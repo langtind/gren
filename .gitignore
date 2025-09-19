@@ -49,3 +49,6 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Legacy scripts (kept locally for reference)
+old/
