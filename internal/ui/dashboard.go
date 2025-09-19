@@ -1,0 +1,145 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// dashboardView renders the main dashboard
+func (m Model) dashboardView() string {
+	var content strings.Builder
+
+	// Header
+	header := TitleStyle.Render("🌿 gren - Git Worktree Manager")
+
+	// Project name with status
+	var projectStatus string
+	if m.projectName == "" {
+		projectStatus = "(not a git repository)"
+	} else {
+		projectStatus = m.projectName
+	}
+	subtitle := SubtitleStyle.Render(fmt.Sprintf("Project: %s", projectStatus))
+
+	content.WriteString(header)
+	content.WriteString("\n")
+	content.WriteString(subtitle)
+	content.WriteString("\n\n")
+
+	// Check if we have worktrees to show
+	if len(m.worktrees) == 0 {
+		// No worktrees - show getting started message
+		if m.projectName == "" {
+			// Not in a git repo
+			message := lipgloss.JoinVertical(
+				lipgloss.Center,
+				ErrorStyle.Render("❌ Not in a git repository"),
+				"",
+				WorktreePathStyle.Render("Please run gren from within a git repository."),
+			)
+			content.WriteString(message)
+		} else {
+			// In a git repo but no worktrees configured
+			message := lipgloss.JoinVertical(
+				lipgloss.Center,
+				WorktreeNameStyle.Render("No worktrees configured yet."),
+				"",
+				WorktreePathStyle.Render("Press 'i' to initialize worktree management for this project."),
+				WorktreePathStyle.Render("Press 'n' to create your first worktree."),
+			)
+			content.WriteString(message)
+		}
+
+		// Help text for empty state
+		var helpText string
+		if m.projectName == "" {
+			helpText = HelpStyle.Render("[q] Quit")
+		} else {
+			helpText = HelpStyle.Render("[i] Initialize  [n] New worktree  [q] Quit")
+		}
+		content.WriteString("\n\n")
+		content.WriteString(helpText)
+	} else {
+		// Show worktrees list
+		for i, wt := range m.worktrees {
+			var item strings.Builder
+
+			// Icon based on worktree type
+			icon := "🌿"
+			if wt.Name == "main" || wt.Name == "master" {
+				icon = "📁"
+			}
+
+			// Status indicator (simplified)
+			var statusStyle lipgloss.Style
+			var statusText string
+			switch wt.Status {
+			case "clean":
+				statusStyle = StatusCleanStyle
+				statusText = "🟢 Clean"
+			case "modified":
+				statusStyle = StatusModifiedStyle
+				statusText = "🟡 Modified"
+			default:
+				statusStyle = StatusCleanStyle
+				statusText = "🟢 Clean"
+			}
+
+			// Build the worktree item content
+			nameAndStatus := lipgloss.JoinHorizontal(
+				lipgloss.Top,
+				WorktreeNameStyle.Render(fmt.Sprintf("%s %s", icon, wt.Name)),
+				lipgloss.NewStyle().Render(strings.Repeat(" ", 20)), // Spacer
+				statusStyle.Render(statusText),
+			)
+
+			pathInfo := WorktreePathStyle.Render(fmt.Sprintf("    %s", wt.Path))
+			branchInfo := WorktreeBranchStyle.Render(fmt.Sprintf("    │ Branch: %s", wt.Branch))
+
+			// Combine all parts (removed the confusing extra info)
+			itemContent := lipgloss.JoinVertical(
+				lipgloss.Left,
+				nameAndStatus,
+				pathInfo,
+				branchInfo,
+			)
+
+			// Apply selection styling with consistent width
+			var itemStyle lipgloss.Style
+			if i == m.selected {
+				itemStyle = WorktreeSelectedStyle.Width(m.width - 8)
+			} else {
+				itemStyle = WorktreeItemStyle.Width(m.width - 8)
+			}
+
+			item.WriteString(itemStyle.Render(itemContent))
+			item.WriteString("\n")
+
+			content.WriteString(item.String())
+		}
+
+		// Help text for worktrees view
+		helpText := HelpStyle.Render("[n] New  [d] Delete  [↑↓] Navigate  [enter] Switch  [q] Quit")
+		content.WriteString("\n")
+		content.WriteString(helpText)
+	}
+
+	// Wrap everything in a border
+	return HeaderStyle.Width(m.width - 4).Render(content.String())
+}
+
+// Utility function to get status icon and color
+func getStatusDisplay(status string) (string, lipgloss.Style) {
+	switch status {
+	case "clean":
+		return "🟢 Clean", StatusCleanStyle
+	case "modified":
+		return "⚡ Modified", StatusModifiedStyle
+	case "building":
+		return "🔄 Building", StatusBuildingStyle
+	default:
+		return "🟢 Clean", StatusCleanStyle
+	}
+}
