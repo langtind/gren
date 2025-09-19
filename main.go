@@ -9,8 +9,8 @@ import (
 )
 
 func main() {
-	// Create the model
-	m := ui.NewModel()
+	// Create the model with dependencies
+	m := ui.NewModel(nil, nil) // Use default dependencies
 
 	// Create the program
 	p := tea.NewProgram(

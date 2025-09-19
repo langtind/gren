@@ -16,10 +16,17 @@ func (m Model) dashboardView() string {
 
 	// Project name with status
 	var projectStatus string
-	if m.projectName == "" {
+	if m.err != nil {
+		projectStatus = "(error loading repository info)"
+	} else if m.repoInfo == nil {
+		projectStatus = "(loading...)"
+	} else if !m.repoInfo.IsGitRepo {
 		projectStatus = "(not a git repository)"
 	} else {
-		projectStatus = m.projectName
+		projectStatus = m.repoInfo.Name
+		if m.repoInfo.CurrentBranch != "" {
+			projectStatus += " (on " + m.repoInfo.CurrentBranch + ")"
+		}
 	}
 	subtitle := SubtitleStyle.Render(fmt.Sprintf("Project: %s", projectStatus))
 
@@ -28,10 +35,36 @@ func (m Model) dashboardView() string {
 	content.WriteString(subtitle)
 	content.WriteString("\n\n")
 
+	// Handle error state
+	if m.err != nil {
+		message := lipgloss.JoinVertical(
+			lipgloss.Center,
+			ErrorStyle.Render("❌ Error"),
+			"",
+			WorktreePathStyle.Render(m.err.Error()),
+		)
+		content.WriteString(message)
+		content.WriteString("\n\n")
+		content.WriteString(HelpStyle.Render("[q] Quit"))
+		return HeaderStyle.Width(m.width - 4).Render(content.String())
+	}
+
+	// Handle loading state
+	if m.repoInfo == nil {
+		message := lipgloss.JoinVertical(
+			lipgloss.Center,
+			WorktreeNameStyle.Render("Loading repository information..."),
+		)
+		content.WriteString(message)
+		content.WriteString("\n\n")
+		content.WriteString(HelpStyle.Render("[q] Quit"))
+		return HeaderStyle.Width(m.width - 4).Render(content.String())
+	}
+
 	// Check if we have worktrees to show
 	if len(m.worktrees) == 0 {
 		// No worktrees - show getting started message
-		if m.projectName == "" {
+		if !m.repoInfo.IsGitRepo {
 			// Not in a git repo
 			message := lipgloss.JoinVertical(
 				lipgloss.Center,
@@ -40,13 +73,22 @@ func (m Model) dashboardView() string {
 				WorktreePathStyle.Render("Please run gren from within a git repository."),
 			)
 			content.WriteString(message)
-		} else {
-			// In a git repo but no worktrees configured
+		} else if !m.repoInfo.IsInitialized {
+			// In a git repo but not initialized
 			message := lipgloss.JoinVertical(
 				lipgloss.Center,
-				WorktreeNameStyle.Render("No worktrees configured yet."),
+				WorktreeNameStyle.Render("Worktree management not initialized."),
 				"",
 				WorktreePathStyle.Render("Press 'i' to initialize worktree management for this project."),
+				WorktreePathStyle.Render("This will create a .gren/ configuration directory."),
+			)
+			content.WriteString(message)
+		} else {
+			// Initialized but no worktrees yet
+			message := lipgloss.JoinVertical(
+				lipgloss.Center,
+				WorktreeNameStyle.Render("No worktrees created yet."),
+				"",
 				WorktreePathStyle.Render("Press 'n' to create your first worktree."),
 			)
 			content.WriteString(message)
@@ -54,10 +96,12 @@ func (m Model) dashboardView() string {
 
 		// Help text for empty state
 		var helpText string
-		if m.projectName == "" {
+		if !m.repoInfo.IsGitRepo {
 			helpText = HelpStyle.Render("[q] Quit")
+		} else if !m.repoInfo.IsInitialized {
+			helpText = HelpStyle.Render("[i] Initialize  [q] Quit")
 		} else {
-			helpText = HelpStyle.Render("[i] Initialize  [n] New worktree  [q] Quit")
+			helpText = HelpStyle.Render("[n] New worktree  [q] Quit")
 		}
 		content.WriteString("\n\n")
 		content.WriteString(helpText)
