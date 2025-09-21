@@ -5,7 +5,12 @@
       "WebFetch(domain:github.com)",
       "Bash(mkdir:*)",
       "Bash(go get:*)",
-      "Bash(go build:*)"
+      "Bash(go build:*)",
+      "Read(///**)",
+      "Bash(go doc:*)",
+      "Bash(go run:*)",
+      "Bash(./gren:*)",
+      "Bash(echo \"Exit code: $?\")"
     ],
     "deny": [],
     "ask": []

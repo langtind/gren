@@ -84,14 +84,40 @@ func (m Model) dashboardView() string {
 			)
 			content.WriteString(message)
 		} else {
-			// Initialized but no worktrees yet
-			message := lipgloss.JoinVertical(
-				lipgloss.Center,
-				WorktreeNameStyle.Render("No worktrees created yet."),
-				"",
-				WorktreePathStyle.Render("Press 'n' to create your first worktree."),
-			)
-			content.WriteString(message)
+			// Initialized - check for worktrees
+			if len(m.worktrees) == 0 {
+				// No worktrees yet
+				message := lipgloss.JoinVertical(
+					lipgloss.Center,
+					WorktreeNameStyle.Render("No worktrees created yet."),
+					"",
+					WorktreePathStyle.Render("Press 'n' to create your first worktree."),
+				)
+				content.WriteString(message)
+			} else {
+				// Show worktrees list
+				content.WriteString(WorktreeNameStyle.Render("🌳 Active Worktrees"))
+				content.WriteString("\n\n")
+
+				for i, worktree := range m.worktrees {
+					var style lipgloss.Style
+					if i == m.selected {
+						style = WorktreeSelectedStyle
+					} else {
+						style = WorktreeItemStyle
+					}
+
+					worktreeInfo := fmt.Sprintf("📁 %s", worktree.Name)
+					if worktree.Branch != "" {
+						worktreeInfo += fmt.Sprintf(" (%s)", worktree.Branch)
+					}
+
+					content.WriteString(style.Width(m.width-8).Render(worktreeInfo))
+					content.WriteString("\n")
+					content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   📍 %s", worktree.Path)))
+					content.WriteString("\n\n")
+				}
+			}
 		}
 
 		// Help text for empty state
@@ -116,7 +142,13 @@ func (m Model) dashboardView() string {
 				icon = "📁"
 			}
 
-			// Status indicator (simplified)
+			// Current worktree indicator
+			currentIndicator := ""
+			if wt.IsCurrent {
+				currentIndicator = " (current)"
+			}
+
+			// Status indicator with proper detection
 			var statusStyle lipgloss.Style
 			var statusText string
 			switch wt.Status {
@@ -126,6 +158,12 @@ func (m Model) dashboardView() string {
 			case "modified":
 				statusStyle = StatusModifiedStyle
 				statusText = "🟡 Modified"
+			case "untracked":
+				statusStyle = StatusModifiedStyle // Use same style for now
+				statusText = "🔴 Untracked"
+			case "mixed":
+				statusStyle = StatusModifiedStyle
+				statusText = "⚠️ Mixed"
 			default:
 				statusStyle = StatusCleanStyle
 				statusText = "🟢 Clean"
@@ -134,7 +172,7 @@ func (m Model) dashboardView() string {
 			// Build the worktree item content
 			nameAndStatus := lipgloss.JoinHorizontal(
 				lipgloss.Top,
-				WorktreeNameStyle.Render(fmt.Sprintf("%s %s", icon, wt.Name)),
+				WorktreeNameStyle.Render(fmt.Sprintf("%s %s%s", icon, wt.Name, currentIndicator)),
 				lipgloss.NewStyle().Render(strings.Repeat(" ", 20)), // Spacer
 				statusStyle.Render(statusText),
 			)
@@ -165,7 +203,7 @@ func (m Model) dashboardView() string {
 		}
 
 		// Help text for worktrees view
-		helpText := HelpStyle.Render("[n] New  [d] Delete  [↑↓] Navigate  [enter] Switch  [q] Quit")
+		helpText := HelpStyle.Render("[n] New  [d] Delete  [↑↓] Navigate  [enter] Open in...  [q] Quit")
 		content.WriteString("\n")
 		content.WriteString(helpText)
 	}

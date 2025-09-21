@@ -223,13 +223,8 @@ func (m Model) renderCreateCompleteStep() string {
 	content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("📍 Path: %s", worktreePath)))
 	content.WriteString("\n\n")
 
-	// Next actions
-	content.WriteString(WorktreeNameStyle.Render("What would you like to do next?"))
-	content.WriteString("\n\n")
-
-	actions := m.getAvailableActions()
-
 	// Show message if no editors are available
+	actions := m.getAvailableActions()
 	if len(actions) == 1 { // Only "Return to dashboard" is available
 		content.WriteString(WorktreePathStyle.Render("💡 No editors detected in PATH"))
 		content.WriteString("\n")
@@ -237,54 +232,25 @@ func (m Model) renderCreateCompleteStep() string {
 		content.WriteString("\n\n")
 	}
 
-	for i, action := range actions {
-		var style lipgloss.Style
-		if i == m.createState.selectedAction {
-			style = WorktreeSelectedStyle
-		} else {
-			style = WorktreeItemStyle
-		}
+	// Show available actions as simple list
+	content.WriteString(WorktreeNameStyle.Render("What would you like to do next?"))
+	content.WriteString("\n\n")
 
-		actionText := fmt.Sprintf("%s %s", action.Icon, action.Name)
-		content.WriteString(style.Width(m.width-8).Render(actionText))
+	for i, action := range actions {
+		prefix := "  "
+		if i == m.createState.selectedAction {
+			prefix = "▶ "
+			// Just change text color, no border/box
+			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name)))
+		} else {
+			content.WriteString(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name))
+		}
 		content.WriteString("\n")
 	}
 
 	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("[enter] Select  [↑↓] Navigate  [q] Quit"))
+	content.WriteString(HelpStyle.Render("↑↓ Navigate • Enter Select • Esc Back"))
 
 	return HeaderStyle.Width(m.width - 4).Render(content.String())
-}
-
-// isValidBranchName validates git branch names
-func isValidBranchName(name string) bool {
-	if name == "" {
-		return false
-	}
-
-	// Basic validation - could be more comprehensive
-	for _, char := range name {
-		if char == ' ' || char == '~' || char == '^' || char == ':' ||
-		   char == '?' || char == '*' || char == '[' || char == '\\' {
-			return false
-		}
-	}
-
-	// Can't start with . or -
-	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "-") {
-		return false
-	}
-
-	// Can't end with .
-	if strings.HasSuffix(name, ".") {
-		return false
-	}
-
-	// Can't contain consecutive dots
-	if strings.Contains(name, "..") {
-		return false
-	}
-
-	return true
 }
 
