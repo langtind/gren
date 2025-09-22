@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/config"
@@ -11,12 +13,45 @@ import (
 	"github.com/langtind/gren/internal/ui"
 )
 
-// Version information - will be injected at build time
+// Version information - will be injected at build time for releases
 var (
-	version = "dev"
-	commit  = "unknown"
-	date    = "unknown"
+	version = "" // Will be set by ldflags during release builds
+	commit  = ""
+	date    = ""
 )
+
+// getVersion returns the current version, detecting it dynamically if not set by ldflags
+func getVersion() string {
+	// If version was injected at build time (release builds), use it
+	if version != "" {
+		return version
+	}
+
+	// Try to get version from git tag (for go install)
+	if gitVersion := getGitVersion(); gitVersion != "" {
+		return gitVersion
+	}
+
+	// Fallback for local development
+	return "dev"
+}
+
+// getGitVersion attempts to get the current version from git tags
+func getGitVersion() string {
+	// Try to get the latest tag
+	cmd := exec.Command("git", "describe", "--tags", "--exact-match", "HEAD")
+	if output, err := cmd.Output(); err == nil {
+		return strings.TrimSpace(string(output))
+	}
+
+	// If no exact tag, try to get latest tag with commit info
+	cmd = exec.Command("git", "describe", "--tags", "--always")
+	if output, err := cmd.Output(); err == nil {
+		return strings.TrimSpace(string(output))
+	}
+
+	return ""
+}
 
 func main() {
 	// Parse command line flags
@@ -25,11 +60,12 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("gren version %s\n", version)
-		if commit != "unknown" {
+		currentVersion := getVersion()
+		fmt.Printf("gren version %s\n", currentVersion)
+		if commit != "" {
 			fmt.Printf("commit: %s\n", commit)
 		}
-		if date != "unknown" {
+		if date != "" {
 			fmt.Printf("built: %s\n", date)
 		}
 		return
@@ -37,7 +73,7 @@ func main() {
 
 	if *showHelp {
 		fmt.Println("gren - Git Worktree Manager")
-		fmt.Printf("version %s\n", version)
+		fmt.Printf("version %s\n", getVersion())
 		fmt.Println()
 		fmt.Println("A TUI application for managing git worktrees efficiently.")
 		fmt.Println()
