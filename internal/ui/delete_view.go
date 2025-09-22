@@ -101,7 +101,7 @@ func (m Model) renderDeleteSelectionStep() string {
 		case "untracked":
 			statusText = "🔴 Untracked"
 		case "mixed":
-			statusText = "⚠️ Mixed"
+			statusText = "📝 Changes"
 		default:
 			statusText = "🟢 Clean"
 		}
@@ -135,33 +135,62 @@ func (m Model) renderDeleteConfirmStep() string {
 	content.WriteString(ErrorStyle.Render("WARNING: This action cannot be undone!"))
 	content.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("The following worktrees will be permanently deleted:"))
-	content.WriteString("\n\n")
+	// Handle single worktree deletion
+	if m.deleteState.targetWorktree != nil {
+		wt := m.deleteState.targetWorktree
+		content.WriteString(WorktreeNameStyle.Render(fmt.Sprintf("Delete worktree '%s'?", wt.Name)))
+		content.WriteString("\n\n")
 
-	for _, selectedIdx := range m.deleteState.selectedWorktrees {
-		if selectedIdx < len(m.worktrees) {
-			wt := m.worktrees[selectedIdx]
+		content.WriteString(WorktreeItemStyle.Render(fmt.Sprintf("🗑️ %s", wt.Name)))
+		content.WriteString("\n")
+		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   📍 %s", wt.Path)))
+		content.WriteString("\n")
+		content.WriteString(WorktreeBranchStyle.Render(fmt.Sprintf("   🌿 Branch: %s", wt.Branch)))
 
-			content.WriteString(WorktreeItemStyle.Render(fmt.Sprintf("🗑️ %s", wt.Name)))
-			content.WriteString("\n")
-			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   📍 %s", wt.Path)))
-			content.WriteString("\n")
-			content.WriteString(WorktreeBranchStyle.Render(fmt.Sprintf("   🌿 Branch: %s", wt.Branch)))
-
-			if wt.Status != "clean" {
-				var statusWarning string
-				switch wt.Status {
-				case "modified":
-					statusWarning = "   ⚠️ Has uncommitted changes - will be lost!"
-				case "untracked":
-					statusWarning = "   ⚠️ Has untracked files - will be lost!"
-				case "mixed":
-					statusWarning = "   ⚠️ Has uncommitted and untracked changes - will be lost!"
-				}
-				content.WriteString("\n")
-				content.WriteString(ErrorStyle.Render(statusWarning))
+		if wt.Status != "clean" {
+			var statusWarning string
+			switch wt.Status {
+			case "modified":
+				statusWarning = "   ⚠️ Has uncommitted changes - will be lost!"
+			case "untracked":
+				statusWarning = "   ⚠️ Has untracked files - will be lost!"
+			case "mixed":
+				statusWarning = "   ⚠️ Has uncommitted and untracked changes - will be lost!"
 			}
-			content.WriteString("\n\n")
+			content.WriteString("\n")
+			content.WriteString(ErrorStyle.Render(statusWarning))
+		}
+		content.WriteString("\n\n")
+	} else {
+		// Handle multi-select deletion
+		content.WriteString(WorktreeNameStyle.Render("The following worktrees will be permanently deleted:"))
+		content.WriteString("\n\n")
+
+		for _, selectedIdx := range m.deleteState.selectedWorktrees {
+			if selectedIdx < len(m.worktrees) {
+				wt := m.worktrees[selectedIdx]
+
+				content.WriteString(WorktreeItemStyle.Render(fmt.Sprintf("🗑️ %s", wt.Name)))
+				content.WriteString("\n")
+				content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   📍 %s", wt.Path)))
+				content.WriteString("\n")
+				content.WriteString(WorktreeBranchStyle.Render(fmt.Sprintf("   🌿 Branch: %s", wt.Branch)))
+
+				if wt.Status != "clean" {
+					var statusWarning string
+					switch wt.Status {
+					case "modified":
+						statusWarning = "   ⚠️ Has uncommitted changes - will be lost!"
+					case "untracked":
+						statusWarning = "   ⚠️ Has untracked files - will be lost!"
+					case "mixed":
+						statusWarning = "   ⚠️ Has uncommitted and untracked changes - will be lost!"
+					}
+					content.WriteString("\n")
+					content.WriteString(ErrorStyle.Render(statusWarning))
+				}
+				content.WriteString("\n\n")
+			}
 		}
 	}
 
@@ -194,18 +223,30 @@ func (m Model) renderDeleteCompleteStep() string {
 	content.WriteString(TitleStyle.Render("✅ Deletion Complete"))
 	content.WriteString("\n\n")
 
-	deletedCount := len(m.deleteState.selectedWorktrees)
-	content.WriteString(StatusCleanStyle.Render(fmt.Sprintf("Successfully deleted %d worktree(s)", deletedCount)))
-	content.WriteString("\n\n")
+	// Handle single worktree deletion
+	if m.deleteState.targetWorktree != nil {
+		content.WriteString(StatusCleanStyle.Render("Successfully deleted 1 worktree"))
+		content.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Deleted worktrees:"))
-	content.WriteString("\n")
+		content.WriteString(WorktreeNameStyle.Render("Deleted worktree:"))
+		content.WriteString("\n")
+		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("✅ %s", m.deleteState.targetWorktree.Name)))
+		content.WriteString("\n")
+	} else {
+		// Handle multi-select deletion
+		deletedCount := len(m.deleteState.selectedWorktrees)
+		content.WriteString(StatusCleanStyle.Render(fmt.Sprintf("Successfully deleted %d worktree(s)", deletedCount)))
+		content.WriteString("\n\n")
 
-	for _, selectedIdx := range m.deleteState.selectedWorktrees {
-		if selectedIdx < len(m.worktrees) {
-			wt := m.worktrees[selectedIdx]
-			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("✅ %s", wt.Name)))
-			content.WriteString("\n")
+		content.WriteString(WorktreeNameStyle.Render("Deleted worktrees:"))
+		content.WriteString("\n")
+
+		for _, selectedIdx := range m.deleteState.selectedWorktrees {
+			if selectedIdx < len(m.worktrees) {
+				wt := m.worktrees[selectedIdx]
+				content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("✅ %s", wt.Name)))
+				content.WriteString("\n")
+			}
 		}
 	}
 

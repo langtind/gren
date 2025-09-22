@@ -98,8 +98,15 @@ func (m Model) parseWorktreeList(output string) []Worktree {
 				IsCurrent: false,
 			}
 		} else if strings.HasPrefix(line, "HEAD ") && currentWorktree != nil {
-			branch := strings.TrimPrefix(line, "HEAD ")
-			currentWorktree.Branch = branch
+			// Skip HEAD line - we'll use the branch line instead
+		} else if strings.HasPrefix(line, "branch ") && currentWorktree != nil {
+			branchRef := strings.TrimPrefix(line, "branch ")
+			// Extract branch name from refs/heads/branchname
+			if strings.HasPrefix(branchRef, "refs/heads/") {
+				currentWorktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
+			} else {
+				currentWorktree.Branch = branchRef
+			}
 		} else if line == "bare" && currentWorktree != nil {
 			// Skip bare worktrees for now
 		} else if line == "detached" && currentWorktree != nil {
@@ -190,14 +197,17 @@ func (m Model) getWorktreeStatus(worktreePath string, isCurrent bool) (string, e
 // setupCreateState initializes create state from message
 func (m *Model) setupCreateState(msg createInitMsg) {
 	m.createState = &CreateState{
-		currentStep:     CreateStepBranchName,
-		branchName:      "",
-		baseBranch:      msg.recommendedBase,
-		branchStatuses:  msg.branchStatuses,
-		selectedBranch:  0,
-		showWarning:     false,
-		warningAccepted: false,
-		selectedAction:  0,
+		currentStep:      CreateStepBranchMode,
+		createMode:       CreateModeNewBranch,
+		branchName:       "",
+		baseBranch:       msg.recommendedBase,
+		branchStatuses:   msg.branchStatuses,
+		availableBranches: []BranchStatus{}, // Will be populated when needed
+		selectedBranch:   0,
+		selectedMode:     0, // Default to "Create new branch"
+		showWarning:      false,
+		warningAccepted:  false,
+		selectedAction:   0,
 	}
 
 	// Find the index of recommended base branch
@@ -215,6 +225,16 @@ func (m *Model) setupDeleteState() {
 		currentStep:       DeleteStepSelection,
 		selectedWorktrees: make([]int, 0),
 		warnings:          make([]string, 0),
+	}
+}
+
+// setupDeleteStateForWorktree initializes delete state for specific worktree
+func (m *Model) setupDeleteStateForWorktree(worktree Worktree) {
+	m.deleteState = &DeleteState{
+		currentStep:       DeleteStepConfirm,
+		selectedWorktrees: []int{}, // Will be handled differently for single worktree
+		warnings:          make([]string, 0),
+		targetWorktree:    &worktree, // Store the specific worktree
 	}
 }
 

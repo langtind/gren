@@ -19,6 +19,7 @@ const (
 	InitView
 	SettingsView
 	OpenInView
+	ConfigView
 )
 
 // Worktree represents a git worktree
@@ -102,11 +103,21 @@ func (a PostCreateAction) Desc() string {
 	return a.Description
 }
 
+// CreateMode represents the type of branch creation
+type CreateMode int
+
+const (
+	CreateModeNewBranch CreateMode = iota
+	CreateModeExistingBranch
+)
+
 // CreateStep represents the current step in worktree creation
 type CreateStep int
 
 const (
-	CreateStepBranchName CreateStep = iota
+	CreateStepBranchMode CreateStep = iota
+	CreateStepBranchName
+	CreateStepExistingBranch
 	CreateStepBaseBranch
 	CreateStepConfirm
 	CreateStepCreating
@@ -127,15 +138,18 @@ type BranchStatus struct {
 
 // CreateState holds the state for worktree creation
 type CreateState struct {
-	currentStep     CreateStep
-	branchName      string
-	baseBranch      string
-	branchStatuses  []BranchStatus
-	selectedBranch  int
-	showWarning     bool
-	warningAccepted bool
-	selectedAction  int        // For the post-create actions
-	actionsList     list.Model // Dropdown menu for post-create actions
+	currentStep      CreateStep
+	createMode       CreateMode
+	branchName       string
+	baseBranch       string
+	branchStatuses   []BranchStatus
+	availableBranches []BranchStatus // For existing branch selection
+	selectedBranch   int
+	selectedMode     int  // For branch mode selection
+	showWarning      bool
+	warningAccepted  bool
+	selectedAction   int        // For the post-create actions
+	actionsList      list.Model // Dropdown menu for post-create actions
 }
 
 // DeleteStep represents the current step in worktree deletion
@@ -155,11 +169,26 @@ type OpenInState struct {
 	selectedIndex   int                  // Currently selected action index
 }
 
+// ConfigFile represents a configuration file
+type ConfigFile struct {
+	Name        string // Display name
+	Path        string // File path
+	Icon        string // Display icon
+	Description string // File description
+}
+
+// ConfigState holds the state for the config view
+type ConfigState struct {
+	files         []ConfigFile // Available config files
+	selectedIndex int          // Currently selected file index
+}
+
 // DeleteState holds the state for worktree deletion
 type DeleteState struct {
 	currentStep       DeleteStep
-	selectedWorktrees []int // Indices of selected worktrees for deletion
+	selectedWorktrees []int      // Indices of selected worktrees for deletion
 	warnings          []string
+	targetWorktree    *Worktree  // Specific worktree to delete (for single deletion)
 }
 
 // Model holds the entire application state
@@ -170,15 +199,16 @@ type Model struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
 	// State
-	repoInfo    *git.RepoInfo
-	config      *config.Config
-	worktrees   []Worktree
-	selected    int
-	err         error
-	initState   *InitState
-	createState *CreateState
-	deleteState *DeleteState
-	openInState *OpenInState
+	repoInfo     *git.RepoInfo
+	config       *config.Config
+	worktrees    []Worktree
+	selected     int
+	err          error
+	initState    *InitState
+	createState  *CreateState
+	deleteState  *DeleteState
+	openInState  *OpenInState
+	configState  *ConfigState
 
 	// Screen dimensions
 	width  int
@@ -200,6 +230,7 @@ type KeyMap struct {
 	New    key.Binding
 	Delete key.Binding
 	Init   key.Binding
+	Config key.Binding
 }
 
 // DefaultKeyMap returns default key bindings
@@ -244,6 +275,10 @@ func DefaultKeyMap() KeyMap {
 		Init: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", "initialize"),
+		),
+		Config: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "config"),
 		),
 	}
 }

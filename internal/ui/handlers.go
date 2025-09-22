@@ -220,8 +220,8 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.createState.currentStep == CreateStepBranchName {
 		switch {
 		case key.Matches(msg, m.keys.Back):
-			m.currentView = DashboardView
-			return m, m.loadProjectInfo()
+			m.createState.currentStep = CreateStepBranchMode
+			return m, nil
 		case key.Matches(msg, m.keys.Enter):
 			if isValidBranchName(m.createState.branchName) {
 				m.createState.currentStep = CreateStepBaseBranch
@@ -247,17 +247,46 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		// Go back one step (CreateStepBranchName is handled in text input block above)
-		if m.createState.currentStep > CreateStepBranchName {
-			m.createState.currentStep--
+		switch m.createState.currentStep {
+		case CreateStepBranchMode:
+			m.currentView = DashboardView
+			return m, m.loadProjectInfo()
+		case CreateStepBranchName:
+			m.createState.currentStep = CreateStepBranchMode
+		case CreateStepExistingBranch:
+			m.createState.currentStep = CreateStepBranchMode
+		case CreateStepBaseBranch:
+			if m.createState.createMode == CreateModeNewBranch {
+				m.createState.currentStep = CreateStepBranchName
+			} else {
+				m.createState.currentStep = CreateStepExistingBranch
+			}
+		case CreateStepConfirm:
+			if m.createState.createMode == CreateModeNewBranch {
+				m.createState.currentStep = CreateStepBaseBranch
+			} else {
+				m.createState.currentStep = CreateStepExistingBranch
+			}
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Up):
-		if m.createState.currentStep == CreateStepBaseBranch {
+		// Clear any errors when navigating
+		m.err = nil
+		switch m.createState.currentStep {
+		case CreateStepBranchMode:
+			if m.createState.selectedMode > 0 {
+				m.createState.selectedMode--
+			}
+		case CreateStepExistingBranch:
+			if m.createState.selectedBranch > 0 {
+				m.createState.selectedBranch--
+			}
+		case CreateStepBaseBranch:
 			if m.createState.selectedBranch > 0 {
 				m.createState.selectedBranch--
 				m.createState.warningAccepted = false
 			}
-		} else if m.createState.currentStep == CreateStepComplete {
+		case CreateStepComplete:
 			// Navigate up in actions list
 			if m.createState.selectedAction > 0 {
 				m.createState.selectedAction--
@@ -265,12 +294,23 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Down):
-		if m.createState.currentStep == CreateStepBaseBranch {
+		// Clear any errors when navigating
+		m.err = nil
+		switch m.createState.currentStep {
+		case CreateStepBranchMode:
+			if m.createState.selectedMode < 1 { // 0="Create new", 1="Use existing"
+				m.createState.selectedMode++
+			}
+		case CreateStepExistingBranch:
+			if m.createState.selectedBranch < len(m.createState.availableBranches)-1 {
+				m.createState.selectedBranch++
+			}
+		case CreateStepBaseBranch:
 			if m.createState.selectedBranch < len(m.createState.branchStatuses)-1 {
 				m.createState.selectedBranch++
 				m.createState.warningAccepted = false
 			}
-		} else if m.createState.currentStep == CreateStepComplete {
+		case CreateStepComplete:
 			// Navigate down in actions list
 			actions := m.getAvailableActions()
 			if m.createState.selectedAction < len(actions)-1 {
@@ -279,7 +319,28 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Enter):
+		// Clear any errors when making selections
+		m.err = nil
 		switch m.createState.currentStep {
+		case CreateStepBranchMode:
+			// Set mode and advance to appropriate step
+			if m.createState.selectedMode == 0 {
+				m.createState.createMode = CreateModeNewBranch
+				m.createState.currentStep = CreateStepBranchName
+			} else {
+				m.createState.createMode = CreateModeExistingBranch
+				m.createState.currentStep = CreateStepExistingBranch
+				// Need to load available branches
+				return m, m.loadAvailableBranches()
+			}
+			return m, nil
+		case CreateStepExistingBranch:
+			if len(m.createState.availableBranches) > 0 && m.createState.selectedBranch < len(m.createState.availableBranches) {
+				selectedBranch := m.createState.availableBranches[m.createState.selectedBranch]
+				m.createState.branchName = selectedBranch.Name
+				m.createState.currentStep = CreateStepConfirm
+			}
+			return m, nil
 		case CreateStepBaseBranch:
 			if len(m.createState.branchStatuses) > 0 && m.createState.selectedBranch < len(m.createState.branchStatuses) {
 				selectedStatus := m.createState.branchStatuses[m.createState.selectedBranch]
@@ -439,7 +500,14 @@ func (m Model) handleDeleteConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
-		m.deleteState.currentStep = DeleteStepSelection
+		// For single worktree deletion, go back to dashboard
+		// For multi-select deletion, go back to selection step
+		if m.deleteState.targetWorktree != nil {
+			m.currentView = DashboardView
+			m.deleteState = nil
+		} else {
+			m.deleteState.currentStep = DeleteStepSelection
+		}
 		return m, nil
 	case msg.String() == "y" || msg.String() == "Y":
 		// Proceed with deletion
@@ -495,6 +563,44 @@ func (m Model) handleOpenInKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Return to dashboard after action
 		m.currentView = DashboardView
 		m.openInState = nil
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleConfigKeys handles keyboard input for the config view
+func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.configState == nil {
+		return m, nil
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		// Return to dashboard
+		m.currentView = DashboardView
+		m.configState = nil
+		return m, nil
+	case key.Matches(msg, m.keys.Up):
+		// Navigate up in the list
+		if m.configState.selectedIndex > 0 {
+			m.configState.selectedIndex--
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Down):
+		// Navigate down in the list
+		if m.configState.selectedIndex < len(m.configState.files)-1 {
+			m.configState.selectedIndex++
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Enter):
+		// Open the selected config file
+		if m.configState.selectedIndex < len(m.configState.files) {
+			selectedFile := m.configState.files[m.configState.selectedIndex]
+			return m, m.openConfigFile(selectedFile.Path)
+		}
 		return m, nil
 	}
 

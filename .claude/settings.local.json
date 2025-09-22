@@ -10,7 +10,12 @@
       "Bash(go doc:*)",
       "Bash(go run:*)",
       "Bash(./gren:*)",
-      "Bash(echo \"Exit code: $?\")"
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(cat:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch:*)",
+      "Bash(git worktree:*)",
+      "Read(//Users/arild/Developer/Private/gren-worktrees/test123/**)"
     ],
     "deny": [],
     "ask": []

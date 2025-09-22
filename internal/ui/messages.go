@@ -20,7 +20,8 @@ type createInitMsg struct {
 }
 
 type deleteInitMsg struct {
-	err error
+	selectedWorktree *Worktree // Specific worktree to delete, nil for multi-select
+	err              error
 }
 
 type projectAnalysisCompleteMsg struct{}
@@ -51,5 +52,18 @@ type commitCompleteMsg struct {
 }
 
 type scriptCreateCompleteMsg struct {
+	err error
+}
+
+type availableBranchesLoadedMsg struct {
+	branches []BranchStatus
+	err      error
+}
+
+type configInitializedMsg struct {
+	files []ConfigFile
+}
+
+type configFileOpenedMsg struct {
 	err error
 }

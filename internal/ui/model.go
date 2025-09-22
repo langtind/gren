@@ -39,7 +39,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentView = DashboardView
 			return m, nil
 		}
-		m.setupDeleteState()
+		if msg.selectedWorktree != nil {
+			// Delete specific worktree
+			m.setupDeleteStateForWorktree(*msg.selectedWorktree)
+		} else {
+			// Multi-select delete
+			m.setupDeleteState()
+		}
 		return m, nil
 
 	case projectAnalysisCompleteMsg:
@@ -129,6 +135,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openInInitializedMsg:
 		m.initializeOpenInStateFromMsg(msg)
 		return m, nil
+
+	case availableBranchesLoadedMsg:
+		if m.createState != nil {
+			if msg.err != nil {
+				m.err = fmt.Errorf("failed to load available branches: %w", msg.err)
+				// Stay in create view but show error
+				m.createState.currentStep = CreateStepBranchMode
+			} else {
+				m.createState.availableBranches = msg.branches
+				m.createState.selectedBranch = 0
+				// Debug: log how many branches we found
+				if len(msg.branches) == 0 {
+					m.err = fmt.Errorf("no available branches found for worktree creation")
+					m.createState.currentStep = CreateStepBranchMode
+				}
+			}
+		}
+		return m, nil
+
+	case configInitializedMsg:
+		m.configState = &ConfigState{
+			files:         msg.files,
+			selectedIndex: 0,
+		}
+		return m, nil
+
+	case configFileOpenedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		// Stay in config view after opening file
+		return m, nil
 	}
 
 	// Handle keyboard input based on current view
@@ -144,6 +182,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.currentView == OpenInView {
 			return m.handleOpenInKeys(keyMsg)
+		}
+		if m.currentView == ConfigView {
+			return m.handleConfigKeys(keyMsg)
 		}
 
 		// Global keys
@@ -172,15 +213,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only allow creating worktrees if initialized
 			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
 				m.currentView = CreateView
-				return m, m.initializeCreateState()
+				// Use selected worktree's branch as suggested base
+				var suggestedBase string
+				if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+					suggestedBase = m.worktrees[m.selected].Branch
+				}
+				return m, m.initializeCreateStateWithBase(suggestedBase)
 			}
 			return m, nil
 
 		case key.Matches(keyMsg, m.keys.Delete):
-			// Only allow deleting worktrees if we have some and are initialized
-			if len(m.worktrees) > 0 && m.repoInfo != nil && m.repoInfo.IsInitialized {
+			// Delete the currently selected worktree with confirmation
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) && m.repoInfo != nil && m.repoInfo.IsInitialized {
+				selectedWorktree := m.worktrees[m.selected]
+				// Don't allow deleting the current worktree
+				if selectedWorktree.IsCurrent {
+					return m, nil // Silently ignore - or could show error message
+				}
 				m.currentView = DeleteView
-				return m, m.initializeDeleteState()
+				return m, m.initializeDeleteStateForWorktree(selectedWorktree)
 			}
 			return m, nil
 
@@ -200,6 +251,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					packageManager:    "",
 					postCreateCmd:     "",
 				}
+			}
+			return m, nil
+
+		case key.Matches(keyMsg, m.keys.Config):
+			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+				m.currentView = ConfigView
+				return m, m.initializeConfigState()
 			}
 			return m, nil
 		}
@@ -223,6 +281,8 @@ func (m Model) View() string {
 		return m.settingsView()
 	case OpenInView:
 		return m.openInView()
+	case ConfigView:
+		return m.configView()
 	default:
 		return m.dashboardView()
 	}

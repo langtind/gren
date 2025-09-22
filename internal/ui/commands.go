@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,22 +37,41 @@ func (m Model) runInitialize() tea.Cmd {
 
 // initializeCreateState initializes the create worktree state
 func (m Model) initializeCreateState() tea.Cmd {
+	return m.initializeCreateStateWithBase("")
+}
+
+func (m Model) initializeCreateStateWithBase(suggestedBase string) tea.Cmd {
 	return func() tea.Msg {
 		branchStatuses, err := m.getBranchStatuses()
 		if err != nil {
 			return createInitMsg{err: err}
 		}
 
-		// Find recommended base branch (current branch or main/master)
+		// Find recommended base branch
 		var recommendedBase string
-		for _, status := range branchStatuses {
-			if status.IsCurrent {
-				recommendedBase = status.Name
-				break
+
+		// First, try using the suggested base if provided and exists
+		if suggestedBase != "" {
+			for _, status := range branchStatuses {
+				if status.Name == suggestedBase {
+					recommendedBase = suggestedBase
+					break
+				}
 			}
 		}
+
+		// If no suggested base or suggested base not found, use current branch
 		if recommendedBase == "" {
-			// Fall back to main or master
+			for _, status := range branchStatuses {
+				if status.IsCurrent {
+					recommendedBase = status.Name
+					break
+				}
+			}
+		}
+
+		// Fall back to main or master
+		if recommendedBase == "" {
 			for _, status := range branchStatuses {
 				if status.Name == "main" || status.Name == "master" {
 					recommendedBase = status.Name
@@ -59,6 +79,8 @@ func (m Model) initializeCreateState() tea.Cmd {
 				}
 			}
 		}
+
+		// Last resort: use first branch
 		if recommendedBase == "" && len(branchStatuses) > 0 {
 			recommendedBase = branchStatuses[0].Name
 		}
@@ -75,6 +97,159 @@ func (m Model) initializeDeleteState() tea.Cmd {
 	return func() tea.Msg {
 		return deleteInitMsg{}
 	}
+}
+
+// initializeDeleteStateForWorktree initializes delete state for a specific worktree
+func (m Model) initializeDeleteStateForWorktree(worktree Worktree) tea.Cmd {
+	return func() tea.Msg {
+		return deleteInitMsg{selectedWorktree: &worktree}
+	}
+}
+
+// loadAvailableBranches loads branches available for existing worktree creation
+func (m Model) loadAvailableBranches() tea.Cmd {
+	return func() tea.Msg {
+		// Get all branches (local and remote)
+		branchStatuses, err := m.getAvailableBranchesForWorktree()
+		if err != nil {
+			return availableBranchesLoadedMsg{err: err}
+		}
+
+		return availableBranchesLoadedMsg{
+			branches: branchStatuses,
+		}
+	}
+}
+
+// initializeConfigState initializes the config view state
+func (m Model) initializeConfigState() tea.Cmd {
+	return func() tea.Msg {
+		var files []ConfigFile
+
+		// Check for config.json
+		if _, err := os.Stat(".gren/config.json"); err == nil {
+			files = append(files, ConfigFile{
+				Name:        "config.json",
+				Path:        ".gren/config.json",
+				Icon:        "📄",
+				Description: "Main configuration file for gren settings",
+			})
+		}
+
+		// Check for post-create.sh
+		if _, err := os.Stat(".gren/post-create.sh"); err == nil {
+			files = append(files, ConfigFile{
+				Name:        "post-create.sh",
+				Path:        ".gren/post-create.sh",
+				Icon:        "📜",
+				Description: "Script that runs after creating new worktrees",
+			})
+		}
+
+		return configInitializedMsg{files: files}
+	}
+}
+
+// getAvailableBranchesForWorktree gets branches that can be used for worktrees
+func (m Model) getAvailableBranchesForWorktree() ([]BranchStatus, error) {
+	log.Printf("DEBUG: Starting getAvailableBranchesForWorktree")
+
+	// Get all local branches
+	cmd := exec.Command("git", "branch", "-v")
+	output, err := cmd.Output()
+	if err != nil {
+		log.Printf("DEBUG: git branch -v failed: %v", err)
+		return nil, fmt.Errorf("failed to run 'git branch -v': %w", err)
+	}
+
+	outputStr := string(output)
+	log.Printf("DEBUG: git branch -v output: %q", outputStr)
+
+	if strings.TrimSpace(outputStr) == "" {
+		return nil, fmt.Errorf("git branch command returned empty output")
+	}
+
+	var branches []BranchStatus
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+	// Get existing worktree branches for reference (but don't filter them out completely)
+	existingWorktreeBranches := make(map[string]bool)
+	for _, wt := range m.worktrees {
+		existingWorktreeBranches[wt.Branch] = true
+	}
+	log.Printf("DEBUG: Existing worktree branches: %v", existingWorktreeBranches)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Parse branch line format: "* main abc123 commit message" or "  feature def456 commit message"
+		isCurrent := strings.HasPrefix(line, "* ")
+
+		// Remove prefix and extract branch name safely
+		var branchName string
+		if isCurrent {
+			// Remove "* " and get first field
+			parts := strings.Fields(line[2:])
+			if len(parts) < 2 {
+				continue
+			}
+			branchName = parts[0]
+		} else {
+			// For non-current branches, skip leading spaces and get first field
+			parts := strings.Fields(line)
+			if len(parts) < 2 {
+				continue
+			}
+			branchName = parts[0]
+		}
+		log.Printf("DEBUG: Processing branch: %s, isCurrent: %v", branchName, isCurrent)
+
+		// Skip if this branch already has a worktree
+		if existingWorktreeBranches[branchName] {
+			log.Printf("DEBUG: Skipping branch %s - already has worktree", branchName)
+			continue
+		}
+
+		// Validate that branch exists and is a valid reference
+		validateCmd := exec.Command("git", "rev-parse", "--verify", branchName)
+		if err := validateCmd.Run(); err != nil {
+			log.Printf("DEBUG: Branch %s failed validation: %v", branchName, err)
+			// Skip invalid branches
+			continue
+		}
+		log.Printf("DEBUG: Branch %s passed validation", branchName)
+
+		// Get detailed status for this branch
+		branchStatus := BranchStatus{
+			Name:             branchName,
+			IsClean:          true, // Simplified for now
+			UncommittedFiles: 0,
+			UntrackedFiles:   0,
+			IsCurrent:        isCurrent,
+			AheadCount:       0,
+			BehindCount:      0,
+		}
+
+		branches = append(branches, branchStatus)
+		log.Printf("DEBUG: Added branch: %s", branchName)
+	}
+
+	log.Printf("DEBUG: Final branches count: %d", len(branches))
+	for i, b := range branches {
+		log.Printf("DEBUG: Branch %d: %s", i, b.Name)
+	}
+
+	// Debug: return info about what we found
+	if len(branches) == 0 {
+		totalLines := len(lines)
+		existingCount := len(existingWorktreeBranches)
+		return nil, fmt.Errorf("no available branches found - processed %d lines, %d existing worktrees", totalLines, existingCount)
+	}
+
+	return branches, nil
 }
 
 // getBranchStatuses gets the status of all branches
@@ -136,14 +311,27 @@ func (m Model) createWorktree() tea.Cmd {
 			return worktreeCreatedMsg{err: fmt.Errorf("worktree directory already exists: %s", worktreePath)}
 		}
 
-		// Check if branch already exists
-		checkCmd := exec.Command("git", "branch", "--list", branchName)
-		if output, err := checkCmd.Output(); err == nil && len(strings.TrimSpace(string(output))) > 0 {
-			return worktreeCreatedMsg{err: fmt.Errorf("branch '%s' already exists", branchName)}
-		}
+		var cmd *exec.Cmd
 
-		// Create the git worktree
-		cmd := exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseBranch)
+		if m.createState.createMode == CreateModeNewBranch {
+			// Check if branch already exists (only for new branch mode)
+			checkCmd := exec.Command("git", "branch", "--list", branchName)
+			if output, err := checkCmd.Output(); err == nil && len(strings.TrimSpace(string(output))) > 0 {
+				return worktreeCreatedMsg{err: fmt.Errorf("branch '%s' already exists", branchName)}
+			}
+
+			// Create the git worktree with new branch
+			cmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseBranch)
+		} else {
+			// Validate existing branch before creating worktree
+			validateCmd := exec.Command("git", "rev-parse", "--verify", branchName)
+			if err := validateCmd.Run(); err != nil {
+				return worktreeCreatedMsg{err: fmt.Errorf("branch '%s' is not a valid git reference", branchName)}
+			}
+
+			// Create the git worktree with existing branch
+			cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
+		}
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			// Provide more detailed error information
@@ -288,21 +476,40 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 		}
 
 		deletedCount := 0
-		for _, selectedIdx := range m.deleteState.selectedWorktrees {
-			if selectedIdx < len(m.worktrees) {
-				worktree := m.worktrees[selectedIdx]
 
-				// Remove git worktree
-				cmd := exec.Command("git", "worktree", "remove", worktree.Path, "--force")
-				if err := cmd.Run(); err != nil {
-					return worktreeDeletedMsg{err: fmt.Errorf("failed to remove worktree %s: %w", worktree.Name, err)}
+		// Handle single worktree deletion
+		if m.deleteState.targetWorktree != nil {
+			worktree := *m.deleteState.targetWorktree
+
+			// Remove git worktree
+			cmd := exec.Command("git", "worktree", "remove", worktree.Path, "--force")
+			if err := cmd.Run(); err != nil {
+				return worktreeDeletedMsg{err: fmt.Errorf("failed to remove worktree %s: %w", worktree.Name, err)}
+			}
+
+			// Delete local branch if it exists
+			cmd = exec.Command("git", "branch", "-D", worktree.Branch)
+			cmd.Run() // Ignore errors for branch deletion
+
+			deletedCount = 1
+		} else {
+			// Handle multi-select deletion
+			for _, selectedIdx := range m.deleteState.selectedWorktrees {
+				if selectedIdx < len(m.worktrees) {
+					worktree := m.worktrees[selectedIdx]
+
+					// Remove git worktree
+					cmd := exec.Command("git", "worktree", "remove", worktree.Path, "--force")
+					if err := cmd.Run(); err != nil {
+						return worktreeDeletedMsg{err: fmt.Errorf("failed to remove worktree %s: %w", worktree.Name, err)}
+					}
+
+					// Delete local branch if it exists
+					cmd = exec.Command("git", "branch", "-D", worktree.Branch)
+					cmd.Run() // Ignore errors for branch deletion
+
+					deletedCount++
 				}
-
-				// Delete local branch if it exists
-				cmd = exec.Command("git", "branch", "-D", worktree.Branch)
-				cmd.Run() // Ignore errors for branch deletion
-
-				deletedCount++
 			}
 		}
 
@@ -534,4 +741,48 @@ func (m *Model) initializeActionsList() {
 	l.Styles.HelpStyle = HelpStyle
 
 	m.createState.actionsList = l
+}
+
+// openConfigFile opens a configuration file in an available editor
+func (m Model) openConfigFile(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Try to detect available editors in order of preference
+		editors := []struct {
+			name    string
+			command string
+		}{
+			{"Visual Studio Code", "code"},
+			{"Zed", "zed"},
+			{"Vim", "vim"},
+			{"Nano", "nano"},
+		}
+
+		var foundEditor string
+		for _, editor := range editors {
+			if _, err := exec.LookPath(editor.command); err == nil {
+				foundEditor = editor.command
+				break
+			}
+		}
+
+		if foundEditor == "" {
+			return configFileOpenedMsg{err: fmt.Errorf("no suitable editor found (tried: code, zed, vim, nano)")}
+		}
+
+		// Check if file exists
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			return configFileOpenedMsg{err: fmt.Errorf("config file does not exist: %s", filePath)}
+		}
+
+		// Execute the editor
+		cmd := exec.Command(foundEditor, filePath)
+		if err := cmd.Start(); err != nil {
+			return configFileOpenedMsg{err: fmt.Errorf("failed to open %s: %w", foundEditor, err)}
+		}
+
+		// For GUI editors like code/zed, we don't wait
+		// For terminal editors like vim/nano, we should wait but that would block the UI
+		// For now, we'll treat all editors the same way
+		return configFileOpenedMsg{err: nil} // Success
+	}
 }

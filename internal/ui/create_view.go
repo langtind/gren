@@ -16,8 +16,12 @@ func (m Model) createView() string {
 	}
 
 	switch m.createState.currentStep {
+	case CreateStepBranchMode:
+		return m.renderBranchModeStep()
 	case CreateStepBranchName:
 		return m.renderBranchNameStep()
+	case CreateStepExistingBranch:
+		return m.renderExistingBranchStep()
 	case CreateStepBaseBranch:
 		return m.renderBaseBranchStep()
 	case CreateStepConfirm:
@@ -29,6 +33,54 @@ func (m Model) createView() string {
 	default:
 		return "Unknown step"
 	}
+}
+
+// renderBranchModeStep shows branch mode selection
+func (m Model) renderBranchModeStep() string {
+	var content strings.Builder
+
+	content.WriteString(TitleStyle.Render("🌱 Create New Worktree"))
+	content.WriteString("\n\n")
+
+	// Show error if any
+	if m.err != nil {
+		content.WriteString(ErrorStyle.Render(fmt.Sprintf("❌ %s", m.err.Error())))
+		content.WriteString("\n\n")
+	}
+
+	content.WriteString(WorktreeNameStyle.Render("Choose branch type:"))
+	content.WriteString("\n\n")
+
+	// Mode options
+	modes := []struct {
+		name string
+		icon string
+	}{
+		{"Create new branch", "🌿"},
+		{"Use existing branch", "🔄"},
+	}
+
+	for i, mode := range modes {
+		prefix := "  "
+		if i == m.createState.selectedMode {
+			prefix = "▶ "
+		}
+
+		modeLine := fmt.Sprintf("%s%s %s", prefix, mode.icon, mode.name)
+
+		// Apply color styling for selected item
+		if i == m.createState.selectedMode {
+			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(modeLine))
+		} else {
+			content.WriteString(modeLine)
+		}
+		content.WriteString("\n")
+	}
+
+	content.WriteString("\n")
+	content.WriteString(HelpStyle.Render("[↑↓] Navigate  [enter] Select  [esc] Cancel"))
+
+	return HeaderStyle.Width(m.width - 4).Render(content.String())
 }
 
 // renderBranchNameStep shows branch name input
@@ -71,25 +123,27 @@ func (m Model) renderBranchNameStep() string {
 	return HeaderStyle.Width(m.width - 4).Render(content.String())
 }
 
-// renderBaseBranchStep shows base branch selection with warnings
-func (m Model) renderBaseBranchStep() string {
+// renderExistingBranchStep shows existing branch selection
+func (m Model) renderExistingBranchStep() string {
 	var content strings.Builder
 
-	content.WriteString(TitleStyle.Render("🌳 Select Base Branch"))
+	content.WriteString(TitleStyle.Render("🔄 Select Existing Branch"))
 	content.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render(fmt.Sprintf("Create '%s' from:", m.createState.branchName)))
+	content.WriteString(WorktreeNameStyle.Render("Select branch to checkout:"))
 	content.WriteString("\n\n")
 
-	// Branch list with status indicators
-	for i, status := range m.createState.branchStatuses {
-		var style lipgloss.Style
-		if i == m.createState.selectedBranch {
-			style = WorktreeSelectedStyle
-		} else {
-			style = WorktreeItemStyle
-		}
+	if len(m.createState.availableBranches) == 0 {
+		content.WriteString(WorktreePathStyle.Render("No available branches found."))
+		content.WriteString("\n")
+		content.WriteString(WorktreePathStyle.Render("All branches may already have worktrees."))
+		content.WriteString("\n\n")
+		content.WriteString(HelpStyle.Render("[esc] Back"))
+		return HeaderStyle.Width(m.width - 4).Render(content.String())
+	}
 
+	// Branch list with status indicators (simple list style)
+	for i, status := range m.createState.availableBranches {
 		// Status indicator
 		statusIcon := "🟢"
 		statusText := ""
@@ -114,10 +168,81 @@ func (m Model) renderBaseBranchStep() string {
 			aheadBehind += fmt.Sprintf(" ↓%d", status.BehindCount)
 		}
 
-		branchLine := fmt.Sprintf("%s %s%s%s%s",
-			statusIcon, status.Name, currentIndicator, statusText, aheadBehind)
+		// Selection prefix
+		prefix := "  "
+		if i == m.createState.selectedBranch {
+			prefix = "▶ "
+		}
 
-		content.WriteString(style.Width(m.width-8).Render(branchLine))
+		branchLine := fmt.Sprintf("%s%s %s%s%s%s",
+			prefix, statusIcon, status.Name, currentIndicator, statusText, aheadBehind)
+
+		// Apply color styling for selected item
+		if i == m.createState.selectedBranch {
+			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(branchLine))
+		} else {
+			content.WriteString(branchLine)
+		}
+		content.WriteString("\n")
+	}
+
+	content.WriteString("\n")
+	content.WriteString(HelpStyle.Render("[enter] Continue  [↑↓] Select  [esc] Back"))
+
+	return HeaderStyle.Width(m.width - 4).Render(content.String())
+}
+
+// renderBaseBranchStep shows base branch selection with warnings
+func (m Model) renderBaseBranchStep() string {
+	var content strings.Builder
+
+	content.WriteString(TitleStyle.Render("🌳 Select Base Branch"))
+	content.WriteString("\n\n")
+
+	content.WriteString(WorktreeNameStyle.Render(fmt.Sprintf("Create '%s' from:", m.createState.branchName)))
+	content.WriteString("\n\n")
+
+	// Branch list with status indicators (simple list style)
+	for i, status := range m.createState.branchStatuses {
+		// Status indicator
+		statusIcon := "🟢"
+		statusText := ""
+		if !status.IsClean {
+			statusIcon = "⚠️"
+			statusText = fmt.Sprintf(" (%d uncommitted, %d untracked)",
+				status.UncommittedFiles, status.UntrackedFiles)
+		}
+
+		// Current branch indicator
+		currentIndicator := ""
+		if status.IsCurrent {
+			currentIndicator = " (current)"
+		}
+
+		// Ahead/behind indicator
+		aheadBehind := ""
+		if status.AheadCount > 0 {
+			aheadBehind += fmt.Sprintf(" ↑%d", status.AheadCount)
+		}
+		if status.BehindCount > 0 {
+			aheadBehind += fmt.Sprintf(" ↓%d", status.BehindCount)
+		}
+
+		// Selection prefix
+		prefix := "  "
+		if i == m.createState.selectedBranch {
+			prefix = "▶ "
+		}
+
+		branchLine := fmt.Sprintf("%s%s %s%s%s%s",
+			prefix, statusIcon, status.Name, currentIndicator, statusText, aheadBehind)
+
+		// Apply color styling for selected item
+		if i == m.createState.selectedBranch {
+			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(branchLine))
+		} else {
+			content.WriteString(branchLine)
+		}
 		content.WriteString("\n")
 	}
 
@@ -161,15 +286,25 @@ func (m Model) renderConfirmStep() string {
 	content.WriteString(TitleStyle.Render("✅ Confirm Worktree Creation"))
 	content.WriteString("\n\n")
 
-	// Summary
-	summary := fmt.Sprintf("📁 Worktree: %s\n"+
-		"🌿 Branch: %s\n"+
-		"🔗 From: %s\n"+
-		"📍 Path: ../gren-worktrees/%s/",
-		m.createState.branchName,
-		m.createState.branchName,
-		m.createState.baseBranch,
-		m.createState.branchName)
+	// Summary - different format for new vs existing branch
+	var summary string
+	if m.createState.createMode == CreateModeNewBranch {
+		summary = fmt.Sprintf("📁 Worktree: %s\n"+
+			"🌿 New Branch: %s\n"+
+			"🔗 Based on: %s\n"+
+			"📍 Path: ../gren-worktrees/%s/",
+			m.createState.branchName,
+			m.createState.branchName,
+			m.createState.baseBranch,
+			m.createState.branchName)
+	} else {
+		summary = fmt.Sprintf("📁 Worktree: %s\n"+
+			"🔄 Existing Branch: %s\n"+
+			"📍 Path: ../gren-worktrees/%s/",
+			m.createState.branchName,
+			m.createState.branchName,
+			m.createState.branchName)
+	}
 
 	content.WriteString(WorktreeItemStyle.Render(summary))
 	content.WriteString("\n\n")

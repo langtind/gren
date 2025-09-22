@@ -127,7 +127,7 @@ func (m Model) dashboardView() string {
 		} else if !m.repoInfo.IsInitialized {
 			helpText = HelpStyle.Render("[i] Initialize  [q] Quit")
 		} else {
-			helpText = HelpStyle.Render("[n] New worktree  [q] Quit")
+			helpText = HelpStyle.Render("[n] New worktree  [c] Config  [q] Quit")
 		}
 		content.WriteString("\n\n")
 		content.WriteString(helpText)
@@ -163,7 +163,7 @@ func (m Model) dashboardView() string {
 				statusText = "🔴 Untracked"
 			case "mixed":
 				statusStyle = StatusModifiedStyle
-				statusText = "⚠️ Mixed"
+				statusText = "📝 Changes"
 			default:
 				statusStyle = StatusCleanStyle
 				statusText = "🟢 Clean"
@@ -203,7 +203,7 @@ func (m Model) dashboardView() string {
 		}
 
 		// Help text for worktrees view
-		helpText := HelpStyle.Render("[n] New  [d] Delete  [↑↓] Navigate  [enter] Open in...  [q] Quit")
+		helpText := HelpStyle.Render("[n] New  [d] Delete  [c] Config  [↑↓] Navigate  [enter] Open in...  [q] Quit")
 		content.WriteString("\n")
 		content.WriteString(helpText)
 	}
