@@ -15,7 +15,10 @@
       "Bash(git rev-parse:*)",
       "Bash(git branch:*)",
       "Bash(git worktree:*)",
-      "Read(//Users/arild/Developer/Private/gren-worktrees/test123/**)"
+      "Read(//Users/arild/Developer/Private/gren-worktrees/test123/**)",
+      "Bash(go mod:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
