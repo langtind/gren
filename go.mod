@@ -1,4 +1,4 @@
-module gren
+module github.com/langtind/gren
 
 go 1.25.1
 

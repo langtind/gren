@@ -6,24 +6,45 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"gren/internal/config"
-	"gren/internal/git"
-	"gren/internal/ui"
+	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/git"
+	"github.com/langtind/gren/internal/ui"
+)
+
+// Version information - will be injected at build time
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
 )
 
 func main() {
 	// Parse command line flags
 	var showHelp = flag.Bool("help", false, "Show help message")
+	var showVersion = flag.Bool("version", false, "Show version information")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("gren version %s\n", version)
+		if commit != "unknown" {
+			fmt.Printf("commit: %s\n", commit)
+		}
+		if date != "unknown" {
+			fmt.Printf("built: %s\n", date)
+		}
+		return
+	}
 
 	if *showHelp {
 		fmt.Println("gren - Git Worktree Manager")
+		fmt.Printf("version %s\n", version)
 		fmt.Println()
 		fmt.Println("A TUI application for managing git worktrees efficiently.")
 		fmt.Println()
 		fmt.Println("Usage:")
-		fmt.Println("  gren          Start the interactive interface")
-		fmt.Println("  gren --help   Show this help message")
+		fmt.Println("  gren            Start the interactive interface")
+		fmt.Println("  gren --help     Show this help message")
+		fmt.Println("  gren --version  Show version information")
 		fmt.Println()
 		fmt.Println("Controls:")
 		fmt.Println("  ↑↓      Navigate between worktrees")

@@ -5,8 +5,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
-	"gren/internal/config"
-	"gren/internal/git"
+	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/git"
 )
 
 // ViewState represents the current view/screen

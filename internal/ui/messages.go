@@ -1,6 +1,6 @@
 package ui
 
-import "gren/internal/git"
+import "github.com/langtind/gren/internal/git"
 
 // Message types for Tea commands
 type projectInfoMsg struct {

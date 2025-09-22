@@ -1,28 +1,58 @@
 # 🌿 gren
 
-A beautiful terminal UI for managing Git worktrees.
+A beautiful terminal UI for managing Git worktrees efficiently.
+
+Gren makes it easy to create, manage, and switch between Git worktrees with an intuitive interface. Perfect for developers who work with multiple branches simultaneously or need to quickly test different features without stashing changes.
 
 ## Features
 
-- ✨ Beautiful, intuitive TUI interface
+- ✨ Beautiful, intuitive TUI interface built with Bubble Tea
 - 🚀 Fast worktree creation and management
-- 🔧 Configurable post-create hooks
-- 📁 Smart file copying (env files, configs)
+- 🔧 Configurable post-create hooks and automation
+- 📁 Smart file copying (env files, configs, etc.)
 - 🎯 Project-specific setup workflows
-- 🎨 Clean, modern design
+- 🎨 Clean, modern terminal design
+- ⌨️ Keyboard-driven navigation
+- 🔍 Search and filter worktrees
 
 ## Installation
 
+### Install with Go (Recommended)
+
 ```bash
-go build -o gren .
-./gren
+go install github.com/langtind/gren@latest
 ```
+
+### Download Pre-built Binaries
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/langtind/gren/releases).
+
+### Build from Source
+
+```bash
+git clone https://github.com/langtind/gren.git
+cd gren
+go build -o gren .
+```
+
+## Quick Start
+
+1. Navigate to any Git repository
+2. Run `gren` to start the interactive interface
+3. Use keyboard shortcuts to manage worktrees:
+   - `↑↓` Navigate between worktrees
+   - `Enter` Switch to selected worktree
+   - `n` Create new worktree
+   - `d` Delete worktrees
+   - `i` Initialize gren configuration
+   - `q` Quit
 
 ## Usage
 
 ```bash
-gren init    # Initialize project for worktree management
-gren         # Launch TUI interface
+gren          # Launch interactive TUI
+gren --help   # Show help and keyboard shortcuts
+gren --version # Show version information
 ```
 
 ## Development

@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"gren/internal/config"
-	"gren/internal/git"
+	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/git"
 )
 
 // NewModel creates a new Model with the given dependencies
