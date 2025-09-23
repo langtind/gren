@@ -20,7 +20,13 @@ Gren makes it easy to create, manage, and switch between Git worktrees with an i
 ### Homebrew (macOS - Recommended)
 
 ```bash
-brew install langtind/gren/gren
+brew install https://raw.githubusercontent.com/langtind/gren/main/Formula/gren.rb
+```
+
+Or add the tap first:
+```bash
+brew tap langtind/gren https://github.com/langtind/gren
+brew install gren
 ```
 
 ### Download Pre-built Binaries
