@@ -17,15 +17,23 @@ Gren makes it easy to create, manage, and switch between Git worktrees with an i
 
 ## Installation
 
-### Install with Go (Recommended)
+### Homebrew (macOS - Recommended)
 
 ```bash
-go install github.com/langtind/gren@latest
+brew install langtind/gren/gren
 ```
 
 ### Download Pre-built Binaries
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/langtind/gren/releases).
+
+### Install with Go
+
+```bash
+go install github.com/langtind/gren@latest
+```
+
+*Note: `go install` builds from source and may show "dev" as version. For proper version numbers, use Homebrew or download pre-built binaries.*
 
 ### Build from Source
 
