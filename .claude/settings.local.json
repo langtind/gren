@@ -18,7 +18,17 @@
       "Read(//Users/arild/Developer/Private/gren-worktrees/test123/**)",
       "Bash(go mod:*)",
       "Bash(git add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git checkout:*)",
+      "Bash(git fetch:*)",
+      "Bash(go install:*)",
+      "Bash(gren:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh release view:*)",
+      "Bash(tar:*)",
+      "Bash(./gren-v0.1.1-darwin-arm64:*)",
+      "Bash(./gren-v0.1.2-darwin-arm64:*)",
+      "WebFetch(domain:docs.brew.sh)"
     ],
     "deny": [],
     "ask": []
