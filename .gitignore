@@ -55,3 +55,6 @@ old/
 
 # Gren configuration (kept locally for development)
 .gren/
+
+# Claude Code
+.claude/
