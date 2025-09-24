@@ -267,13 +267,22 @@ func (m Model) detectPackageManager() string {
 	}
 
 	if _, err := os.Stat("requirements.txt"); err == nil {
-		return "python"
+		return "python (pip)"
 	}
 	if _, err := os.Stat("pyproject.toml"); err == nil {
-		return "python"
+		return "python (pip)"
 	}
 
-	return "unknown"
+	if _, err := os.Stat("Makefile"); err == nil {
+		return "make"
+	}
+
+	// Check for common project types
+	if _, err := os.Stat("README.md"); err == nil {
+		return "generic project"
+	}
+
+	return "no package manager detected"
 }
 
 // detectPostCreateCommand detects appropriate post-create command
@@ -291,13 +300,17 @@ func (m Model) detectPostCreateCommand() string {
 		return "go mod download"
 	case "cargo":
 		return "cargo build"
-	case "python":
+	case "python (pip)":
 		if _, err := os.Stat("requirements.txt"); err == nil {
 			return "pip install -r requirements.txt"
 		}
 		return "pip install -e ."
+	case "make":
+		return "make install"
+	case "generic project":
+		return "" // No setup command needed
 	default:
-		return "echo 'No package manager detected'"
+		return "" // No setup command needed
 	}
 }
 
@@ -324,9 +337,11 @@ func (m Model) generateSetupScript() string {
 
 	// Install dependencies
 	installCmd := m.detectPostCreateCommand()
-	script.WriteString("# Install dependencies\n")
-	script.WriteString(fmt.Sprintf("echo 'Running: %s'\n", installCmd))
-	script.WriteString(fmt.Sprintf("%s\n\n", installCmd))
+	if installCmd != "" {
+		script.WriteString("# Install dependencies\n")
+		script.WriteString(fmt.Sprintf("echo 'Running: %s'\n", installCmd))
+		script.WriteString(fmt.Sprintf("%s\n\n", installCmd))
+	}
 
 	script.WriteString("echo 'Worktree setup complete!'\n")
 

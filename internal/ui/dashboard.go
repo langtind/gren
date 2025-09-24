@@ -61,76 +61,41 @@ func (m Model) dashboardView() string {
 		return HeaderStyle.Width(m.width - 4).Render(content.String())
 	}
 
-	// Check if we have worktrees to show
-	if len(m.worktrees) == 0 {
-		// No worktrees - show getting started message
-		if !m.repoInfo.IsGitRepo {
-			// Not in a git repo
-			message := lipgloss.JoinVertical(
-				lipgloss.Center,
-				ErrorStyle.Render("❌ Not in a git repository"),
-				"",
-				WorktreePathStyle.Render("Please run gren from within a git repository."),
-			)
-			content.WriteString(message)
-		} else if !m.repoInfo.IsInitialized {
-			// In a git repo but not initialized
-			message := lipgloss.JoinVertical(
-				lipgloss.Center,
-				WorktreeNameStyle.Render("Worktree management not initialized."),
-				"",
-				WorktreePathStyle.Render("Press 'i' to initialize worktree management for this project."),
-				WorktreePathStyle.Render("This will create a .gren/ configuration directory."),
-			)
-			content.WriteString(message)
-		} else {
-			// Initialized - check for worktrees
-			if len(m.worktrees) == 0 {
-				// No worktrees yet
-				message := lipgloss.JoinVertical(
-					lipgloss.Center,
-					WorktreeNameStyle.Render("No worktrees created yet."),
-					"",
-					WorktreePathStyle.Render("Press 'n' to create your first worktree."),
-				)
-				content.WriteString(message)
-			} else {
-				// Show worktrees list
-				content.WriteString(WorktreeNameStyle.Render("🌳 Active Worktrees"))
-				content.WriteString("\n\n")
-
-				for i, worktree := range m.worktrees {
-					var style lipgloss.Style
-					if i == m.selected {
-						style = WorktreeSelectedStyle
-					} else {
-						style = WorktreeItemStyle
-					}
-
-					worktreeInfo := fmt.Sprintf("📁 %s", worktree.Name)
-					if worktree.Branch != "" {
-						worktreeInfo += fmt.Sprintf(" (%s)", worktree.Branch)
-					}
-
-					content.WriteString(style.Width(m.width-8).Render(worktreeInfo))
-					content.WriteString("\n")
-					content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   📍 %s", worktree.Path)))
-					content.WriteString("\n\n")
-				}
-			}
-		}
-
-		// Help text for empty state
-		var helpText string
-		if !m.repoInfo.IsGitRepo {
-			helpText = HelpStyle.Render("[q] Quit")
-		} else if !m.repoInfo.IsInitialized {
-			helpText = HelpStyle.Render("[i] Initialize  [q] Quit")
-		} else {
-			helpText = HelpStyle.Render("[n] New worktree  [c] Config  [q] Quit")
-		}
+	// Check initialization status first, then worktrees
+	if !m.repoInfo.IsGitRepo {
+		// Not in a git repo
+		message := lipgloss.JoinVertical(
+			lipgloss.Center,
+			ErrorStyle.Render("❌ Not in a git repository"),
+			"",
+			WorktreePathStyle.Render("Please run gren from within a git repository."),
+		)
+		content.WriteString(message)
 		content.WriteString("\n\n")
-		content.WriteString(helpText)
+		content.WriteString(HelpStyle.Render("[q] Quit"))
+	} else if !m.repoInfo.IsInitialized {
+		// In a git repo but not initialized - always show init message
+		message := lipgloss.JoinVertical(
+			lipgloss.Center,
+			WorktreeNameStyle.Render("Worktree management not initialized."),
+			"",
+			WorktreePathStyle.Render("Press 'i' to initialize worktree management for this project."),
+			WorktreePathStyle.Render("This will create a .gren/ configuration directory."),
+		)
+		content.WriteString(message)
+		content.WriteString("\n\n")
+		content.WriteString(HelpStyle.Render("[i] Initialize  [q] Quit"))
+	} else if len(m.worktrees) == 0 {
+		// Initialized but no worktrees yet
+		message := lipgloss.JoinVertical(
+			lipgloss.Center,
+			WorktreeNameStyle.Render("No worktrees created yet."),
+			"",
+			WorktreePathStyle.Render("Press 'n' to create your first worktree."),
+		)
+		content.WriteString(message)
+		content.WriteString("\n\n")
+		content.WriteString(HelpStyle.Render("[n] New worktree  [c] Config  [q] Quit"))
 	} else {
 		// Show worktrees list
 		for i, wt := range m.worktrees {

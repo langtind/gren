@@ -22,18 +22,28 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
-		if m.initState.currentStep == InitStepWelcome {
+		switch m.initState.currentStep {
+		case InitStepWelcome:
 			m.currentView = DashboardView
 			return m, nil
-		}
-		// Go back one step
-		if m.initState.currentStep > InitStepWelcome {
-			m.initState.currentStep--
+		case InitStepAnalysis, InitStepExecuting:
+			// These are non-interactive steps, skip back further
+			m.initState.currentStep = InitStepWelcome
+		case InitStepCreated:
+			// Go back to preview step
+			m.initState.currentStep = InitStepPreview
+			m.initState.selected = 0
+		default:
+			// Normal back navigation for interactive steps
+			if m.initState.currentStep > InitStepWelcome {
+				m.initState.currentStep--
+			}
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Up):
 		if m.initState.currentStep == InitStepRecommendations ||
-			m.initState.currentStep == InitStepPreview {
+			m.initState.currentStep == InitStepPreview ||
+			m.initState.currentStep == InitStepCreated {
 			if m.initState.selected > 0 {
 				m.initState.selected--
 			}
@@ -43,9 +53,11 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var maxItems int
 		switch m.initState.currentStep {
 		case InitStepRecommendations:
-			maxItems = len(m.initState.copyPatterns) + 1 // +1 for customization option
+			maxItems = 2 // "Accept recommendations" and "Customize configuration"
 		case InitStepPreview:
 			maxItems = 4 // Number of preview items
+		case InitStepCreated:
+			maxItems = 2 // "Edit script" and "Skip and continue"
 		}
 		if m.initState.selected < maxItems-1 {
 			m.initState.selected++
@@ -57,12 +69,12 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.initState.currentStep = InitStepAnalysis
 			return m, m.runProjectAnalysis()
 		case InitStepRecommendations:
-			if m.initState.selected == len(m.initState.copyPatterns) {
-				// Selected "Customize" option
+			if m.initState.selected == 1 {
+				// Selected "Customize configuration" option
 				m.initState.currentStep = InitStepCustomization
 				m.initState.selected = 0
 			} else {
-				// Skip to preview
+				// Selected "Accept recommendations and continue"
 				m.initState.currentStep = InitStepPreview
 				m.initState.selected = 0
 			}
@@ -72,9 +84,14 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.initState.currentStep = InitStepExecuting
 			return m, m.runInitialization()
 		case InitStepCreated:
-			// Open script in editor
-			m.initState.currentStep = InitStepExecuting
-			return m, m.openPostCreateScript()
+			if m.initState.selected == 0 {
+				// Edit script option
+				m.initState.currentStep = InitStepExecuting
+				return m, m.openPostCreateScript()
+			} else {
+				// Skip and continue option
+				m.initState.currentStep = InitStepComplete
+			}
 		case InitStepCommitConfirm:
 			// Commit changes
 			m.initState.currentStep = InitStepFinal
@@ -89,32 +106,31 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadProjectInfo()
 		}
 	case msg.String() == "y" || msg.String() == "Y":
-		if m.initState.currentStep == InitStepRecommendations {
-			m.initState.currentStep = InitStepPreview
-			m.initState.selected = 0
-		} else if m.initState.currentStep == InitStepCreated {
-			// Open script in external editor
-			m.initState.currentStep = InitStepExecuting
-			return m, m.openPostCreateScript()
-		} else if m.initState.currentStep == InitStepCommitConfirm {
+		if m.initState.currentStep == InitStepCommitConfirm {
 			// Commit the changes
 			m.initState.currentStep = InitStepFinal
 			return m, m.commitConfiguration()
 		}
 		return m, nil
 	case msg.String() == "n" || msg.String() == "N":
-		if m.initState.currentStep == InitStepRecommendations {
-			m.initState.currentStep = InitStepWelcome
-		} else if m.initState.currentStep == InitStepCreated {
-			// Skip opening, go to complete
-			m.initState.currentStep = InitStepComplete
-		} else if m.initState.currentStep == InitStepCommitConfirm {
+		if m.initState.currentStep == InitStepCommitConfirm {
 			// Skip commit, go to final
 			m.initState.currentStep = InitStepFinal
 			// Mark as initialized since we're skipping commit
 			if m.repoInfo != nil {
 				m.repoInfo.IsInitialized = true
 			}
+		} else if m.initState.currentStep == InitStepFinal {
+			// Go to dashboard and start create workflow
+			m.currentView = CreateView
+			m.createState = &CreateState{
+				currentStep:   CreateStepBranchMode,
+				selectedMode:  0,
+				branchName:    "",
+				baseBranch:    "",
+				createMode:    CreateModeNewBranch,
+			}
+			return m, m.loadProjectInfo()
 		}
 		return m, nil
 	}

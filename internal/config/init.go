@@ -92,6 +92,11 @@ func detectProjectSettings(config *Config) *Config {
 		copyPatterns = append(copyPatterns, ".claude/**/*")
 	}
 
+	// Check for CLAUDE.md (if gitignored)
+	if fileExists("CLAUDE.md") && isGitIgnored("CLAUDE.md") {
+		copyPatterns = append(copyPatterns, "CLAUDE.md")
+	}
+
 	config.CopyPatterns = copyPatterns
 	return config
 }
@@ -140,9 +145,15 @@ func generateHookContent(config *Config) string {
 			builder.WriteString("cp \"$REPO_ROOT\"/.env* . 2>/dev/null || echo \"  No .env files found\"\n\n")
 		} else if pattern == ".claude/**/*" {
 			builder.WriteString("# Copy .claude directory if gitignored\n")
-			builder.WriteString("if [[ -d \"$REPO_ROOT/.claude\" ]] && grep -q \"\\.claude\" \"$REPO_ROOT/.gitignore\" 2>/dev/null; then\n")
+			builder.WriteString("if [[ -d \"$REPO_ROOT/.claude\" ]] && (grep -q \"\\.claude\" \"$REPO_ROOT/.gitignore\" 2>/dev/null || grep -q \"/\\.claude\" \"$REPO_ROOT/.gitignore\" 2>/dev/null); then\n")
 			builder.WriteString("    echo \"📁 Copying .claude config...\"\n")
 			builder.WriteString("    cp -r \"$REPO_ROOT/.claude\" . 2>/dev/null || true\n")
+			builder.WriteString("fi\n\n")
+		} else if pattern == "CLAUDE.md" {
+			builder.WriteString("# Copy CLAUDE.md if gitignored\n")
+			builder.WriteString("if [[ -f \"$REPO_ROOT/CLAUDE.md\" ]] && (grep -q \"CLAUDE\\.md\" \"$REPO_ROOT/.gitignore\" 2>/dev/null || grep -q \"/CLAUDE\\.md\" \"$REPO_ROOT/.gitignore\" 2>/dev/null); then\n")
+			builder.WriteString("    echo \"📝 Copying CLAUDE.md...\"\n")
+			builder.WriteString("    cp \"$REPO_ROOT/CLAUDE.md\" . 2>/dev/null || true\n")
 			builder.WriteString("fi\n\n")
 		} else {
 			builder.WriteString(fmt.Sprintf("# Copy %s\n", pattern))
@@ -212,5 +223,21 @@ func isGitIgnored(path string) bool {
 		return false
 	}
 
-	return strings.Contains(string(data), path)
+	gitignoreContent := string(data)
+
+	// Check for various gitignore patterns for the path
+	patterns := []string{
+		path,           // .claude
+		"/" + path,     // /.claude
+		path + "/",     // .claude/
+		"/" + path + "/", // /.claude/
+	}
+
+	for _, pattern := range patterns {
+		if strings.Contains(gitignoreContent, pattern) {
+			return true
+		}
+	}
+
+	return false
 }

@@ -50,6 +50,13 @@ func (m Model) getActionsForPath(worktreePath, backActionName string) []PostCrea
 			Description: "Open worktree in Cursor editor",
 		},
 		{
+			Name:        "Open in Zed",
+			Icon:        "⚡",
+			Command:     "zed",
+			Args:        []string{worktreePath},
+			Description: "Open worktree in Zed editor",
+		},
+		{
 			Name:        "Open in Finder",
 			Icon:        "🗂️",
 			Command:     "open",

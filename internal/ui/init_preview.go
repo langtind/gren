@@ -153,17 +153,37 @@ func (m Model) renderCreatedStep() string {
 	content.WriteString(WorktreeNameStyle.Render("Would you like to:"))
 	content.WriteString("\n\n")
 
-	content.WriteString(WorktreeItemStyle.Width(m.width-8).Render("📝 Edit the post-create script (recommended)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   Customize the setup commands for your project"))
-	content.WriteString("\n\n")
+	options := []string{
+		"Edit the post-create script (recommended)",
+		"Skip and continue",
+	}
 
-	content.WriteString(WorktreeItemStyle.Width(m.width-8).Render("⏭️ Skip and continue"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   Use the generated script as-is"))
-	content.WriteString("\n\n")
+	for i, option := range options {
+		var style lipgloss.Style
+		if i == m.initState.selected {
+			style = WorktreeSelectedStyle
+		} else {
+			style = WorktreeItemStyle
+		}
 
-	content.WriteString(HelpStyle.Render("[y] Edit script  [n] Skip  [esc] Back"))
+		prefix := "📝 "
+		description := "Customize the setup commands for your project"
+		if i == 1 {
+			prefix = "⏭️ "
+			description = "Use the generated script as-is"
+		}
+
+		content.WriteString(style.Width(m.width-8).Render(fmt.Sprintf("%s%s", prefix, option)))
+		content.WriteString("\n")
+		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", description)))
+		content.WriteString("\n")
+		if i < len(options)-1 {
+			content.WriteString("\n")
+		}
+	}
+
+	content.WriteString("\n\n")
+	content.WriteString(HelpStyle.Render("[enter] Select  [↑↓] Navigate  [esc] Back"))
 
 	return HeaderStyle.Width(m.width - 4).Render(content.String())
 }

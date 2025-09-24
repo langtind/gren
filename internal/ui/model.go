@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -243,7 +245,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					detectedFiles:     []DetectedFile{},
 					copyPatterns:      []CopyPattern{},
 					selected:          0,
-					worktreeDir:       "../gren-worktrees",
+					worktreeDir:       m.generateDefaultWorktreeDir(),
 					customizationMode: "",
 					editingText:       "",
 					postCreateScript:  "",
@@ -320,4 +322,22 @@ func (m Model) openInView() string {
 	content.WriteString(HelpStyle.Render("↑↓ Navigate • Enter Select • Esc Back"))
 
 	return content.String()
+}
+
+// generateDefaultWorktreeDir creates a default worktree directory name based on current working directory
+func (m Model) generateDefaultWorktreeDir() string {
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "../gren-worktrees" // fallback
+	}
+
+	// Get the directory name
+	dirName := filepath.Base(cwd)
+	if dirName == "" || dirName == "." || dirName == "/" {
+		return "../gren-worktrees" // fallback
+	}
+
+	// Create worktree directory name based on current directory
+	return fmt.Sprintf("../%s-worktrees", dirName)
 }
