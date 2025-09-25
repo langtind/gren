@@ -250,11 +250,24 @@ func (m *Model) initializeOpenInStateFromMsg(msg openInInitializedMsg) {
 // detectPackageManager detects the package manager used in the project
 func (m Model) detectPackageManager() string {
 	if _, err := os.Stat("package.json"); err == nil {
-		if _, err := os.Stat("yarn.lock"); err == nil {
+		// Check for bun lock files first
+		if _, err := os.Stat("bun.lockb"); err == nil {
+			return "bun"
+		} else if _, err := os.Stat("bun.lock"); err == nil {
+			return "bun"
+		} else if _, err := os.Stat("yarn.lock"); err == nil {
 			return "yarn"
 		} else if _, err := os.Stat("pnpm-lock.yaml"); err == nil {
 			return "pnpm"
 		}
+
+		// Check for packageManager field in package.json as a fallback
+		if data, err := os.ReadFile("package.json"); err == nil {
+			if strings.Contains(string(data), "\"packageManager\": \"bun@") {
+				return "bun"
+			}
+		}
+
 		return "npm"
 	}
 
@@ -290,6 +303,8 @@ func (m Model) detectPostCreateCommand() string {
 	packageManager := m.detectPackageManager()
 
 	switch packageManager {
+	case "bun":
+		return "bun install"
 	case "npm":
 		return "npm install"
 	case "yarn":

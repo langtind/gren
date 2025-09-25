@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/langtind/gren/internal/cli"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/ui"
@@ -35,31 +37,41 @@ func main() {
 		return
 	}
 
-	if *showHelp {
-		fmt.Println("gren - Git Worktree Manager")
-		fmt.Printf("version %s\n", version)
-		fmt.Println()
-		fmt.Println("A TUI application for managing git worktrees efficiently.")
-		fmt.Println()
-		fmt.Println("Usage:")
-		fmt.Println("  gren            Start the interactive interface")
-		fmt.Println("  gren --help     Show this help message")
-		fmt.Println("  gren --version  Show version information")
-		fmt.Println()
-		fmt.Println("Controls:")
-		fmt.Println("  ↑↓      Navigate between worktrees")
-		fmt.Println("  Enter   Open selected worktree")
-		fmt.Println("  n       Create new worktree")
-		fmt.Println("  d       Delete worktrees")
-		fmt.Println("  i       Initialize gren in this repository")
-		fmt.Println("  q       Quit")
-		return
-	}
-
 	// Create dependencies
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
 
+	// Check if we have CLI commands (anything beyond flags)
+	args := os.Args
+	cliArgs := []string{}
+
+	// Filter out flag arguments to get command arguments
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if !(*showHelp) && !(*showVersion) && !strings.HasPrefix(arg, "-") {
+			cliArgs = append(cliArgs, args[i:]...)
+			break
+		}
+	}
+
+	// If we have CLI commands, use CLI mode
+	if len(cliArgs) > 0 {
+		cliHandler := cli.NewCLI(gitRepo, configManager)
+		if err := cliHandler.ParseAndExecute(append([]string{"gren"}, cliArgs...)); err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Show help if requested or if no commands provided
+	if *showHelp {
+		cliHandler := cli.NewCLI(gitRepo, configManager)
+		cliHandler.ShowHelp()
+		return
+	}
+
+	// Default to TUI mode
 	// Create the model with dependencies
 	m := ui.NewModel(gitRepo, configManager)
 

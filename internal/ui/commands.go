@@ -591,16 +591,27 @@ func (m Model) runInitialization() tea.Cmd {
 func (m Model) analyzeProject() []DetectedFile {
 	var files []DetectedFile
 
-	// Common patterns to look for
+	// Detect all .env files using glob pattern
+	envFiles, err := filepath.Glob(".env*")
+	if err == nil {
+		for _, envFile := range envFiles {
+			files = append(files, DetectedFile{
+				Path:         envFile,
+				Type:         "env",
+				IsGitIgnored: m.isGitIgnored(envFile),
+				Description:  getFileDescription(envFile, "env"),
+			})
+		}
+	}
+
+	// Common patterns to look for (excluding env files which we handle above)
 	patterns := map[string]string{
-		".env":         "env",
-		".env.local":   "env",
-		".env.example": "env",
-		"package.json": "config",
-		"go.mod":       "config",
-		"Cargo.toml":   "config",
-		".nvmrc":       "tool",
+		"package.json":  "config",
+		"go.mod":        "config",
+		"Cargo.toml":    "config",
+		".nvmrc":        "tool",
 		".node-version": "tool",
+		".envrc":        "tool",
 	}
 
 	for pattern, fileType := range patterns {
@@ -634,6 +645,12 @@ func getFileDescription(path, fileType string) string {
 		return "Local environment variables"
 	case ".env.example":
 		return "Environment variables template"
+	case ".env.prod":
+		return "Production environment variables"
+	case ".env.preview":
+		return "Preview environment variables"
+	case ".envrc":
+		return "Direnv configuration"
 	case "package.json":
 		return "Node.js dependencies"
 	case "go.mod":
@@ -645,6 +662,9 @@ func getFileDescription(path, fileType string) string {
 	case ".node-version":
 		return "Node.js version"
 	default:
+		if fileType == "env" {
+			return "Environment variables"
+		}
 		return fmt.Sprintf("%s file", strings.Title(fileType))
 	}
 }
