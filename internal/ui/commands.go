@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -14,6 +13,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/core"
 )
 
 // loadProjectInfo loads project information asynchronously
@@ -289,7 +290,7 @@ func (m Model) runProjectAnalysis() tea.Cmd {
 	}
 }
 
-// createWorktree creates the actual worktree
+// createWorktree creates the actual worktree using WorktreeManager
 func (m Model) createWorktree() tea.Cmd {
 	return func() tea.Msg {
 		if m.createState == nil {
@@ -298,136 +299,26 @@ func (m Model) createWorktree() tea.Cmd {
 
 		branchName := m.createState.branchName
 		baseBranch := m.createState.baseBranch
-		worktreePath := fmt.Sprintf("../gren-worktrees/%s", branchName)
 
-		// Create worktrees directory if it doesn't exist
-		worktreesDir := "../gren-worktrees"
-		if err := os.MkdirAll(worktreesDir, 0755); err != nil {
-			return worktreeCreatedMsg{err: fmt.Errorf("failed to create worktrees directory: %w", err)}
+		// Use WorktreeManager to create worktree (same logic as CLI)
+		req := core.CreateWorktreeRequest{
+			Name:        branchName,
+			Branch:      branchName,
+			BaseBranch:  baseBranch,
+			IsNewBranch: m.createState.createMode == CreateModeNewBranch,
+			WorktreeDir: "", // Let WorktreeManager determine from config
 		}
 
-		// Check if worktree path already exists
-		if _, err := os.Stat(worktreePath); err == nil {
-			return worktreeCreatedMsg{err: fmt.Errorf("worktree directory already exists: %s", worktreePath)}
-		}
-
-		var cmd *exec.Cmd
-
-		if m.createState.createMode == CreateModeNewBranch {
-			// Check if branch already exists (only for new branch mode)
-			checkCmd := exec.Command("git", "branch", "--list", branchName)
-			if output, err := checkCmd.Output(); err == nil && len(strings.TrimSpace(string(output))) > 0 {
-				return worktreeCreatedMsg{err: fmt.Errorf("branch '%s' already exists", branchName)}
-			}
-
-			// Create the git worktree with new branch
-			cmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseBranch)
-		} else {
-			// Validate existing branch before creating worktree
-			validateCmd := exec.Command("git", "rev-parse", "--verify", branchName)
-			if err := validateCmd.Run(); err != nil {
-				return worktreeCreatedMsg{err: fmt.Errorf("branch '%s' is not a valid git reference", branchName)}
-			}
-
-			// Create the git worktree with existing branch
-			cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
-		}
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			// Provide more detailed error information
-			errorMsg := fmt.Sprintf("git worktree add failed: %s", string(output))
-			if len(output) == 0 {
-				errorMsg = fmt.Sprintf("git worktree add failed with exit code: %v", err)
-			}
-			return worktreeCreatedMsg{err: fmt.Errorf(errorMsg)}
-		}
-
-		// Copy .gren/ configuration to worktree
-		if err := m.copyGrenConfig(worktreePath); err != nil {
-			// Don't fail the entire operation, just log it
-			// The worktree was created successfully
-		}
-
-		// Run post-create script if it exists
-		if err := m.runPostCreateScript(worktreePath); err != nil {
-			// Don't fail the entire operation, just log it
-			// The worktree was created successfully
+		ctx := context.Background()
+		worktreeManager := core.NewWorktreeManager(m.gitRepo, m.configManager)
+		if err := worktreeManager.CreateWorktree(ctx, req); err != nil {
+			return worktreeCreatedMsg{err: err}
 		}
 
 		return worktreeCreatedMsg{branchName: branchName}
 	}
 }
 
-// copyGrenConfig copies .gren/ directory to worktree
-func (m Model) copyGrenConfig(worktreePath string) error {
-	grenSrc := ".gren"
-	grenDest := filepath.Join(worktreePath, ".gren")
-
-	if _, err := os.Stat(grenSrc); os.IsNotExist(err) {
-		return nil // No .gren directory to copy
-	}
-
-	return copyDir(grenSrc, grenDest)
-}
-
-// copyDir recursively copies a directory
-func copyDir(src, dst string) error {
-	if err := os.MkdirAll(dst, 0755); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if entry.IsDir() {
-			if err := copyDir(srcPath, dstPath); err != nil {
-				return err
-			}
-		} else {
-			if err := copyFile(srcPath, dstPath); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-// copyFile copies a single file
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
-}
-
-// runPostCreateScript runs the post-create script if it exists
-func (m Model) runPostCreateScript(worktreePath string) error {
-	scriptPath := filepath.Join(worktreePath, ".gren", "post-create.sh")
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		return nil // No script to run
-	}
-
-	cmd := exec.Command("bash", scriptPath)
-	cmd.Dir = worktreePath
-	return cmd.Run()
-}
 
 // switchToWorktree opens a new terminal in the worktree directory
 func (m Model) switchToWorktree(worktreePath string) tea.Cmd {
@@ -574,14 +465,23 @@ func (m Model) commitConfiguration() tea.Cmd {
 // runInitialization runs the actual initialization process
 func (m Model) runInitialization() tea.Cmd {
 	return func() tea.Msg {
-		// Create .gren directory structure
-		if err := os.MkdirAll(".gren", 0755); err != nil {
-			return initExecutionCompleteMsg{}
+		// Get project name from repo info
+		projectName := "project"
+		if m.repoInfo != nil {
+			projectName = m.repoInfo.Name
 		}
 
-		// Create basic configuration files
-		// This is a simplified version - real implementation would be more complex
-		return initExecutionCompleteMsg{}
+		// Use the same initialization logic as CLI
+		result := config.Initialize(projectName)
+		if result.Error != nil {
+			return initExecutionCompleteMsg{err: result.Error}
+		}
+
+		return initExecutionCompleteMsg{
+			configCreated: result.ConfigCreated,
+			hookCreated:   result.HookCreated,
+			message:       result.Message,
+		}
 	}
 }
 

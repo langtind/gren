@@ -73,7 +73,7 @@ func main() {
 
 	// Default to TUI mode
 	// Create the model with dependencies
-	m := ui.NewModel(gitRepo, configManager)
+	m := ui.NewModel(gitRepo, configManager, version)
 
 	// Create the program
 	p := tea.NewProgram(

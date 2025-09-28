@@ -13,13 +13,14 @@ import (
 )
 
 // NewModel creates a new Model with the given dependencies
-func NewModel(gitRepo git.Repository, configManager *config.Manager) Model {
+func NewModel(gitRepo git.Repository, configManager *config.Manager, version string) Model {
 	return Model{
 		currentView:   DashboardView,
 		gitRepo:       gitRepo,
 		configManager: configManager,
 		keys:          DefaultKeyMap(),
 		selected:      0,
+		version:       version,
 	}
 }
 

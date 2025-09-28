@@ -1,7 +1,10 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // renderWelcomeStep shows the initial welcome
@@ -37,7 +40,24 @@ func (m Model) renderWelcomeStep() string {
 
 	content.WriteString(HelpStyle.Render("[enter] Start setup  [q] Quit"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	// Add version info above the box, aligned to the right
+	var finalResult strings.Builder
+	if m.version != "" {
+		versionText := fmt.Sprintf("version: %s", m.version)
+		// Create right-aligned version text
+		versionLine := lipgloss.NewStyle().
+			Width(m.width - 4).
+			Align(lipgloss.Right).
+			Render(HelpStyle.Render(versionText))
+		finalResult.WriteString(versionLine)
+		finalResult.WriteString("\n")
+	}
+
+	// Wrap everything in a border
+	result := HeaderStyle.Width(m.width - 4).Render(content.String())
+	finalResult.WriteString(result)
+
+	return finalResult.String()
 }
 
 // renderAnalysisStep shows project analysis in progress

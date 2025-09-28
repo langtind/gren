@@ -63,7 +63,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case initExecutionCompleteMsg:
 		if m.initState != nil {
-			m.initState.currentStep = InitStepCreated
+			if msg.err != nil {
+				m.err = fmt.Errorf("initialization failed: %w", msg.err)
+				m.initState.currentStep = InitStepComplete
+			} else {
+				m.initState.currentStep = InitStepCreated
+				// Mark as initialized if successful
+				if m.repoInfo != nil {
+					m.repoInfo.IsInitialized = true
+				}
+			}
 		}
 		return m, nil
 

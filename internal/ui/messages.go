@@ -26,7 +26,12 @@ type deleteInitMsg struct {
 
 type projectAnalysisCompleteMsg struct{}
 
-type initExecutionCompleteMsg struct{}
+type initExecutionCompleteMsg struct {
+	configCreated bool
+	hookCreated   bool
+	message       string
+	err           error
+}
 
 type worktreeCreatedMsg struct {
 	branchName string

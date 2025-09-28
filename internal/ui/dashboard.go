@@ -173,8 +173,24 @@ func (m Model) dashboardView() string {
 		content.WriteString(helpText)
 	}
 
+	// Add version info above the box, aligned to the right
+	var finalResult strings.Builder
+	if m.version != "" {
+		versionText := fmt.Sprintf("version: %s", m.version)
+		// Create right-aligned version text
+		versionLine := lipgloss.NewStyle().
+			Width(m.width - 4).
+			Align(lipgloss.Right).
+			Render(HelpStyle.Render(versionText))
+		finalResult.WriteString(versionLine)
+		finalResult.WriteString("\n")
+	}
+
 	// Wrap everything in a border
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	result := HeaderStyle.Width(m.width - 4).Render(content.String())
+	finalResult.WriteString(result)
+
+	return finalResult.String()
 }
 
 // Utility function to get status icon and color

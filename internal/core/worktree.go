@@ -70,8 +70,15 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	worktreePath := filepath.Join(worktreeDir, req.Name)
 
 	// Create worktree directory if it doesn't exist
-	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
-		return fmt.Errorf("failed to create worktree directory: %w", err)
+	if _, err := os.Stat(worktreeDir); os.IsNotExist(err) {
+		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+			return fmt.Errorf("failed to create worktree directory: %w", err)
+		}
+		// Create README.md in the worktree directory
+		if err := wm.createWorktreeReadme(worktreeDir); err != nil {
+			// Log but don't fail for this
+			fmt.Printf("Warning: failed to create README.md in worktree directory: %v\n", err)
+		}
 	}
 
 	// Create the git worktree
@@ -269,4 +276,49 @@ func copyDir(src, dst string) error {
 
 		return os.WriteFile(dstPath, data, info.Mode())
 	})
+}
+
+// createWorktreeReadme creates a README.md file in the worktree directory
+func (wm *WorktreeManager) createWorktreeReadme(worktreeDir string) error {
+	readmePath := filepath.Join(worktreeDir, "README.md")
+
+	// Don't overwrite existing README.md
+	if _, err := os.Stat(readmePath); err == nil {
+		return nil
+	}
+
+	content := `# Git Worktrees
+
+This directory contains git worktrees managed by [gren](https://github.com/langtind/gren).
+
+## What are git worktrees?
+
+Git worktrees allow you to have multiple working directories from the same repository, each checked out to different branches. This is useful for:
+
+- Working on multiple features simultaneously
+- Testing different branches without stashing changes
+- Maintaining clean separation between different work streams
+
+## About gren
+
+Gren is a Git Worktree Manager that makes it easy to create, manage, and work with git worktrees.
+
+- **Repository**: https://github.com/langtind/gren
+- **Documentation**: See the repository README for usage instructions
+
+## Directory Structure
+
+Each subdirectory in this folder represents a separate worktree:
+
+- Each worktree has its own working directory
+- Each worktree can be on a different branch
+- Changes in one worktree don't affect others
+- All worktrees share the same git history and remotes
+
+---
+
+*This file was automatically created by gren. You can safely delete it if not needed.*
+`
+
+	return os.WriteFile(readmePath, []byte(content), 0644)
 }

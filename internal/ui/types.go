@@ -214,6 +214,9 @@ type Model struct {
 	width  int
 	height int
 
+	// Version info
+	version string
+
 	// Key bindings
 	keys KeyMap
 }
