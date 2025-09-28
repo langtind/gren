@@ -71,23 +71,76 @@ Uses `filepath.Glob(".env*")` to find ALL `.env.*` files, not just common ones. 
 - Configurable via `.gren/config.json`
 - Post-create hooks run from the new worktree directory
 
+### Missing Worktree Detection and Cleanup
+The TUI automatically detects and handles missing/prunable worktrees:
+- Parses `git worktree list --porcelain` output to identify "prunable" entries
+- Displays missing worktrees with "❌ Missing" status and error styling
+- Provides 'p' key binding to run `git worktree prune` and clean up missing entries
+- Auto-refreshes worktree list after successful pruning operation
+
 ### TUI State Management
 The TUI has complex state transitions between:
-- Dashboard (main view)
+- Dashboard (main view with worktree listing)
 - Create worktree (multi-step wizard)
 - Delete worktree (confirmation flow)
-- Init workflow (project setup)
+- Init workflow (project setup with smart detection)
 - Configuration management
+- Open in... (action selection for worktrees)
 
 Each state has its own rendering and input handling methods in `internal/ui/`.
+
+### Version Display
+Version information is displayed in both:
+- Dashboard view (top-right, above the main box)
+- Init welcome screen (top-right positioning)
+
+### README.md Generation
+When creating new worktrees, a README.md file is automatically generated in the worktree root directory containing:
+- Information about gren worktree management
+- Links to the gren repository for documentation
+- Basic usage instructions
 
 ## Configuration System
 
 Projects can be initialized with `gren init` which creates:
-- `.gren/config.json` - Project configuration
-- `.gren/post-create.sh` - Executable hook script (if configured)
+- `.gren/config.json` - Project configuration with worktree directory, copy patterns, and post-create hooks
+- `.gren/post-create.sh` - Executable hook script with smart dependency installation
 
-The config includes patterns for files to copy to new worktrees and post-create automation.
+The config includes:
+- File patterns to copy to new worktrees (e.g., `.env*`, `.claude/**/*`)
+- Auto-detected package manager and post-create commands
+- Configurable worktree directory location
+
+### Post-Create Hook Features
+The generated post-create script includes:
+- Environment file copying (`.env*` patterns)
+- Claude configuration copying (if gitignored)
+- Smart package manager detection and dependency installation
+- Direnv integration if `.envrc` exists
+
+## TUI Features
+
+### Dashboard
+- Lists all worktrees with status indicators (Clean, Modified, Missing)
+- Shows current worktree with highlighting
+- Displays branch information and worktree paths
+- Keyboard navigation with arrow keys
+
+### Key Bindings
+- `n` - Create new worktree
+- `d` - Delete selected worktree
+- `p` - Prune missing worktrees
+- `c` - Open configuration
+- `i` - Initialize project (if not initialized)
+- `enter` - Open selected worktree in external applications
+- `q` - Quit application
+
+### Status Indicators
+- 🟢 Clean - No uncommitted changes
+- 🟡 Modified - Has uncommitted changes
+- 🔴 Untracked - Has untracked files
+- 📝 Changes - Mixed modified and untracked files
+- ❌ Missing - Worktree directory no longer exists (prunable)
 
 ## Release Process
 
@@ -103,13 +156,16 @@ Releases are automated via GitHub Actions:
 - **Lipgloss**: Styling library for the TUI - defines colors, borders, layouts
 - **Bubbles**: Pre-built TUI components like lists and spinners
 
-## File Structure Notes
+## File Structure
 
-The README.md shows an outdated structure mentioning `cmd/gren/` which doesn't exist. The actual structure is:
-- `main.go` - Entry point
-- `internal/` - All implementation packages
+The actual project structure:
+- `main.go` - Entry point with CLI/TUI routing
+- `internal/core/` - Shared business logic (WorktreeManager)
+- `internal/ui/` - TUI implementation (Bubble Tea components)
+- `internal/cli/` - CLI command handlers
+- `internal/git/` - Git operations and repository interface
+- `internal/config/` - Configuration management and initialization
 - `.github/workflows/` - CI/CD automation
-- No separate `cmd/` directory
 
 ## Common Tasks
 
@@ -121,5 +177,35 @@ The README.md shows an outdated structure mentioning `cmd/gren/` which doesn't e
 ### Adding New TUI Views
 1. Create view renderer in `internal/ui/`
 2. Add state enum to `internal/ui/types.go`
-3. Add state handling in `internal/ui/handlers.go`
-4. Wire up navigation in main update loop
+3. Add state handling in update loop in `internal/ui/model.go`
+4. Wire up navigation and key bindings
+
+### Adding New TUI Features
+1. Add key binding to `KeyMap` struct in `internal/ui/types.go`
+2. Add key binding to `DefaultKeyMap()` function
+3. Implement command function in `internal/ui/commands.go`
+4. Add message type in `internal/ui/messages.go` if async operation
+5. Handle message in main update loop in `internal/ui/model.go`
+6. Update help text in relevant view renderers
+
+## Testing and Development
+
+### Current Working Directory Behavior
+Both TUI and CLI respect the current working directory when:
+- Detecting git repositories
+- Creating worktree configurations
+- Resolving relative paths in configuration
+
+### Error Handling
+The application gracefully handles:
+- Non-git repositories (shows initialization prompt)
+- Missing worktree directories (shows missing status with cleanup option)
+- Failed operations (displays error messages with context)
+- Configuration errors (falls back to sensible defaults)
+
+## Commit Message Guidelines
+
+- Use descriptive commit messages in English
+- Focus on what was changed and why
+- Do not reference external tools or assistants in commit messages
+- Follow conventional commit format when appropriate
