@@ -234,6 +234,7 @@ type KeyMap struct {
 	Delete key.Binding
 	Init   key.Binding
 	Config key.Binding
+	Prune  key.Binding
 }
 
 // DefaultKeyMap returns default key bindings
@@ -282,6 +283,10 @@ func DefaultKeyMap() KeyMap {
 		Config: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "config"),
+		),
+		Prune: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "prune missing"),
 		),
 	}
 }

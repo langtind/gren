@@ -112,6 +112,9 @@ func (m Model) parseWorktreeList(output string) []Worktree {
 			// Skip bare worktrees for now
 		} else if line == "detached" && currentWorktree != nil {
 			currentWorktree.Branch = "detached"
+		} else if strings.HasPrefix(line, "prunable") && currentWorktree != nil {
+			// Mark worktree as missing/prunable
+			currentWorktree.Status = "missing"
 		}
 	}
 

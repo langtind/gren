@@ -706,3 +706,40 @@ func (m Model) openConfigFile(filePath string) tea.Cmd {
 		return configFileOpenedMsg{err: nil} // Success
 	}
 }
+
+// pruneWorktrees removes missing/prunable worktrees from git tracking
+func (m Model) pruneWorktrees() tea.Cmd {
+	return func() tea.Msg {
+		// Run git worktree prune to remove missing worktrees
+		cmd := exec.Command("git", "worktree", "prune", "--verbose")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return pruneCompleteMsg{err: fmt.Errorf("failed to prune worktrees: %w", err)}
+		}
+
+		// Parse the output to count and list pruned worktrees
+		var prunedPaths []string
+		outputStr := string(output)
+		lines := strings.Split(strings.TrimSpace(outputStr), "\n")
+
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && strings.Contains(line, "Removing") {
+				// Extract path from "Removing worktrees/path: gitdir file points to non-existent location"
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) > 0 {
+					path := strings.TrimSpace(strings.TrimPrefix(parts[0], "Removing"))
+					if path != "" {
+						prunedPaths = append(prunedPaths, path)
+					}
+				}
+			}
+		}
+
+		return pruneCompleteMsg{
+			err:         nil,
+			prunedCount: len(prunedPaths),
+			prunedPaths: prunedPaths,
+		}
+	}
+}

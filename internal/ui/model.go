@@ -112,6 +112,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pruneCompleteMsg:
+		// Prune operation complete
+		if msg.err != nil {
+			m.err = fmt.Errorf("prune failed: %w", msg.err)
+		} else if msg.prunedCount > 0 {
+			// Show success message briefly, then refresh worktrees
+			m.err = nil
+			// Refresh worktree list to reflect changes
+			if err := m.refreshWorktrees(); err != nil {
+				m.err = err
+			}
+		}
+		return m, nil
+
 	case worktreeCreatedMsg:
 		if m.createState != nil {
 			if msg.err != nil {
@@ -269,6 +283,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
 				m.currentView = ConfigView
 				return m, m.initializeConfigState()
+			}
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Prune):
+			// Only allow pruning if initialized and we have worktrees
+			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+				return m, m.pruneWorktrees()
 			}
 			return m, nil
 		}

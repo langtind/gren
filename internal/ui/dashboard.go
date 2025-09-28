@@ -129,6 +129,9 @@ func (m Model) dashboardView() string {
 			case "mixed":
 				statusStyle = StatusModifiedStyle
 				statusText = "📝 Changes"
+			case "missing":
+				statusStyle = ErrorStyle
+				statusText = "❌ Missing"
 			default:
 				statusStyle = StatusCleanStyle
 				statusText = "🟢 Clean"
@@ -168,7 +171,7 @@ func (m Model) dashboardView() string {
 		}
 
 		// Help text for worktrees view
-		helpText := HelpStyle.Render("[n] New  [d] Delete  [c] Config  [↑↓] Navigate  [enter] Open in...  [q] Quit")
+		helpText := HelpStyle.Render("[n] New  [d] Delete  [p] Prune missing  [c] Config  [↑↓] Navigate  [enter] Open in...  [q] Quit")
 		content.WriteString("\n")
 		content.WriteString(helpText)
 	}

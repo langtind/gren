@@ -72,3 +72,9 @@ type configInitializedMsg struct {
 type configFileOpenedMsg struct {
 	err error
 }
+
+type pruneCompleteMsg struct {
+	err            error
+	prunedCount    int
+	prunedPaths    []string
+}
