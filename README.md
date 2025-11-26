@@ -119,8 +119,8 @@ cd "$WORKTREE_PATH"
 # Install dependencies
 npm install
 
-# Copy environment files
-cp ../.env .env.local
+# Symlink environment files (stays in sync with main repo)
+ln -sf "../.env" .env.local
 ```
 
 ### Create a worktree
