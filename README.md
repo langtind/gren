@@ -117,7 +117,7 @@ WORKTREE_PATH="$1"
 cd "$WORKTREE_PATH"
 
 # Install dependencies
-npm install
+bun install
 
 # Symlink environment files (stays in sync with main repo)
 ln -sf "../.env" .env.local
@@ -126,14 +126,14 @@ ln -sf "../.env" .env.local
 ### Create a worktree
 
 ```bash
-# Create worktree for a new feature branch
-gren create my-feature
+# Create new branch "my-feature" from current branch
+gren create -n my-feature
 
-# Create from a specific base branch
-gren create bugfix -b develop
+# Create new branch "bugfix" from develop
+gren create -n bugfix -b develop
 
-# Create from an existing remote branch
-gren create feature-123 -e
+# Check out existing branch "feature-123" into a worktree
+gren create -n feature-123 -existing
 ```
 
 The post-create hook runs automatically after worktree creation.
