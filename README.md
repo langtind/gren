@@ -4,6 +4,8 @@ A beautiful terminal UI for managing Git worktrees efficiently.
 
 Gren makes it easy to create, manage, and switch between Git worktrees with an intuitive interface. Perfect for developers who work with multiple branches simultaneously or need to quickly test different features without stashing changes.
 
+![gren screenshot](assets/screenshot.png)
+
 ## Features
 
 - ✨ Beautiful, intuitive TUI interface built with Bubble Tea
