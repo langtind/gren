@@ -96,6 +96,48 @@ gren --help   # Show help and keyboard shortcuts
 gren --version # Show version information
 ```
 
+## CLI Examples
+
+### Initialize a project
+
+```bash
+cd my-project
+gren init
+```
+
+This creates `.gren/config.json` and `.gren/post-create.sh` in your repository.
+
+### Configure post-create hook
+
+Edit `.gren/post-create.sh` to run setup commands when creating new worktrees:
+
+```bash
+#!/bin/bash
+WORKTREE_PATH="$1"
+cd "$WORKTREE_PATH"
+
+# Install dependencies
+npm install
+
+# Copy environment files
+cp ../.env .env.local
+```
+
+### Create a worktree
+
+```bash
+# Create worktree for a new feature branch
+gren create my-feature
+
+# Create from a specific base branch
+gren create bugfix -b develop
+
+# Create from an existing remote branch
+gren create feature-123 -e
+```
+
+The post-create hook runs automatically after worktree creation.
+
 ## Development
 
 This project uses:
