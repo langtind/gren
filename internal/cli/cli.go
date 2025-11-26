@@ -11,12 +11,13 @@ import (
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/git"
+	"github.com/langtind/gren/internal/logging"
 )
 
 // CLI handles command-line interface operations
 type CLI struct {
-	gitRepo        git.Repository
-	configManager  *config.Manager
+	gitRepo         git.Repository
+	configManager   *config.Manager
 	worktreeManager *core.WorktreeManager
 }
 
@@ -33,10 +34,12 @@ func NewCLI(gitRepo git.Repository, configManager *config.Manager) *CLI {
 // ParseAndExecute parses command line arguments and executes the appropriate command
 func (c *CLI) ParseAndExecute(args []string) error {
 	if len(args) < 2 {
+		logging.Error("CLI: no command provided")
 		return fmt.Errorf("no command provided")
 	}
 
 	command := args[1]
+	logging.Info("CLI command: %s, args: %v", command, args[2:])
 
 	switch command {
 	case "create":
@@ -47,7 +50,12 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleDelete(args[2:])
 	case "init":
 		return c.handleInit(args[2:])
+	case "navigate", "nav", "cd":
+		return c.handleNavigate(args[2:])
+	case "shell-init":
+		return c.handleShellInit(args[2:])
 	default:
+		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
 	}
 }
@@ -77,20 +85,42 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 
 	if *name == "" {
+		logging.Error("CLI create: worktree name is required")
 		fs.Usage()
 		return fmt.Errorf("worktree name is required")
 	}
 
+	// If no base branch specified for CLI, default to current branch
+	effectiveBaseBranch := *baseBranch
+	if effectiveBaseBranch == "" && !*existing {
+		currentBranch, err := c.gitRepo.GetCurrentBranch(context.Background())
+		if err != nil {
+			logging.Warn("CLI create: failed to get current branch, will use recommended: %v", err)
+		} else {
+			effectiveBaseBranch = currentBranch
+			logging.Debug("CLI create: using current branch as base: %s", effectiveBaseBranch)
+		}
+	}
+
+	logging.Info("CLI create: name=%s, branch=%s, base=%s, existing=%v, dir=%s",
+		*name, *branch, effectiveBaseBranch, *existing, *worktreeDir)
+
 	req := core.CreateWorktreeRequest{
 		Name:        *name,
 		Branch:      *branch,
-		BaseBranch:  *baseBranch,
+		BaseBranch:  effectiveBaseBranch,
 		IsNewBranch: !*existing,
 		WorktreeDir: *worktreeDir,
 	}
 
 	ctx := context.Background()
-	return c.worktreeManager.CreateWorktree(ctx, req)
+	err := c.worktreeManager.CreateWorktree(ctx, req)
+	if err != nil {
+		logging.Error("CLI create failed: %v", err)
+	} else {
+		logging.Info("CLI create succeeded: %s", *name)
+	}
+	return err
 }
 
 // handleList handles the list command
@@ -109,11 +139,16 @@ func (c *CLI) handleList(args []string) error {
 		return err
 	}
 
+	logging.Debug("CLI list: verbose=%v", *verbose)
+
 	ctx := context.Background()
 	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
 	if err != nil {
+		logging.Error("CLI list failed: %v", err)
 		return err
 	}
+
+	logging.Info("CLI list: found %d worktrees", len(worktrees))
 
 	if len(worktrees) == 0 {
 		fmt.Println("No worktrees found")
@@ -166,11 +201,13 @@ func (c *CLI) handleDelete(args []string) error {
 	}
 
 	if fs.NArg() == 0 {
+		logging.Error("CLI delete: worktree name is required")
 		fs.Usage()
 		return fmt.Errorf("worktree name is required")
 	}
 
 	worktreeName := fs.Arg(0)
+	logging.Info("CLI delete: worktree=%s, force=%v", worktreeName, *force)
 
 	// Confirmation unless force is specified
 	if !*force {
@@ -179,13 +216,21 @@ func (c *CLI) handleDelete(args []string) error {
 		fmt.Scanln(&response)
 		response = strings.ToLower(strings.TrimSpace(response))
 		if response != "y" && response != "yes" {
+			logging.Info("CLI delete: user cancelled deletion of %s", worktreeName)
 			fmt.Println("Cancelled")
 			return nil
 		}
+		logging.Info("CLI delete: user confirmed deletion of %s", worktreeName)
 	}
 
 	ctx := context.Background()
-	return c.worktreeManager.DeleteWorktree(ctx, worktreeName)
+	err := c.worktreeManager.DeleteWorktree(ctx, worktreeName)
+	if err != nil {
+		logging.Error("CLI delete failed: %v", err)
+	} else {
+		logging.Info("CLI delete succeeded: %s", worktreeName)
+	}
+	return err
 }
 
 // handleInit handles the init command (non-interactive)
@@ -210,15 +255,21 @@ func (c *CLI) handleInit(args []string) error {
 		ctx := context.Background()
 		repoInfo, err := c.gitRepo.GetRepoInfo(ctx)
 		if err != nil {
+			logging.Error("CLI init: failed to get repo info: %v", err)
 			return fmt.Errorf("failed to get repository info: %w", err)
 		}
 		projectName = repoInfo.Name
 	}
 
+	logging.Info("CLI init: project=%s", projectName)
+
 	result := config.Initialize(projectName)
 	if result.Error != nil {
+		logging.Error("CLI init failed: %v", result.Error)
 		return fmt.Errorf("initialization failed: %w", result.Error)
 	}
+
+	logging.Info("CLI init succeeded: configCreated=%v, hookCreated=%v", result.ConfigCreated, result.HookCreated)
 
 	fmt.Printf("✅ %s\n", result.Message)
 	if result.ConfigCreated {
@@ -231,6 +282,169 @@ func (c *CLI) handleInit(args []string) error {
 	return nil
 }
 
+// handleNavigate handles the navigate command
+func (c *CLI) handleNavigate(args []string) error {
+	fs := flag.NewFlagSet("navigate", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren navigate [worktree-name]\n")
+		fmt.Fprintf(fs.Output(), "\nNavigate to a worktree directory by writing command to temp file\n\n")
+		fmt.Fprintf(fs.Output(), "Examples:\n")
+		fmt.Fprintf(fs.Output(), "  gren navigate feature-branch\n")
+		fmt.Fprintf(fs.Output(), "  gren nav feature-branch\n")
+		fmt.Fprintf(fs.Output(), "  gren cd feature-branch\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() == 0 {
+		logging.Error("CLI navigate: worktree name is required")
+		fs.Usage()
+		return fmt.Errorf("worktree name is required")
+	}
+
+	worktreeName := fs.Arg(0)
+	logging.Info("CLI navigate: worktree=%s", worktreeName)
+
+	// Get list of worktrees to find the path
+	ctx := context.Background()
+	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
+	if err != nil {
+		logging.Error("CLI navigate: failed to list worktrees: %v", err)
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	// Find the worktree by name
+	var targetWorktree *core.WorktreeInfo
+	for _, wt := range worktrees {
+		if wt.Name == worktreeName {
+			targetWorktree = &wt
+			break
+		}
+	}
+
+	if targetWorktree == nil {
+		logging.Error("CLI navigate: worktree '%s' not found", worktreeName)
+		return fmt.Errorf("worktree '%s' not found", worktreeName)
+	}
+
+	// Write navigation command to temp file
+	tempFile := "/tmp/gren_navigate"
+	command := fmt.Sprintf("cd \"%s\"", targetWorktree.Path)
+
+	if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
+		logging.Error("CLI navigate: failed to write navigation command: %v", err)
+		return fmt.Errorf("failed to write navigation command: %w", err)
+	}
+
+	logging.Info("CLI navigate: wrote navigation command to %s for path %s", tempFile, targetWorktree.Path)
+	fmt.Printf("Navigation command written. Use the gren wrapper script to navigate to %s\n", targetWorktree.Path)
+	return nil
+}
+
+// handleShellInit handles the shell-init command for setting up navigation
+func (c *CLI) handleShellInit(args []string) error {
+	fs := flag.NewFlagSet("shell-init", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren shell-init <shell>\n")
+		fmt.Fprintf(fs.Output(), "\nGenerate shell integration code for navigation functionality\n\n")
+		fmt.Fprintf(fs.Output(), "Supported shells: bash, zsh, fish\n\n")
+		fmt.Fprintf(fs.Output(), "Examples:\n")
+		fmt.Fprintf(fs.Output(), "  eval \"$(gren shell-init zsh)\"     # Add to ~/.zshrc\n")
+		fmt.Fprintf(fs.Output(), "  eval \"$(gren shell-init bash)\"    # Add to ~/.bashrc\n")
+		fmt.Fprintf(fs.Output(), "  gren shell-init fish >> ~/.config/fish/config.fish\n")
+		fmt.Fprintf(fs.Output(), "\nAfter setup, use gren normally:\n")
+		fmt.Fprintf(fs.Output(), "  gren                         # TUI with navigation (press 'g')\n")
+		fmt.Fprintf(fs.Output(), "  gren navigate <name>         # Navigate to worktree\n")
+		fmt.Fprintf(fs.Output(), "  gcd <name>                   # Short alias\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() == 0 {
+		logging.Error("CLI shell-init: shell type required")
+		fs.Usage()
+		return fmt.Errorf("shell type required")
+	}
+
+	shell := fs.Arg(0)
+	logging.Info("CLI shell-init: shell=%s", shell)
+	switch shell {
+	case "bash", "zsh":
+		fmt.Print(bashZshInit)
+	case "fish":
+		fmt.Print(fishInit)
+	default:
+		logging.Error("CLI shell-init: unsupported shell: %s", shell)
+		return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish)", shell)
+	}
+
+	return nil
+}
+
+const bashZshInit = `# gren navigation wrapper
+_gren_original_command=$(which gren)
+
+gren() {
+    local TEMP_FILE="/tmp/gren_navigate"
+    rm -f "$TEMP_FILE"
+
+    "$_gren_original_command" "$@"
+    local exit_code=$?
+
+    if [ -f "$TEMP_FILE" ]; then
+        local COMMAND=$(cat "$TEMP_FILE")
+        rm -f "$TEMP_FILE"
+        eval "$COMMAND"
+        echo "📂 Now in: $(pwd)"
+        # Auto-allow direnv if available
+        if command -v direnv &> /dev/null && [ -f ".envrc" ]; then
+            direnv allow 2>/dev/null
+        fi
+    fi
+
+    return $exit_code
+}
+
+# Convenient aliases for navigation
+alias gcd='gren navigate'
+alias gnav='gren navigate'
+`
+
+const fishInit = `# gren navigation wrapper for fish shell
+set _gren_original_command (which gren)
+
+function gren
+    set TEMP_FILE "/tmp/gren_navigate"
+    rm -f $TEMP_FILE
+
+    $_gren_original_command $argv
+    set exit_code $status
+
+    if test -f $TEMP_FILE
+        set COMMAND (cat $TEMP_FILE)
+        rm -f $TEMP_FILE
+        eval $COMMAND
+        echo "📂 Now in: "(pwd)
+        # Auto-allow direnv if available
+        if command -v direnv &> /dev/null; and test -f ".envrc"
+            direnv allow 2>/dev/null
+        end
+    end
+
+    return $exit_code
+end
+
+# Convenient aliases for navigation
+alias gcd='gren navigate'
+alias gnav='gren navigate'
+`
+
 // ShowHelp shows the general help message
 func (c *CLI) ShowHelp() {
 	fmt.Println("gren - Git Worktree Manager")
@@ -240,6 +454,8 @@ func (c *CLI) ShowHelp() {
 	fmt.Println("  gren create -n <name>   Create new worktree")
 	fmt.Println("  gren list              List all worktrees")
 	fmt.Println("  gren delete <name>     Delete a worktree")
+	fmt.Println("  gren navigate <name>   Navigate to worktree (requires shell setup)")
+	fmt.Println("  gren shell-init <shell> Generate shell integration for navigation")
 	fmt.Println("  gren init              Initialize gren in repository")
 	fmt.Println()
 	fmt.Println("Global Options:")

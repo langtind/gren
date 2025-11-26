@@ -51,10 +51,9 @@ const (
 type InitState struct {
 	currentStep       InitStep
 	detectedFiles     []DetectedFile
-	copyPatterns      []CopyPattern
 	selected          int
 	worktreeDir       string
-	customizationMode string // "", "worktree", "patterns", "postcreate"
+	customizationMode string // "", "worktree", "postcreate"
 	editingText       string
 	postCreateScript  string
 	analysisComplete  bool   // whether project analysis is complete
@@ -62,22 +61,12 @@ type InitState struct {
 	postCreateCmd     string // detected post-create command
 }
 
-// CopyPattern represents a file pattern to copy to worktrees
-type CopyPattern struct {
-	Pattern     string
-	Type        string // "env", "config", "tool"
-	IsGitIgnored bool
-	Description string
-	Enabled     bool   // whether this pattern is enabled
-	Detected    bool   // whether this pattern was detected automatically
-}
-
 // DetectedFile represents a detected file that could be useful for worktrees
 type DetectedFile struct {
-	Path        string
-	Type        string // "env", "config", "tool"
+	Path         string
+	Type         string // "env", "config", "tool"
 	IsGitIgnored bool
-	Description string
+	Description  string
 }
 
 // PostCreateAction represents an action available after worktree creation
@@ -138,18 +127,23 @@ type BranchStatus struct {
 
 // CreateState holds the state for worktree creation
 type CreateState struct {
-	currentStep      CreateStep
-	createMode       CreateMode
-	branchName       string
-	baseBranch       string
-	branchStatuses   []BranchStatus
-	availableBranches []BranchStatus // For existing branch selection
-	selectedBranch   int
-	selectedMode     int  // For branch mode selection
-	showWarning      bool
-	warningAccepted  bool
-	selectedAction   int        // For the post-create actions
-	actionsList      list.Model // Dropdown menu for post-create actions
+	currentStep               CreateStep
+	createMode                CreateMode
+	branchName                string
+	baseBranch                string
+	branchStatuses            []BranchStatus
+	filteredBranches          []BranchStatus // Filtered list for search (base branch)
+	availableBranches         []BranchStatus // For existing branch selection
+	filteredAvailableBranches []BranchStatus // Filtered list for search (existing branch)
+	selectedBranch            int
+	scrollOffset              int    // For scrolling long branch lists
+	searchQuery               string // For fzf-like filtering
+	isSearching               bool   // Whether search mode is active
+	selectedMode              int    // For branch mode selection
+	showWarning               bool
+	warningAccepted           bool
+	selectedAction            int        // For the post-create actions
+	actionsList               list.Model // Dropdown menu for post-create actions
 }
 
 // DeleteStep represents the current step in worktree deletion
@@ -164,9 +158,9 @@ const (
 
 // OpenInState holds the state for the "Open in..." view
 type OpenInState struct {
-	worktreePath    string               // Path of the selected worktree
-	actions         []PostCreateAction   // Available actions
-	selectedIndex   int                  // Currently selected action index
+	worktreePath  string             // Path of the selected worktree
+	actions       []PostCreateAction // Available actions
+	selectedIndex int                // Currently selected action index
 }
 
 // ConfigFile represents a configuration file
@@ -186,9 +180,9 @@ type ConfigState struct {
 // DeleteState holds the state for worktree deletion
 type DeleteState struct {
 	currentStep       DeleteStep
-	selectedWorktrees []int      // Indices of selected worktrees for deletion
+	selectedWorktrees []int // Indices of selected worktrees for deletion
 	warnings          []string
-	targetWorktree    *Worktree  // Specific worktree to delete (for single deletion)
+	targetWorktree    *Worktree // Specific worktree to delete (for single deletion)
 }
 
 // Model holds the entire application state
@@ -199,16 +193,16 @@ type Model struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
 	// State
-	repoInfo     *git.RepoInfo
-	config       *config.Config
-	worktrees    []Worktree
-	selected     int
-	err          error
-	initState    *InitState
-	createState  *CreateState
-	deleteState  *DeleteState
-	openInState  *OpenInState
-	configState  *ConfigState
+	repoInfo    *git.RepoInfo
+	config      *config.Config
+	worktrees   []Worktree
+	selected    int
+	err         error
+	initState   *InitState
+	createState *CreateState
+	deleteState *DeleteState
+	openInState *OpenInState
+	configState *ConfigState
 
 	// Screen dimensions
 	width  int
@@ -223,18 +217,19 @@ type Model struct {
 
 // KeyMap defines key bindings for the application
 type KeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Left   key.Binding
-	Right  key.Binding
-	Enter  key.Binding
-	Back   key.Binding
-	Quit   key.Binding
-	New    key.Binding
-	Delete key.Binding
-	Init   key.Binding
-	Config key.Binding
-	Prune  key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Left     key.Binding
+	Right    key.Binding
+	Enter    key.Binding
+	Back     key.Binding
+	Quit     key.Binding
+	New      key.Binding
+	Delete   key.Binding
+	Init     key.Binding
+	Config   key.Binding
+	Prune    key.Binding
+	Navigate key.Binding
 }
 
 // DefaultKeyMap returns default key bindings
@@ -287,6 +282,10 @@ func DefaultKeyMap() KeyMap {
 		Prune: key.NewBinding(
 			key.WithKeys("p"),
 			key.WithHelp("p", "prune missing"),
+		),
+		Navigate: key.NewBinding(
+			key.WithKeys("g"),
+			key.WithHelp("g", "navigate to worktree"),
 		),
 	}
 }

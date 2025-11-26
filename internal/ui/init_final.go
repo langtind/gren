@@ -50,7 +50,7 @@ func (m Model) renderCommitConfirmStep() string {
 
 	content.WriteString(WorktreePathStyle.Render("The configuration files have been created:"))
 	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   📄 .gren/config.yml"))
+	content.WriteString(WorktreePathStyle.Render("   📄 .gren/config.json"))
 	content.WriteString("\n")
 	content.WriteString(WorktreePathStyle.Render("   📄 .gren/post-create.sh"))
 	content.WriteString("\n")
@@ -96,7 +96,7 @@ func (m Model) renderFinalStep() string {
 	content.WriteString(WorktreeNameStyle.Render("Quick start:"))
 	content.WriteString("\n\n")
 
-	content.WriteString(WorktreeSelectedStyle.Width(m.width-8).Render("Press 'n' to create your first worktree"))
+	content.WriteString(WorktreeSelectedStyle.Width(m.width - 8).Render("Press 'n' to create your first worktree"))
 	content.WriteString("\n\n")
 
 	content.WriteString(WorktreePathStyle.Render("Each worktree will be automatically set up with:"))
@@ -110,7 +110,7 @@ func (m Model) renderFinalStep() string {
 
 	content.WriteString(WorktreeNameStyle.Render("Documentation:"))
 	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   • Configuration: .gren/config.yml"))
+	content.WriteString(WorktreePathStyle.Render("   • Configuration: .gren/config.json"))
 	content.WriteString("\n")
 	content.WriteString(WorktreePathStyle.Render("   • Setup script: .gren/post-create.sh"))
 	content.WriteString("\n\n")

@@ -13,7 +13,7 @@ func (m Model) getAvailableActions() []PostCreateAction {
 		return []PostCreateAction{}
 	}
 
-	worktreePath := fmt.Sprintf("../gren-worktrees/%s", m.createState.branchName)
+	worktreePath := m.getWorktreePath(m.createState.branchName)
 	return m.getActionsForPath(worktreePath, "Return to dashboard")
 }
 
@@ -22,11 +22,19 @@ func (m Model) getActionsForPath(worktreePath, backActionName string) []PostCrea
 
 	allActions := []PostCreateAction{
 		{
+			Name:        "Navigate to folder",
+			Icon:        "📁",
+			Command:     "navigate", // Special marker - handled in handlers.go
+			Args:        []string{worktreePath},
+			Available:   true, // Always available
+			Description: "Navigate to worktree in current terminal",
+		},
+		{
 			Name:        "Open in Terminal",
 			Icon:        "🖥️",
 			Command:     m.getTerminalCommand(),
 			Args:        m.getTerminalArgs(worktreePath),
-			Description: "Open worktree directory in terminal",
+			Description: "Open worktree directory in new terminal",
 		},
 		{
 			Name:        "Open in VS Code",
@@ -68,7 +76,8 @@ func (m Model) getActionsForPath(worktreePath, backActionName string) []PostCrea
 	// Check which commands are available and collect them
 	var availableActions []PostCreateAction
 	for _, action := range allActions {
-		if isCommandAvailable(action.Command) {
+		// Include if already marked available (like "navigate") or if command exists
+		if action.Available || isCommandAvailable(action.Command) {
 			action.Available = true
 			availableActions = append(availableActions, action)
 		}
@@ -180,6 +189,12 @@ func (m Model) executeAction(action PostCreateAction, worktreePath string) error
 
 	fmt.Printf("DEBUG: Command started successfully\n")
 	return nil
+}
+
+// sanitizeBranchForPath converts a branch name to a valid directory name
+// e.g., "feature/testing" -> "feature-testing"
+func sanitizeBranchForPath(branchName string) string {
+	return strings.ReplaceAll(branchName, "/", "-")
 }
 
 // isValidBranchName validates git branch names

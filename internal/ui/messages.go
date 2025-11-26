@@ -14,9 +14,9 @@ type initializeMsg struct {
 }
 
 type createInitMsg struct {
-	branchStatuses    []BranchStatus
-	recommendedBase   string
-	err               error
+	branchStatuses  []BranchStatus
+	recommendedBase string
+	err             error
 }
 
 type deleteInitMsg struct {
@@ -74,7 +74,7 @@ type configFileOpenedMsg struct {
 }
 
 type pruneCompleteMsg struct {
-	err            error
-	prunedCount    int
-	prunedPaths    []string
+	err         error
+	prunedCount int
+	prunedPaths []string
 }

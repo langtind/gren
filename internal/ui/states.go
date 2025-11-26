@@ -123,17 +123,15 @@ func (m Model) parseWorktreeList(output string) []Worktree {
 		worktrees = append(worktrees, *currentWorktree)
 	}
 
-	// Mark the current worktree
+	// Mark current worktree and get status for all worktrees
 	if len(worktrees) > 0 {
 		cwd, _ := os.Getwd()
 		for i := range worktrees {
-			if worktrees[i].Path == cwd {
-				worktrees[i].IsCurrent = true
-				// Get status for current worktree
-				if status, err := m.getWorktreeStatus(worktrees[i].Path, true); err == nil {
-					worktrees[i].Status = status
-				}
-				break
+			isCurrent := worktrees[i].Path == cwd
+			worktrees[i].IsCurrent = isCurrent
+			// Get status for all worktrees (not just current)
+			if status, err := m.getWorktreeStatus(worktrees[i].Path, isCurrent); err == nil {
+				worktrees[i].Status = status
 			}
 		}
 	}
@@ -141,77 +139,124 @@ func (m Model) parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
+// WorktreeStatusInfo contains detailed status information for a worktree
+type WorktreeStatusInfo struct {
+	Status              string // "clean", "modified", "untracked", "mixed", "unpushed", "missing"
+	HasModified         bool
+	HasUntracked        bool
+	UnpushedCount       int
+	IsNotPushedToRemote bool // Branch doesn't exist on remote at all
+}
+
 // getWorktreeStatus gets the git status for a worktree
 func (m Model) getWorktreeStatus(worktreePath string, isCurrent bool) (string, error) {
-	if !isCurrent {
-		// For non-current worktrees, we need to check status in that directory
-		// This is simplified - real implementation would be more sophisticated
-		return "clean", nil
-	}
+	info := m.getWorktreeStatusInfo(worktreePath, isCurrent)
+	return info.Status, nil
+}
 
-	// For current worktree, get actual status using git command
-	cmd := exec.Command("git", "status", "--porcelain")
-	if !isCurrent {
-		cmd.Dir = worktreePath
+// getWorktreeStatusInfo gets detailed status information for a worktree
+func (m Model) getWorktreeStatusInfo(worktreePath string, isCurrent bool) WorktreeStatusInfo {
+	info := WorktreeStatusInfo{Status: "clean"}
+
+	// Get git status for uncommitted/untracked changes
+	var cmd *exec.Cmd
+	if isCurrent {
+		cmd = exec.Command("git", "status", "--porcelain")
+	} else {
+		cmd = exec.Command("git", "-C", worktreePath, "status", "--porcelain")
 	}
 
 	output, err := cmd.Output()
+	if err == nil {
+		statusLines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range statusLines {
+			if len(line) < 2 {
+				continue
+			}
+			// Check staged/modified status
+			if line[0] != ' ' && line[0] != '?' {
+				info.HasModified = true
+			}
+			if line[1] != ' ' && line[1] != '?' {
+				info.HasModified = true
+			}
+			// Check untracked status
+			if line[0] == '?' && line[1] == '?' {
+				info.HasUntracked = true
+			}
+		}
+	}
+
+	// Check for unpushed commits
+	var unpushedCmd *exec.Cmd
+	if isCurrent {
+		unpushedCmd = exec.Command("git", "log", "@{u}..HEAD", "--oneline")
+	} else {
+		unpushedCmd = exec.Command("git", "-C", worktreePath, "log", "@{u}..HEAD", "--oneline")
+	}
+
+	unpushedOutput, err := unpushedCmd.Output()
 	if err != nil {
-		return "unknown", err
+		// No upstream - check if branch exists on remote
+		var branchCmd *exec.Cmd
+		if isCurrent {
+			branchCmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		} else {
+			branchCmd = exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+		}
+		branchOutput, _ := branchCmd.Output()
+		branch := strings.TrimSpace(string(branchOutput))
+
+		if branch != "" && branch != "HEAD" {
+			// Check if branch exists on remote
+			var remoteCheckCmd *exec.Cmd
+			if isCurrent {
+				remoteCheckCmd = exec.Command("git", "rev-parse", "--verify", "origin/"+branch)
+			} else {
+				remoteCheckCmd = exec.Command("git", "-C", worktreePath, "rev-parse", "--verify", "origin/"+branch)
+			}
+			if remoteCheckCmd.Run() != nil {
+				info.IsNotPushedToRemote = true
+			}
+		}
+	} else {
+		unpushedLines := strings.Split(strings.TrimSpace(string(unpushedOutput)), "\n")
+		if len(unpushedLines) > 0 && unpushedLines[0] != "" {
+			info.UnpushedCount = len(unpushedLines)
+		}
 	}
 
-	statusLines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(statusLines) == 1 && statusLines[0] == "" {
-		return "clean", nil
+	// Determine overall status
+	if info.HasModified && info.HasUntracked {
+		info.Status = "mixed"
+	} else if info.HasModified {
+		info.Status = "modified"
+	} else if info.HasUntracked {
+		info.Status = "untracked"
+	} else if info.UnpushedCount > 0 || info.IsNotPushedToRemote {
+		info.Status = "unpushed"
 	}
 
-	hasModified := false
-	hasUntracked := false
-
-	for _, line := range statusLines {
-		if len(line) < 2 {
-			continue
-		}
-
-		// Check staged/modified status
-		if line[0] != ' ' && line[0] != '?' {
-			hasModified = true
-		}
-		if line[1] != ' ' && line[1] != '?' {
-			hasModified = true
-		}
-
-		// Check untracked status
-		if line[0] == '?' && line[1] == '?' {
-			hasUntracked = true
-		}
-	}
-
-	if hasModified && hasUntracked {
-		return "mixed", nil
-	} else if hasModified {
-		return "modified", nil
-	} else if hasUntracked {
-		return "untracked", nil
-	}
-
-	return "clean", nil
+	return info
 }
 
 // setupCreateState initializes create state from message
 func (m *Model) setupCreateState(msg createInitMsg) {
 	m.createState = &CreateState{
-		currentStep:      CreateStepBranchMode,
-		createMode:       CreateModeNewBranch,
-		branchName:       "",
-		baseBranch:       msg.recommendedBase,
-		branchStatuses:   msg.branchStatuses,
-		availableBranches: []BranchStatus{}, // Will be populated when needed
-		selectedBranch:   0,
-		selectedMode:     0, // Default to "Create new branch"
-		showWarning:      false,
-		warningAccepted:  false,
-		selectedAction:   0,
+		currentStep:       CreateStepBranchMode,
+		createMode:        CreateModeNewBranch,
+		branchName:        "",
+		baseBranch:        msg.recommendedBase,
+		branchStatuses:    msg.branchStatuses,
+		filteredBranches:  msg.branchStatuses, // Initialize with all branches
+		availableBranches: []BranchStatus{},   // Will be populated when needed
+		selectedBranch:    0,
+		scrollOffset:      0,
+		searchQuery:       "",
+		selectedMode:      0, // Default to "Create new branch"
+		showWarning:       false,
+		warningAccepted:   false,
+		selectedAction:    0,
 	}
 
 	// Find the index of recommended base branch
@@ -221,6 +266,104 @@ func (m *Model) setupCreateState(msg createInitMsg) {
 			break
 		}
 	}
+
+	// Calculate scroll offset to center the selected branch in the visible window
+	m.centerScrollOnSelectedBranch()
+}
+
+// filterBranches filters the branch list based on the search query (fzf-like)
+func (m *Model) filterBranches() {
+	if m.createState == nil {
+		return
+	}
+
+	query := strings.ToLower(m.createState.searchQuery)
+	if query == "" {
+		m.createState.filteredBranches = m.createState.branchStatuses
+		m.createState.selectedBranch = 0
+		m.centerScrollOnSelectedBranch()
+		return
+	}
+
+	// Filter branches that contain the search query (case-insensitive)
+	var filtered []BranchStatus
+	for _, status := range m.createState.branchStatuses {
+		if strings.Contains(strings.ToLower(status.Name), query) {
+			filtered = append(filtered, status)
+		}
+	}
+
+	m.createState.filteredBranches = filtered
+	m.createState.selectedBranch = 0
+	m.createState.scrollOffset = 0
+}
+
+// filterAvailableBranches filters the available branches list based on the search query (fzf-like)
+func (m *Model) filterAvailableBranches() {
+	if m.createState == nil {
+		return
+	}
+
+	query := strings.ToLower(m.createState.searchQuery)
+	if query == "" {
+		m.createState.filteredAvailableBranches = m.createState.availableBranches
+		m.createState.selectedBranch = 0
+		m.centerScrollOnSelectedBranch()
+		return
+	}
+
+	// Filter branches that contain the search query (case-insensitive)
+	var filtered []BranchStatus
+	for _, status := range m.createState.availableBranches {
+		if strings.Contains(strings.ToLower(status.Name), query) {
+			filtered = append(filtered, status)
+		}
+	}
+
+	m.createState.filteredAvailableBranches = filtered
+	m.createState.selectedBranch = 0
+	m.createState.scrollOffset = 0
+}
+
+// centerScrollOnSelectedBranch calculates scroll offset to center the selected branch
+func (m *Model) centerScrollOnSelectedBranch() {
+	if m.createState == nil {
+		return
+	}
+
+	// Calculate visible window size (same calculation as in renderBaseBranchStep)
+	maxVisible := m.height - 15
+	if maxVisible < 5 {
+		maxVisible = 5
+	}
+	if maxVisible > 20 {
+		maxVisible = 20
+	}
+
+	branches := m.createState.filteredBranches
+	if len(branches) == 0 {
+		branches = m.createState.branchStatuses
+	}
+	totalBranches := len(branches)
+
+	// Center the selected branch in the visible window
+	selectedIdx := m.createState.selectedBranch
+	halfVisible := maxVisible / 2
+
+	// Calculate offset to put selected branch in the middle
+	offset := selectedIdx - halfVisible
+	if offset < 0 {
+		offset = 0
+	}
+	// Don't scroll past the end
+	if offset > totalBranches-maxVisible {
+		offset = totalBranches - maxVisible
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	m.createState.scrollOffset = offset
 }
 
 // setupDeleteState initializes delete state
@@ -245,9 +388,9 @@ func (m *Model) setupDeleteStateForWorktree(worktree Worktree) {
 // initializeOpenInState initializes the OpenIn state with actions
 func (m *Model) initializeOpenInStateFromMsg(msg openInInitializedMsg) {
 	m.openInState = &OpenInState{
-		worktreePath:    msg.worktreePath,
-		actions:         msg.actions,
-		selectedIndex:   0,
+		worktreePath:  msg.worktreePath,
+		actions:       msg.actions,
+		selectedIndex: 0,
 	}
 }
 
@@ -344,12 +487,11 @@ func (m Model) generateSetupScript() string {
 
 	script.WriteString("echo 'Setting up worktree...'\n\n")
 
-	// Copy environment files
-	if m.initState != nil && len(m.initState.copyPatterns) > 0 {
-		script.WriteString("# Copy configuration files\n")
-		copyCommands := m.generateCopyCommands([]string{})
-		for _, cmd := range copyCommands {
-			script.WriteString(fmt.Sprintf("%s\n", cmd))
+	// Symlink environment files
+	if m.initState != nil && len(m.initState.detectedFiles) > 0 {
+		script.WriteString("# Symlink configuration files\n")
+		for _, file := range m.initState.detectedFiles {
+			script.WriteString(fmt.Sprintf("ln -sf \"$REPO_ROOT/%s\" . 2>/dev/null || true\n", file.Path))
 		}
 		script.WriteString("\n")
 	}
@@ -367,32 +509,11 @@ func (m Model) generateSetupScript() string {
 	return script.String()
 }
 
-// generateCopyCommands generates copy commands for patterns
-func (m Model) generateCopyCommands(patterns []string) []string {
-	var commands []string
-
-	// Default patterns if none provided
-	if len(patterns) == 0 {
-		patterns = []string{".env*", ".nvmrc", ".node-version"}
-	}
-
-	for _, pattern := range patterns {
-		// Simple copy command - real implementation would be more sophisticated
-		commands = append(commands, fmt.Sprintf("cp -f ../%s . 2>/dev/null || true", pattern))
-	}
-
-	return commands
-}
-
 // generateConfigFile generates the gren configuration file
 func (m Model) generateConfigFile() string {
 	config := `# Gren Worktree Manager Configuration
 worktree_dir: ../gren-worktrees
-copy_patterns:
-  - .env*
-  - .nvmrc
-  - .node-version
-post_create_script: .gren/post-create.sh
+post_create_hook: .gren/post-create.sh
 `
 	return config
 }
@@ -416,7 +537,7 @@ func (m Model) createAndOpenScript() tea.Cmd {
 		}
 
 		// Write config file
-		configPath := ".gren/config.yml"
+		configPath := ".gren/config.json"
 		if err := os.WriteFile(configPath, []byte(configFile), 0644); err != nil {
 			return scriptCreateCompleteMsg{err: err}
 		}

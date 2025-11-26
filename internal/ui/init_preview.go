@@ -28,22 +28,15 @@ func (m Model) renderPreviewStep() string {
 	}
 	content.WriteString("\n")
 
-	// File patterns
-	content.WriteString(WorktreeNameStyle.Render("📋 File Patterns"))
+	// Detected files to symlink
+	content.WriteString(WorktreeNameStyle.Render("🔗 Files to Symlink"))
 	content.WriteString("\n")
-	if len(m.initState.copyPatterns) == 0 {
-		content.WriteString(WorktreePathStyle.Render("   • No file patterns configured"))
+	if len(m.initState.detectedFiles) == 0 {
+		content.WriteString(WorktreePathStyle.Render("   • No gitignored files detected"))
 	} else {
-		enabledCount := 0
-		for _, pattern := range m.initState.copyPatterns {
-			if pattern.Enabled {
-				enabledCount++
-				content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   • %s (%s)", pattern.Pattern, pattern.Type)))
-				content.WriteString("\n")
-			}
-		}
-		if enabledCount == 0 {
-			content.WriteString(WorktreePathStyle.Render("   • No patterns enabled"))
+		for _, file := range m.initState.detectedFiles {
+			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   • %s (%s)", file.Path, file.Type)))
+			content.WriteString("\n")
 		}
 	}
 	content.WriteString("\n")
@@ -51,7 +44,7 @@ func (m Model) renderPreviewStep() string {
 	// Generated files preview
 	content.WriteString(WorktreeNameStyle.Render("📄 Files to be created"))
 	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   • .gren/config.yml        (main configuration)"))
+	content.WriteString(WorktreePathStyle.Render("   • .gren/config.json       (main configuration)"))
 	content.WriteString("\n")
 	content.WriteString(WorktreePathStyle.Render("   • .gren/post-create.sh    (setup script)"))
 	content.WriteString("\n")
@@ -89,7 +82,7 @@ func (m Model) renderPreviewStep() string {
 			prefix = "❌ "
 		}
 
-		content.WriteString(style.Width(m.width-8).Render(fmt.Sprintf("%s%s", prefix, option)))
+		content.WriteString(style.Width(m.width - 8).Render(fmt.Sprintf("%s%s", prefix, option)))
 		content.WriteString("\n")
 	}
 
@@ -130,7 +123,7 @@ func (m Model) renderCreatedStep() string {
 
 	content.WriteString(WorktreeNameStyle.Render("Files created:"))
 	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   📄 .gren/config.yml"))
+	content.WriteString(WorktreePathStyle.Render("   📄 .gren/config.json"))
 	content.WriteString("\n")
 	content.WriteString(WorktreePathStyle.Render("   📄 .gren/post-create.sh"))
 	content.WriteString("\n")
@@ -173,7 +166,7 @@ func (m Model) renderCreatedStep() string {
 			description = "Use the generated script as-is"
 		}
 
-		content.WriteString(style.Width(m.width-8).Render(fmt.Sprintf("%s%s", prefix, option)))
+		content.WriteString(style.Width(m.width - 8).Render(fmt.Sprintf("%s%s", prefix, option)))
 		content.WriteString("\n")
 		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", description)))
 		content.WriteString("\n")

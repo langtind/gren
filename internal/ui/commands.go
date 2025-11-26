@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
+	"github.com/langtind/gren/internal/logging"
 )
 
 // loadProjectInfo loads project information asynchronously
@@ -153,18 +153,18 @@ func (m Model) initializeConfigState() tea.Cmd {
 
 // getAvailableBranchesForWorktree gets branches that can be used for worktrees
 func (m Model) getAvailableBranchesForWorktree() ([]BranchStatus, error) {
-	log.Printf("DEBUG: Starting getAvailableBranchesForWorktree")
+	logging.Debug(" Starting getAvailableBranchesForWorktree")
 
 	// Get all local branches
 	cmd := exec.Command("git", "branch", "-v")
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("DEBUG: git branch -v failed: %v", err)
+		logging.Debug(" git branch -v failed: %v", err)
 		return nil, fmt.Errorf("failed to run 'git branch -v': %w", err)
 	}
 
 	outputStr := string(output)
-	log.Printf("DEBUG: git branch -v output: %q", outputStr)
+	logging.Debug(" git branch -v output: %q", outputStr)
 
 	if strings.TrimSpace(outputStr) == "" {
 		return nil, fmt.Errorf("git branch command returned empty output")
@@ -178,7 +178,7 @@ func (m Model) getAvailableBranchesForWorktree() ([]BranchStatus, error) {
 	for _, wt := range m.worktrees {
 		existingWorktreeBranches[wt.Branch] = true
 	}
-	log.Printf("DEBUG: Existing worktree branches: %v", existingWorktreeBranches)
+	logging.Debug(" Existing worktree branches: %v", existingWorktreeBranches)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -206,22 +206,22 @@ func (m Model) getAvailableBranchesForWorktree() ([]BranchStatus, error) {
 			}
 			branchName = parts[0]
 		}
-		log.Printf("DEBUG: Processing branch: %s, isCurrent: %v", branchName, isCurrent)
+		logging.Debug(" Processing branch: %s, isCurrent: %v", branchName, isCurrent)
 
 		// Skip if this branch already has a worktree
 		if existingWorktreeBranches[branchName] {
-			log.Printf("DEBUG: Skipping branch %s - already has worktree", branchName)
+			logging.Debug(" Skipping branch %s - already has worktree", branchName)
 			continue
 		}
 
 		// Validate that branch exists and is a valid reference
 		validateCmd := exec.Command("git", "rev-parse", "--verify", branchName)
 		if err := validateCmd.Run(); err != nil {
-			log.Printf("DEBUG: Branch %s failed validation: %v", branchName, err)
+			logging.Debug(" Branch %s failed validation: %v", branchName, err)
 			// Skip invalid branches
 			continue
 		}
-		log.Printf("DEBUG: Branch %s passed validation", branchName)
+		logging.Debug(" Branch %s passed validation", branchName)
 
 		// Get detailed status for this branch
 		branchStatus := BranchStatus{
@@ -235,12 +235,12 @@ func (m Model) getAvailableBranchesForWorktree() ([]BranchStatus, error) {
 		}
 
 		branches = append(branches, branchStatus)
-		log.Printf("DEBUG: Added branch: %s", branchName)
+		logging.Debug(" Added branch: %s", branchName)
 	}
 
-	log.Printf("DEBUG: Final branches count: %d", len(branches))
+	logging.Debug(" Final branches count: %d", len(branches))
 	for i, b := range branches {
-		log.Printf("DEBUG: Branch %d: %s", i, b.Name)
+		logging.Debug(" Branch %d: %s", i, b.Name)
 	}
 
 	// Debug: return info about what we found
@@ -294,31 +294,36 @@ func (m Model) runProjectAnalysis() tea.Cmd {
 func (m Model) createWorktree() tea.Cmd {
 	return func() tea.Msg {
 		if m.createState == nil {
+			logging.Error("Create worktree failed: create state is nil")
 			return worktreeCreatedMsg{err: fmt.Errorf("create state is nil")}
 		}
 
 		branchName := m.createState.branchName
 		baseBranch := m.createState.baseBranch
+		isNewBranch := m.createState.createMode == CreateModeNewBranch
+
+		logging.Info("Creating worktree: branch=%s, base=%s, isNew=%v", branchName, baseBranch, isNewBranch)
 
 		// Use WorktreeManager to create worktree (same logic as CLI)
 		req := core.CreateWorktreeRequest{
 			Name:        branchName,
 			Branch:      branchName,
 			BaseBranch:  baseBranch,
-			IsNewBranch: m.createState.createMode == CreateModeNewBranch,
+			IsNewBranch: isNewBranch,
 			WorktreeDir: "", // Let WorktreeManager determine from config
 		}
 
 		ctx := context.Background()
 		worktreeManager := core.NewWorktreeManager(m.gitRepo, m.configManager)
 		if err := worktreeManager.CreateWorktree(ctx, req); err != nil {
+			logging.Error("Create worktree failed: %v", err)
 			return worktreeCreatedMsg{err: err}
 		}
 
+		logging.Info("Successfully created worktree: %s", branchName)
 		return worktreeCreatedMsg{branchName: branchName}
 	}
 }
-
 
 // switchToWorktree opens a new terminal in the worktree directory
 func (m Model) switchToWorktree(worktreePath string) tea.Cmd {
@@ -368,19 +373,81 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 
 		deletedCount := 0
 
+		// Helper function to delete a single worktree
+		deleteWorktree := func(worktree Worktree) error {
+			logging.Info("Deleting worktree: %s (path: %s)", worktree.Name, worktree.Path)
+
+			// 1. Remove symlinks that point outside the worktree (they cause issues with git worktree remove)
+			// This includes .gren, .env files, etc. that may have been symlinked by post-create hooks
+			entries, err := os.ReadDir(worktree.Path)
+			if err == nil {
+				for _, entry := range entries {
+					entryPath := filepath.Join(worktree.Path, entry.Name())
+					if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+						// It's a symlink - check if it points outside the worktree
+						target, err := os.Readlink(entryPath)
+						if err == nil {
+							// Resolve to absolute path
+							if !filepath.IsAbs(target) {
+								target = filepath.Join(worktree.Path, target)
+							}
+							absTarget, _ := filepath.Abs(target)
+							absWorktree, _ := filepath.Abs(worktree.Path)
+							// If symlink points outside worktree, remove it
+							if !strings.HasPrefix(absTarget, absWorktree) {
+								logging.Debug("Removing external symlink: %s -> %s", entryPath, absTarget)
+								if err := os.Remove(entryPath); err != nil {
+									logging.Warn("Failed to remove symlink %s: %v", entryPath, err)
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// 2. Deinit submodules and track if worktree has submodules
+			hasSubmodules := false
+			if _, err := os.Stat(filepath.Join(worktree.Path, ".gitmodules")); err == nil {
+				hasSubmodules = true
+				logging.Debug("Worktree has submodules, running deinit")
+				cmd := exec.Command("git", "-C", worktree.Path, "submodule", "deinit", "--all", "--force")
+				output, err := cmd.CombinedOutput()
+				if err != nil {
+					logging.Error("Failed to deinit submodules: %v, output: %s", err, string(output))
+					return fmt.Errorf("failed to deinit submodules in worktree '%s': %w\n\nThis can happen if submodules have uncommitted changes.\nTry running manually:\n  cd %s\n  git submodule deinit --all --force\n\nOutput: %s",
+						worktree.Name, err, worktree.Path, string(output))
+				}
+				logging.Debug("Submodules deinited successfully")
+			}
+
+			// 3. Remove worktree using git
+			// Note: --force is required for worktrees with submodules (even after deinit)
+			var cmd *exec.Cmd
+			if hasSubmodules {
+				logging.Debug("Running: git worktree remove --force %s", worktree.Path)
+				cmd = exec.Command("git", "worktree", "remove", "--force", worktree.Path)
+			} else {
+				logging.Debug("Running: git worktree remove %s", worktree.Path)
+				cmd = exec.Command("git", "worktree", "remove", worktree.Path)
+			}
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				logging.Error("Failed to remove worktree: %v, output: %s", err, string(output))
+				return fmt.Errorf("failed to remove worktree '%s': %w\n\nOutput: %s\n\nIf the worktree has uncommitted changes, commit or stash them first.",
+					worktree.Name, err, string(output))
+			}
+
+			logging.Info("Successfully deleted worktree: %s", worktree.Name)
+			return nil
+		}
+
 		// Handle single worktree deletion
 		if m.deleteState.targetWorktree != nil {
 			worktree := *m.deleteState.targetWorktree
 
-			// Remove git worktree
-			cmd := exec.Command("git", "worktree", "remove", worktree.Path, "--force")
-			if err := cmd.Run(); err != nil {
+			if err := deleteWorktree(worktree); err != nil {
 				return worktreeDeletedMsg{err: fmt.Errorf("failed to remove worktree %s: %w", worktree.Name, err)}
 			}
-
-			// Delete local branch if it exists
-			cmd = exec.Command("git", "branch", "-D", worktree.Branch)
-			cmd.Run() // Ignore errors for branch deletion
 
 			deletedCount = 1
 		} else {
@@ -389,15 +456,9 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 				if selectedIdx < len(m.worktrees) {
 					worktree := m.worktrees[selectedIdx]
 
-					// Remove git worktree
-					cmd := exec.Command("git", "worktree", "remove", worktree.Path, "--force")
-					if err := cmd.Run(); err != nil {
+					if err := deleteWorktree(worktree); err != nil {
 						return worktreeDeletedMsg{err: fmt.Errorf("failed to remove worktree %s: %w", worktree.Name, err)}
 					}
-
-					// Delete local branch if it exists
-					cmd = exec.Command("git", "branch", "-D", worktree.Branch)
-					cmd.Run() // Ignore errors for branch deletion
 
 					deletedCount++
 				}
@@ -596,24 +657,6 @@ func (m Model) parseGitIgnore() []string {
 	return patterns
 }
 
-// generateCopyPatterns generates copy patterns from detected files
-func (m Model) generateCopyPatterns(detectedFiles []DetectedFile) []CopyPattern {
-	var patterns []CopyPattern
-
-	for _, file := range detectedFiles {
-		patterns = append(patterns, CopyPattern{
-			Pattern:      file.Path,
-			Type:         file.Type,
-			IsGitIgnored: file.IsGitIgnored,
-			Description:  file.Description,
-			Enabled:      true, // Enable by default
-			Detected:     true, // This was automatically detected
-		})
-	}
-
-	return patterns
-}
-
 // initializeActionsList creates and configures the list.Model for post-create actions
 func (m *Model) initializeActionsList() {
 	if m.createState == nil {
@@ -635,7 +678,7 @@ func (m *Model) initializeActionsList() {
 		}
 	}
 	height := len(items) + 3 // Items + title + padding
-	if m.height > 0 && height > m.height - 6 {
+	if m.height > 0 && height > m.height-6 {
 		height = m.height - 6
 	}
 	if height < 5 {
@@ -741,5 +784,21 @@ func (m Model) pruneWorktrees() tea.Cmd {
 			prunedCount: len(prunedPaths),
 			prunedPaths: prunedPaths,
 		}
+	}
+}
+
+// navigateToWorktree writes navigation command to temp file and quits TUI
+func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Write navigation command to temp file
+		tempFile := "/tmp/gren_navigate"
+		command := fmt.Sprintf("cd \"%s\"", worktreePath)
+
+		if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
+			return fmt.Errorf("failed to write navigation command: %w", err)
+		}
+
+		// Quit the TUI to allow wrapper script to execute the navigation
+		return tea.Quit()
 	}
 }

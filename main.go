@@ -10,21 +10,30 @@ import (
 	"github.com/langtind/gren/internal/cli"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/git"
+	"github.com/langtind/gren/internal/logging"
 	"github.com/langtind/gren/internal/ui"
 )
 
 // Version information - will be injected at build time for GitHub releases
 var (
-	version = "dev"     // Default for local development, overridden by ldflags in releases
+	version = "dev" // Default for local development, overridden by ldflags in releases
 	commit  = "unknown"
 	date    = "unknown"
 )
 
 func main() {
+	// Initialize logging
+	if err := logging.Init(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize logging: %v\n", err)
+	}
+	defer logging.Close()
+
 	// Parse command line flags
 	var showHelp = flag.Bool("help", false, "Show help message")
 	var showVersion = flag.Bool("version", false, "Show version information")
 	flag.Parse()
+
+	logging.Info("gren %s started, args: %v", version, os.Args)
 
 	if *showVersion {
 		fmt.Printf("gren version %s\n", version)

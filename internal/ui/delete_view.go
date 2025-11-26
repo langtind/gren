@@ -99,15 +99,17 @@ func (m Model) renderDeleteSelectionStep() string {
 		case "modified":
 			statusText = "🟡 Modified"
 		case "untracked":
-			statusText = "🔴 Untracked"
+			statusText = "🔴 Untracked files"
 		case "mixed":
 			statusText = "📝 Changes"
+		case "unpushed":
+			statusText = "⬆️ Unpushed"
 		default:
 			statusText = "🟢 Clean"
 		}
 
 		worktreeInfo := fmt.Sprintf("%s %s %s (%s)", checkbox, wt.Name, statusText, wt.Branch)
-		content.WriteString(style.Width(m.width-8).Render(worktreeInfo))
+		content.WriteString(style.Width(m.width - 8).Render(worktreeInfo))
 		content.WriteString("\n")
 		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   📍 %s", wt.Path)))
 		content.WriteString("\n\n")
@@ -156,6 +158,8 @@ func (m Model) renderDeleteConfirmStep() string {
 				statusWarning = "   ⚠️ Has untracked files - will be lost!"
 			case "mixed":
 				statusWarning = "   ⚠️ Has uncommitted and untracked changes - will be lost!"
+			case "unpushed":
+				statusWarning = "   ⚠️ Has unpushed commits - branch not on remote!"
 			}
 			content.WriteString("\n")
 			content.WriteString(ErrorStyle.Render(statusWarning))
@@ -185,6 +189,8 @@ func (m Model) renderDeleteConfirmStep() string {
 						statusWarning = "   ⚠️ Has untracked files - will be lost!"
 					case "mixed":
 						statusWarning = "   ⚠️ Has uncommitted and untracked changes - will be lost!"
+					case "unpushed":
+						statusWarning = "   ⚠️ Has unpushed commits - branch not on remote!"
 					}
 					content.WriteString("\n")
 					content.WriteString(ErrorStyle.Render(statusWarning))

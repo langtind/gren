@@ -49,15 +49,42 @@ cd gren
 go build -o gren .
 ```
 
+## Shell Integration (Required for Navigation)
+
+To enable the `g` key binding and CLI navigation commands, add this to your shell config:
+
+**Zsh** (~/.zshrc):
+```bash
+eval "$(gren shell-init zsh)"
+```
+
+**Bash** (~/.bashrc):
+```bash
+eval "$(gren shell-init bash)"
+```
+
+**Fish** (~/.config/fish/config.fish):
+```fish
+gren shell-init fish | source
+```
+
+This enables:
+- `g` key in TUI to navigate directly to a worktree folder
+- `gcd <name>` CLI alias for quick navigation
+- `gren navigate <name>` command
+
 ## Quick Start
 
 1. Navigate to any Git repository
 2. Run `gren` to start the interactive interface
 3. Use keyboard shortcuts to manage worktrees:
    - `↑↓` Navigate between worktrees
-   - `Enter` Switch to selected worktree
+   - `Enter` Open in... menu (IDE, terminal, Finder)
+   - `g` Navigate to worktree folder (requires shell integration)
    - `n` Create new worktree
-   - `d` Delete worktrees
+   - `d` Delete worktree
+   - `p` Prune stale worktrees
+   - `c` Configure gren
    - `i` Initialize gren configuration
    - `q` Quit
 
@@ -80,12 +107,12 @@ This project uses:
 
 ```
 gren/
-├── cmd/gren/           # CLI commands
 ├── internal/
-│   ├── ui/            # TUI components and views
-│   ├── git/           # Git operations
+│   ├── cli/           # CLI commands
 │   ├── config/        # Configuration management
-│   └── hooks/         # Hook system
-├── old/               # Legacy bash scripts (reference)
-└── main.go           # Entry point
+│   ├── core/          # Worktree operations
+│   ├── git/           # Git operations
+│   ├── logging/       # Logging utilities
+│   └── ui/            # TUI components and views
+└── main.go            # Entry point
 ```

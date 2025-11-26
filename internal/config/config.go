@@ -21,11 +21,10 @@ const (
 
 // Config represents the gren configuration.
 type Config struct {
-	WorktreeDir    string   `json:"worktree_dir"`
-	CopyPatterns   []string `json:"copy_patterns"`
-	PackageManager string   `json:"package_manager"`
-	PostCreateHook string   `json:"post_create_hook"`
-	Version        string   `json:"version"`
+	WorktreeDir    string `json:"worktree_dir"`
+	PackageManager string `json:"package_manager"`
+	PostCreateHook string `json:"post_create_hook"`
+	Version        string `json:"version"`
 }
 
 // Manager handles configuration operations.
@@ -48,7 +47,6 @@ func NewDefaultConfig(projectName string) (*Config, error) {
 
 	return &Config{
 		WorktreeDir:    filepath.Join("..", projectName+"-worktrees"),
-		CopyPatterns:   []string{".env*"},
 		PackageManager: "auto",
 		PostCreateHook: filepath.Join(ConfigDir, DefaultHookFile),
 		Version:        DefaultVersion,
@@ -123,10 +121,6 @@ func (m *Manager) validateConfig(config *Config) error {
 
 	if strings.TrimSpace(config.Version) == "" {
 		return fmt.Errorf("version cannot be empty")
-	}
-
-	if len(config.CopyPatterns) == 0 {
-		return fmt.Errorf("copy_patterns cannot be empty")
 	}
 
 	// Validate package manager if specified

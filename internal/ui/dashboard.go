@@ -125,10 +125,13 @@ func (m Model) dashboardView() string {
 				statusText = "🟡 Modified"
 			case "untracked":
 				statusStyle = StatusModifiedStyle // Use same style for now
-				statusText = "🔴 Untracked"
+				statusText = "🔴 Untracked files"
 			case "mixed":
 				statusStyle = StatusModifiedStyle
 				statusText = "📝 Changes"
+			case "unpushed":
+				statusStyle = StatusModifiedStyle
+				statusText = "⬆️ Unpushed"
 			case "missing":
 				statusStyle = ErrorStyle
 				statusText = "❌ Missing"
@@ -171,7 +174,7 @@ func (m Model) dashboardView() string {
 		}
 
 		// Help text for worktrees view
-		helpText := HelpStyle.Render("[n] New  [d] Delete  [p] Prune missing  [c] Config  [↑↓] Navigate  [enter] Open in...  [q] Quit")
+		helpText := HelpStyle.Render("[n] New  [d] Delete  [p] Prune missing  [c] Config  [g] Go to  [↑↓] Navigate  [enter] Open in...  [q] Quit")
 		content.WriteString("\n")
 		content.WriteString(helpText)
 	}

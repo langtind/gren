@@ -41,7 +41,7 @@ func (m Model) renderCustomizationMenu() string {
 		description string
 	}{
 		{"Worktree Location", "📂", fmt.Sprintf("Currently: %s", m.initState.worktreeDir)},
-		{"File Patterns", "📋", fmt.Sprintf("%d patterns configured", len(m.initState.copyPatterns))},
+		{"Detected Files", "📋", fmt.Sprintf("%d files to symlink", len(m.initState.detectedFiles))},
 		{"Post-Create Command", "⚡", fmt.Sprintf("Currently: %s", m.initState.postCreateCmd)},
 	}
 
@@ -54,7 +54,7 @@ func (m Model) renderCustomizationMenu() string {
 		}
 
 		optionText := fmt.Sprintf("%s %s", option.icon, option.name)
-		content.WriteString(style.Width(m.width-8).Render(optionText))
+		content.WriteString(style.Width(m.width - 8).Render(optionText))
 		content.WriteString("\n")
 		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", option.description)))
 		content.WriteString("\n\n")
@@ -82,7 +82,7 @@ func (m Model) renderWorktreeCustomization() string {
 		displayText = m.initState.worktreeDir
 	}
 
-	content.WriteString(inputStyle.Width(m.width-8).Render(fmt.Sprintf("📁 %s▮", displayText)))
+	content.WriteString(inputStyle.Width(m.width - 8).Render(fmt.Sprintf("📁 %s▮", displayText)))
 	content.WriteString("\n\n")
 
 	// Help text
@@ -100,21 +100,21 @@ func (m Model) renderWorktreeCustomization() string {
 	return HeaderStyle.Width(m.width - 4).Render(content.String())
 }
 
-// renderPatternsCustomization shows file pattern customization
+// renderPatternsCustomization shows detected files (now read-only, edit post-create.sh to customize)
 func (m Model) renderPatternsCustomization() string {
 	var content strings.Builder
 
-	content.WriteString(TitleStyle.Render("📋 File Patterns"))
+	content.WriteString(TitleStyle.Render("📋 Detected Files"))
 	content.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Select which files to copy to new worktrees:"))
+	content.WriteString(WorktreeNameStyle.Render("These files will be symlinked to new worktrees:"))
 	content.WriteString("\n\n")
 
-	if len(m.initState.copyPatterns) == 0 {
-		content.WriteString(WorktreePathStyle.Render("No patterns configured yet."))
+	if len(m.initState.detectedFiles) == 0 {
+		content.WriteString(WorktreePathStyle.Render("No gitignored files detected."))
 		content.WriteString("\n\n")
 	} else {
-		for i, pattern := range m.initState.copyPatterns {
+		for i, file := range m.initState.detectedFiles {
 			var style lipgloss.Style
 			if i == m.initState.selected {
 				style = WorktreeSelectedStyle
@@ -122,27 +122,15 @@ func (m Model) renderPatternsCustomization() string {
 				style = WorktreeItemStyle
 			}
 
-			// Status indicator
-			status := "☐"
-			if pattern.Enabled {
-				status = "☑️"
-			}
-
-			// Detection indicator
-			detection := ""
-			if pattern.Detected {
-				detection = " (auto-detected)"
-			}
-
-			patternText := fmt.Sprintf("%s %s%s", status, pattern.Pattern, detection)
-			content.WriteString(style.Width(m.width-8).Render(patternText))
+			fileText := fmt.Sprintf("🔗 %s", file.Path)
+			content.WriteString(style.Width(m.width - 8).Render(fileText))
 			content.WriteString("\n")
-			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", pattern.Description)))
+			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", file.Description)))
 			content.WriteString("\n\n")
 		}
 	}
 
-	content.WriteString(HelpStyle.Render("[space] Toggle  [↑↓] Navigate  [esc] Back"))
+	content.WriteString(HelpStyle.Render("Edit .gren/post-create.sh to customize • [esc] Back"))
 
 	return HeaderStyle.Width(m.width - 4).Render(content.String())
 }
@@ -164,7 +152,7 @@ func (m Model) renderPostCreateCustomization() string {
 		displayText = m.initState.postCreateCmd
 	}
 
-	content.WriteString(inputStyle.Width(m.width-8).Render(fmt.Sprintf("⚡ %s▮", displayText)))
+	content.WriteString(inputStyle.Width(m.width - 8).Render(fmt.Sprintf("⚡ %s▮", displayText)))
 	content.WriteString("\n\n")
 
 	// Help text

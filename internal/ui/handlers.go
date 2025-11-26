@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/langtind/gren/internal/logging"
 )
 
 // handleInitKeys handles keyboard input for the init view
@@ -13,6 +14,8 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	logging.Debug("InitView key: %q, step: %d", msg.String(), m.initState.currentStep)
+
 	switch m.initState.currentStep {
 	case InitStepCustomization:
 		return m.handleCustomizationKeys(msg)
@@ -20,10 +23,12 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		logging.Info("User quit from InitView")
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		switch m.initState.currentStep {
 		case InitStepWelcome:
+			logging.Info("InitView: back to Dashboard from Welcome")
 			m.currentView = DashboardView
 			return m, nil
 		case InitStepAnalysis, InitStepExecuting:
@@ -66,42 +71,51 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Enter):
 		switch m.initState.currentStep {
 		case InitStepWelcome:
+			logging.Info("InitView: starting project analysis")
 			m.initState.currentStep = InitStepAnalysis
 			return m, m.runProjectAnalysis()
 		case InitStepRecommendations:
 			if m.initState.selected == 1 {
 				// Selected "Customize configuration" option
+				logging.Info("InitView: entering customization")
 				m.initState.currentStep = InitStepCustomization
 				m.initState.selected = 0
 			} else {
 				// Selected "Accept recommendations and continue"
+				logging.Info("InitView: accepted recommendations, going to preview")
 				m.initState.currentStep = InitStepPreview
 				m.initState.selected = 0
 			}
 			return m, nil
 		case InitStepPreview:
 			// Execute initialization
+			logging.Info("InitView: executing initialization")
 			m.initState.currentStep = InitStepExecuting
 			return m, m.runInitialization()
 		case InitStepCreated:
 			if m.initState.selected == 0 {
 				// Edit script option
+				logging.Info("InitView: opening post-create script for editing")
 				m.initState.currentStep = InitStepExecuting
 				return m, m.openPostCreateScript()
 			} else {
 				// Skip and continue option
+				logging.Info("InitView: skipping script editing")
 				m.initState.currentStep = InitStepComplete
 			}
 		case InitStepCommitConfirm:
 			// Commit changes
+			logging.Info("InitView: committing configuration")
 			m.initState.currentStep = InitStepFinal
 			return m, m.commitConfiguration()
 		case InitStepComplete:
 			// Go to final step
+			logging.Info("InitView: going to final step")
 			m.initState.currentStep = InitStepFinal
 			return m, nil
 		case InitStepFinal:
 			// Return to dashboard
+			logging.Info("InitView: returning to dashboard")
 			m.currentView = DashboardView
 			return m, m.loadProjectInfo()
 		}
@@ -124,11 +138,11 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Go to dashboard and start create workflow
 			m.currentView = CreateView
 			m.createState = &CreateState{
-				currentStep:   CreateStepBranchMode,
-				selectedMode:  0,
-				branchName:    "",
-				baseBranch:    "",
-				createMode:    CreateModeNewBranch,
+				currentStep:  CreateStepBranchMode,
+				selectedMode: 0,
+				branchName:   "",
+				baseBranch:   "",
+				createMode:   CreateModeNewBranch,
 			}
 			return m, m.loadProjectInfo()
 		}
@@ -185,10 +199,10 @@ func (m Model) handleCustomizationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.initState.editingText = ""
 			m.initState.selected = 0
 		} else if m.initState.customizationMode == "patterns" {
-			// Toggle pattern selection and stay in patterns mode
-			if m.initState.selected < len(m.initState.copyPatterns) {
-				// This is a simplified toggle - in real implementation you'd toggle the pattern
-			}
+			// Patterns mode is now read-only (edit post-create.sh to customize)
+			// Just go back to main customization
+			m.initState.customizationMode = ""
+			m.initState.selected = 0
 		}
 		return m, nil
 
@@ -203,7 +217,7 @@ func (m Model) handleCustomizationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.initState.customizationMode == "" {
 			maxItems = 3 // worktree, patterns, postcreate
 		} else if m.initState.customizationMode == "patterns" {
-			maxItems = len(m.initState.copyPatterns)
+			maxItems = len(m.initState.detectedFiles)
 		}
 		if m.initState.selected < maxItems-1 {
 			m.initState.selected++
@@ -232,15 +246,23 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	logging.Debug("CreateView key: %q, step: %d, mode: %d", msg.String(), m.createState.currentStep, m.createState.createMode)
+
 	// If we're in branch name input mode, only allow specific keys
 	if m.createState.currentStep == CreateStepBranchName {
 		switch {
 		case key.Matches(msg, m.keys.Back):
+			logging.Debug("CreateView: back from BranchName to BranchMode")
 			m.createState.currentStep = CreateStepBranchMode
 			return m, nil
 		case key.Matches(msg, m.keys.Enter):
 			if isValidBranchName(m.createState.branchName) {
+				logging.Info("CreateView: branch name entered: %s, going to BaseBranch", m.createState.branchName)
 				m.createState.currentStep = CreateStepBaseBranch
+				// Reset search and center scroll when entering base branch step
+				m.createState.searchQuery = ""
+				m.createState.filteredBranches = m.createState.branchStatuses
+				m.centerScrollOnSelectedBranch()
 			}
 			return m, nil
 		case msg.Type == tea.KeyBackspace:
@@ -257,30 +279,93 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// If we're in branch selection (base branch OR existing branch), handle search mode
+	if m.createState.currentStep == CreateStepBaseBranch || m.createState.currentStep == CreateStepExistingBranch {
+		// If in search mode, capture all typing
+		if m.createState.isSearching {
+			switch msg.Type {
+			case tea.KeyBackspace:
+				if len(m.createState.searchQuery) > 0 {
+					m.createState.searchQuery = m.createState.searchQuery[:len(m.createState.searchQuery)-1]
+					if m.createState.currentStep == CreateStepBaseBranch {
+						m.filterBranches()
+					} else {
+						m.filterAvailableBranches()
+					}
+					logging.Debug("CreateView: search query updated: %q", m.createState.searchQuery)
+				}
+				return m, nil
+			case tea.KeyRunes:
+				m.createState.searchQuery += string(msg.Runes)
+				if m.createState.currentStep == CreateStepBaseBranch {
+					m.filterBranches()
+				} else {
+					m.filterAvailableBranches()
+				}
+				logging.Debug("CreateView: search query updated: %q", m.createState.searchQuery)
+				return m, nil
+			case tea.KeyEscape:
+				// Exit search mode and clear search
+				logging.Debug("CreateView: exited search mode (escape)")
+				m.createState.isSearching = false
+				m.createState.searchQuery = ""
+				if m.createState.currentStep == CreateStepBaseBranch {
+					m.createState.filteredBranches = m.createState.branchStatuses
+				} else {
+					m.createState.filteredAvailableBranches = m.createState.availableBranches
+				}
+				m.createState.selectedBranch = 0
+				m.centerScrollOnSelectedBranch()
+				return m, nil
+			case tea.KeyEnter:
+				// Exit search mode but keep filter, then let enter handler below select branch
+				logging.Debug("CreateView: exited search mode (enter), filter: %q", m.createState.searchQuery)
+				m.createState.isSearching = false
+				// Don't return - let the enter key be handled below
+			}
+		} else {
+			// Not in search mode - check for search trigger keys
+			if msg.String() == "/" || msg.String() == "s" {
+				logging.Debug("CreateView: entered search mode")
+				m.createState.isSearching = true
+				m.createState.searchQuery = ""
+				return m, nil
+			}
+		}
+	}
+
 	// For other steps, handle normal shortcuts
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		logging.Info("User quit from CreateView")
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		// Go back one step (CreateStepBranchName is handled in text input block above)
 		switch m.createState.currentStep {
 		case CreateStepBranchMode:
+			logging.Info("CreateView: back to Dashboard from BranchMode")
 			m.currentView = DashboardView
 			return m, m.loadProjectInfo()
 		case CreateStepBranchName:
+			logging.Debug("CreateView: back to BranchMode from BranchName")
 			m.createState.currentStep = CreateStepBranchMode
 		case CreateStepExistingBranch:
+			logging.Debug("CreateView: back to BranchMode from ExistingBranch")
 			m.createState.currentStep = CreateStepBranchMode
 		case CreateStepBaseBranch:
 			if m.createState.createMode == CreateModeNewBranch {
+				logging.Debug("CreateView: back to BranchName from BaseBranch")
 				m.createState.currentStep = CreateStepBranchName
 			} else {
+				logging.Debug("CreateView: back to ExistingBranch from BaseBranch")
 				m.createState.currentStep = CreateStepExistingBranch
 			}
 		case CreateStepConfirm:
 			if m.createState.createMode == CreateModeNewBranch {
+				logging.Debug("CreateView: back to BaseBranch from Confirm")
 				m.createState.currentStep = CreateStepBaseBranch
 			} else {
+				logging.Debug("CreateView: back to ExistingBranch from Confirm")
 				m.createState.currentStep = CreateStepExistingBranch
 			}
 		}
@@ -296,11 +381,19 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case CreateStepExistingBranch:
 			if m.createState.selectedBranch > 0 {
 				m.createState.selectedBranch--
+				// Adjust scroll offset to keep selection visible
+				if m.createState.selectedBranch < m.createState.scrollOffset {
+					m.createState.scrollOffset = m.createState.selectedBranch
+				}
 			}
 		case CreateStepBaseBranch:
 			if m.createState.selectedBranch > 0 {
 				m.createState.selectedBranch--
 				m.createState.warningAccepted = false
+				// Adjust scroll offset to keep selection visible
+				if m.createState.selectedBranch < m.createState.scrollOffset {
+					m.createState.scrollOffset = m.createState.selectedBranch
+				}
 			}
 		case CreateStepComplete:
 			// Navigate up in actions list
@@ -318,13 +411,43 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.createState.selectedMode++
 			}
 		case CreateStepExistingBranch:
-			if m.createState.selectedBranch < len(m.createState.availableBranches)-1 {
+			branches := m.createState.filteredAvailableBranches
+			if len(branches) == 0 {
+				branches = m.createState.availableBranches
+			}
+			if m.createState.selectedBranch < len(branches)-1 {
 				m.createState.selectedBranch++
+				// Adjust scroll offset to keep selection visible
+				maxVisible := m.height - 15
+				if maxVisible < 5 {
+					maxVisible = 5
+				}
+				if maxVisible > 20 {
+					maxVisible = 20
+				}
+				if m.createState.selectedBranch >= m.createState.scrollOffset+maxVisible {
+					m.createState.scrollOffset = m.createState.selectedBranch - maxVisible + 1
+				}
 			}
 		case CreateStepBaseBranch:
-			if m.createState.selectedBranch < len(m.createState.branchStatuses)-1 {
+			branches := m.createState.filteredBranches
+			if len(branches) == 0 {
+				branches = m.createState.branchStatuses
+			}
+			if m.createState.selectedBranch < len(branches)-1 {
 				m.createState.selectedBranch++
 				m.createState.warningAccepted = false
+				// Adjust scroll offset to keep selection visible
+				maxVisible := m.height - 15
+				if maxVisible < 5 {
+					maxVisible = 5
+				}
+				if maxVisible > 20 {
+					maxVisible = 20
+				}
+				if m.createState.selectedBranch >= m.createState.scrollOffset+maxVisible {
+					m.createState.scrollOffset = m.createState.selectedBranch - maxVisible + 1
+				}
 			}
 		case CreateStepComplete:
 			// Navigate down in actions list
@@ -341,9 +464,11 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case CreateStepBranchMode:
 			// Set mode and advance to appropriate step
 			if m.createState.selectedMode == 0 {
+				logging.Info("CreateView: selected 'Create new branch' mode")
 				m.createState.createMode = CreateModeNewBranch
 				m.createState.currentStep = CreateStepBranchName
 			} else {
+				logging.Info("CreateView: selected 'Use existing branch' mode")
 				m.createState.createMode = CreateModeExistingBranch
 				m.createState.currentStep = CreateStepExistingBranch
 				// Need to load available branches
@@ -351,25 +476,37 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case CreateStepExistingBranch:
-			if len(m.createState.availableBranches) > 0 && m.createState.selectedBranch < len(m.createState.availableBranches) {
-				selectedBranch := m.createState.availableBranches[m.createState.selectedBranch]
+			branches := m.createState.filteredAvailableBranches
+			if len(branches) == 0 {
+				branches = m.createState.availableBranches
+			}
+			if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
+				selectedBranch := branches[m.createState.selectedBranch]
+				logging.Info("CreateView: selected existing branch: %s", selectedBranch.Name)
 				m.createState.branchName = selectedBranch.Name
 				m.createState.currentStep = CreateStepConfirm
 			}
 			return m, nil
 		case CreateStepBaseBranch:
-			if len(m.createState.branchStatuses) > 0 && m.createState.selectedBranch < len(m.createState.branchStatuses) {
-				selectedStatus := m.createState.branchStatuses[m.createState.selectedBranch]
+			branches := m.createState.filteredBranches
+			if len(branches) == 0 {
+				branches = m.createState.branchStatuses
+			}
+			if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
+				selectedStatus := branches[m.createState.selectedBranch]
 				if !selectedStatus.IsClean && !m.createState.warningAccepted {
 					// Show warning, don't advance
+					logging.Debug("CreateView: showing dirty branch warning for: %s", selectedStatus.Name)
 					m.createState.showWarning = true
 					return m, nil
 				}
+				logging.Info("CreateView: selected base branch: %s (clean: %v)", selectedStatus.Name, selectedStatus.IsClean)
 				m.createState.baseBranch = selectedStatus.Name
 				m.createState.currentStep = CreateStepConfirm
 			}
 			return m, nil
 		case CreateStepConfirm:
+			logging.Info("CreateView: confirmed creation, branch: %s, base: %s", m.createState.branchName, m.createState.baseBranch)
 			m.createState.currentStep = CreateStepCreating
 			return m, m.createWorktree()
 		case CreateStepComplete:
@@ -377,15 +514,24 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			actions := m.getAvailableActions()
 			if m.createState.selectedAction < len(actions) {
 				action := actions[m.createState.selectedAction]
-				// Execute the action if it has a command
+				logging.Info("CreateView: executing action: %s", action.Name)
+				// Handle navigate specially - it needs to quit TUI and write to temp file
+				if action.Command == "navigate" {
+					worktreePath := m.getWorktreePath(m.createState.branchName)
+					logging.Info("CreateView: navigating to worktree: %s", worktreePath)
+					return m, m.navigateToWorktree(worktreePath)
+				}
+				// Execute other actions normally
 				if action.Command != "" {
-					if err := m.executeAction(action, fmt.Sprintf("../gren-worktrees/%s", m.createState.branchName)); err != nil {
+					if err := m.executeAction(action, m.getWorktreePath(m.createState.branchName)); err != nil {
 						// Show error message briefly
+						logging.Error("CreateView: action failed: %s - %v", action.Name, err)
 						fmt.Printf("Failed to execute %s: %v\n", action.Name, err)
 					}
 				}
 			}
 			// Always return to dashboard after action
+			logging.Debug("CreateView: returning to Dashboard")
 			m.refreshWorktrees() // Refresh worktrees list
 			m.currentView = DashboardView
 			// Refresh project info to check if .gren was deleted/created
@@ -395,9 +541,14 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Handle 'y' as confirmation only for base branch step
 		if m.createState.currentStep == CreateStepBaseBranch {
 			// Check if current selected branch is dirty (needs warning acceptance)
-			if len(m.createState.branchStatuses) > 0 && m.createState.selectedBranch < len(m.createState.branchStatuses) {
-				selectedStatus := m.createState.branchStatuses[m.createState.selectedBranch]
+			branches := m.createState.filteredBranches
+			if len(branches) == 0 {
+				branches = m.createState.branchStatuses
+			}
+			if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
+				selectedStatus := branches[m.createState.selectedBranch]
 				if !selectedStatus.IsClean {
+					logging.Info("CreateView: user accepted dirty branch warning for: %s", selectedStatus.Name)
 					m.createState.warningAccepted = true
 					return m, nil
 				}
@@ -417,6 +568,8 @@ func (m Model) handleDeleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	logging.Debug("DeleteView key: %q, step: %d", msg.String(), m.deleteState.currentStep)
+
 	switch m.deleteState.currentStep {
 	case DeleteStepSelection:
 		return m.handleDeleteSelectionKeys(msg)
@@ -426,14 +579,17 @@ func (m Model) handleDeleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Only allow quit during deletion
 		switch {
 		case key.Matches(msg, m.keys.Quit):
+			logging.Info("User quit during deletion")
 			return m, tea.Quit
 		}
 	case DeleteStepComplete:
 		// Allow quit/back or enter to return to dashboard
 		switch {
 		case key.Matches(msg, m.keys.Quit):
+			logging.Info("User quit from DeleteView complete")
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):
+			logging.Info("DeleteView: returning to Dashboard after completion")
 			m.currentView = DashboardView
 			m.deleteState = nil
 			return m, nil
@@ -446,8 +602,10 @@ func (m Model) handleDeleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDeleteSelectionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		logging.Info("User quit from DeleteView selection")
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
+		logging.Info("DeleteView: back to Dashboard from selection")
 		m.currentView = DashboardView
 		m.deleteState = nil
 		return m, nil
@@ -470,6 +628,7 @@ func (m Model) handleDeleteSelectionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.Enter):
 		if len(m.deleteState.selectedWorktrees) > 0 {
+			logging.Info("DeleteView: proceeding to confirm with %d worktrees selected", len(m.deleteState.selectedWorktrees))
 			m.deleteState.currentStep = DeleteStepConfirm
 		}
 		return m, nil
@@ -493,6 +652,7 @@ func (m Model) handleDeleteSelectionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			for i, selectedIdx := range m.deleteState.selectedWorktrees {
 				if selectedIdx == actualIndex {
 					// Remove from selection
+					logging.Debug("DeleteView: deselected worktree: %s", m.worktrees[actualIndex].Name)
 					m.deleteState.selectedWorktrees = append(
 						m.deleteState.selectedWorktrees[:i],
 						m.deleteState.selectedWorktrees[i+1:]...)
@@ -502,6 +662,7 @@ func (m Model) handleDeleteSelectionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if !alreadySelected {
 				// Add to selection
+				logging.Debug("DeleteView: selected worktree: %s", m.worktrees[actualIndex].Name)
 				m.deleteState.selectedWorktrees = append(m.deleteState.selectedWorktrees, actualIndex)
 			}
 		}
@@ -514,23 +675,28 @@ func (m Model) handleDeleteSelectionKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleDeleteConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		logging.Info("User quit from DeleteView confirm")
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		// For single worktree deletion, go back to dashboard
 		// For multi-select deletion, go back to selection step
 		if m.deleteState.targetWorktree != nil {
+			logging.Info("DeleteView: cancelled single worktree deletion, back to Dashboard")
 			m.currentView = DashboardView
 			m.deleteState = nil
 		} else {
+			logging.Debug("DeleteView: back to selection from confirm")
 			m.deleteState.currentStep = DeleteStepSelection
 		}
 		return m, nil
 	case msg.String() == "y" || msg.String() == "Y":
 		// Proceed with deletion
+		logging.Info("DeleteView: user confirmed deletion")
 		m.deleteState.currentStep = DeleteStepDeleting
 		return m, m.deleteSelectedWorktrees()
 	case msg.String() == "n" || msg.String() == "N":
 		// Cancel deletion
+		logging.Info("DeleteView: user cancelled deletion")
 		m.currentView = DashboardView
 		m.deleteState = nil
 		return m, nil
@@ -544,11 +710,15 @@ func (m Model) handleOpenInKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	logging.Debug("OpenInView key: %q", msg.String())
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		logging.Info("User quit from OpenInView")
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		// Return to dashboard
+		logging.Debug("OpenInView: back to Dashboard")
 		m.currentView = DashboardView
 		m.openInState = nil
 		return m, nil
@@ -568,15 +738,23 @@ func (m Model) handleOpenInKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Execute the selected action
 		if m.openInState.selectedIndex < len(m.openInState.actions) {
 			action := m.openInState.actions[m.openInState.selectedIndex]
-			// Execute the action if it has a command
+			logging.Info("OpenInView: executing action: %s on %s", action.Name, m.openInState.worktreePath)
+			// Handle navigate specially - it needs to quit TUI and write to temp file
+			if action.Command == "navigate" {
+				logging.Info("OpenInView: navigating to worktree: %s", m.openInState.worktreePath)
+				return m, m.navigateToWorktree(m.openInState.worktreePath)
+			}
+			// Execute other actions normally
 			if action.Command != "" {
 				if err := m.executeAction(action, m.openInState.worktreePath); err != nil {
 					// Show error message briefly
+					logging.Error("OpenInView: action failed: %s - %v", action.Name, err)
 					fmt.Printf("Failed to execute %s: %v\n", action.Name, err)
 				}
 			}
 		}
 		// Return to dashboard after action
+		logging.Debug("OpenInView: returning to Dashboard")
 		m.currentView = DashboardView
 		m.openInState = nil
 		return m, nil
@@ -591,11 +769,15 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	logging.Debug("ConfigView key: %q", msg.String())
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
+		logging.Info("User quit from ConfigView")
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		// Return to dashboard
+		logging.Debug("ConfigView: back to Dashboard")
 		m.currentView = DashboardView
 		m.configState = nil
 		return m, nil
@@ -615,6 +797,7 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Open the selected config file
 		if m.configState.selectedIndex < len(m.configState.files) {
 			selectedFile := m.configState.files[m.configState.selectedIndex]
+			logging.Info("ConfigView: opening config file: %s", selectedFile.Path)
 			return m, m.openConfigFile(selectedFile.Path)
 		}
 		return m, nil

@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/langtind/gren/internal/logging"
 )
 
 // Update handles all incoming messages and updates the model state
@@ -54,7 +55,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.initState != nil {
 			m.initState.currentStep = InitStepRecommendations
 			m.initState.detectedFiles = m.analyzeProject()
-			m.initState.copyPatterns = m.generateCopyPatterns(m.initState.detectedFiles)
 			m.initState.analysisComplete = true
 			m.initState.packageManager = m.detectPackageManager()
 			m.initState.postCreateCmd = m.detectPostCreateCommand()
@@ -169,7 +169,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createState.currentStep = CreateStepBranchMode
 			} else {
 				m.createState.availableBranches = msg.branches
+				m.createState.filteredAvailableBranches = msg.branches // Initialize filtered list
 				m.createState.selectedBranch = 0
+				m.createState.scrollOffset = 0
+				m.createState.searchQuery = ""
+				m.createState.isSearching = false
 				// Debug: log how many branches we found
 				if len(msg.branches) == 0 {
 					m.err = fmt.Errorf("no available branches found for worktree creation")
@@ -212,9 +216,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfigKeys(keyMsg)
 		}
 
+		// Dashboard keys
+		logging.Debug("Dashboard key: %q", keyMsg.String())
+
 		// Global keys
 		switch {
 		case key.Matches(keyMsg, m.keys.Quit):
+			logging.Info("User quit from Dashboard")
 			return m, tea.Quit
 		case key.Matches(keyMsg, m.keys.Up):
 			if m.selected > 0 {
@@ -229,6 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Show "Open in..." menu for selected worktree
 			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
 				selectedWorktree := m.worktrees[m.selected]
+				logging.Info("Dashboard: opening 'Open in...' menu for worktree: %s", selectedWorktree.Name)
 				m.currentView = OpenInView
 				return m, m.initializeOpenInState(selectedWorktree.Path)
 			}
@@ -237,6 +246,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(keyMsg, m.keys.New):
 			// Only allow creating worktrees if initialized
 			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+				logging.Info("Dashboard: entering CreateView (shortcut 'n')")
 				m.currentView = CreateView
 				// Use selected worktree's branch as suggested base
 				var suggestedBase string
@@ -253,8 +263,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selectedWorktree := m.worktrees[m.selected]
 				// Don't allow deleting the current worktree
 				if selectedWorktree.IsCurrent {
+					logging.Debug("Dashboard: cannot delete current worktree: %s", selectedWorktree.Name)
 					return m, nil // Silently ignore - or could show error message
 				}
+				logging.Info("Dashboard: entering DeleteView for worktree: %s (shortcut 'd')", selectedWorktree.Name)
 				m.currentView = DeleteView
 				return m, m.initializeDeleteStateForWorktree(selectedWorktree)
 			}
@@ -262,11 +274,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(keyMsg, m.keys.Init):
 			if m.repoInfo != nil && m.repoInfo.IsGitRepo && !m.repoInfo.IsInitialized {
+				logging.Info("Dashboard: entering InitView (shortcut 'i')")
 				m.currentView = InitView
 				m.initState = &InitState{
 					currentStep:       InitStepWelcome,
 					detectedFiles:     []DetectedFile{},
-					copyPatterns:      []CopyPattern{},
 					selected:          0,
 					worktreeDir:       m.generateDefaultWorktreeDir(),
 					customizationMode: "",
@@ -281,6 +293,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(keyMsg, m.keys.Config):
 			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+				logging.Info("Dashboard: entering ConfigView (shortcut 'c')")
 				m.currentView = ConfigView
 				return m, m.initializeConfigState()
 			}
@@ -288,7 +301,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(keyMsg, m.keys.Prune):
 			// Only allow pruning if initialized and we have worktrees
 			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+				logging.Info("Dashboard: running prune (shortcut 'p')")
 				return m, m.pruneWorktrees()
+			}
+			return m, nil
+		case key.Matches(keyMsg, m.keys.Navigate):
+			// Navigate to selected worktree directory
+			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
+				selectedWorktree := m.worktrees[m.selected]
+				logging.Info("Dashboard: navigating to worktree: %s (shortcut 'g')", selectedWorktree.Name)
+				return m, m.navigateToWorktree(selectedWorktree.Path)
 			}
 			return m, nil
 		}
@@ -369,4 +391,19 @@ func (m Model) generateDefaultWorktreeDir() string {
 
 	// Create worktree directory name based on current directory
 	return fmt.Sprintf("../%s-worktrees", dirName)
+}
+
+// getWorktreeDir returns the configured worktree directory or a default
+func (m Model) getWorktreeDir() string {
+	// Check config first
+	if m.config != nil && m.config.WorktreeDir != "" {
+		return m.config.WorktreeDir
+	}
+	// Fall back to default
+	return m.generateDefaultWorktreeDir()
+}
+
+// getWorktreePath returns the full path for a worktree given a branch name
+func (m Model) getWorktreePath(branchName string) string {
+	return fmt.Sprintf("%s/%s", m.getWorktreeDir(), sanitizeBranchForPath(branchName))
 }

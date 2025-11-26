@@ -103,7 +103,7 @@ func (m Model) renderRecommendationsStep() string {
 			prefix = "⚙️ "
 		}
 
-		content.WriteString(style.Width(m.width-8).Render(fmt.Sprintf("%s%s", prefix, option)))
+		content.WriteString(style.Width(m.width - 8).Render(fmt.Sprintf("%s%s", prefix, option)))
 		content.WriteString("\n")
 	}
 
