@@ -19,6 +19,14 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.initState.currentStep {
 	case InitStepCustomization:
 		return m.handleCustomizationKeys(msg)
+	case InitStepAIGenerating:
+		// AI is generating, only allow quit
+		if key.Matches(msg, m.keys.Quit) {
+			return m, tea.Quit
+		}
+		return m, nil
+	case InitStepAIResult:
+		return m.handleAIResultKeys(msg)
 	}
 
 	switch {
@@ -58,9 +66,9 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var maxItems int
 		switch m.initState.currentStep {
 		case InitStepRecommendations:
-			maxItems = 2 // "Accept recommendations" and "Customize configuration"
+			maxItems = 3 // "Accept recommendations", "Customize configuration", "Generate with AI"
 		case InitStepPreview:
-			maxItems = 4 // Number of preview items
+			maxItems = 3 // "Create configuration", "Back to customize", "Cancel"
 		case InitStepCreated:
 			maxItems = 2 // "Edit script" and "Skip and continue"
 		}
@@ -75,33 +83,62 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.initState.currentStep = InitStepAnalysis
 			return m, m.runProjectAnalysis()
 		case InitStepRecommendations:
-			if m.initState.selected == 1 {
-				// Selected "Customize configuration" option
-				logging.Info("InitView: entering customization")
-				m.initState.currentStep = InitStepCustomization
-				m.initState.selected = 0
-			} else {
+			switch m.initState.selected {
+			case 0:
 				// Selected "Accept recommendations and continue"
 				logging.Info("InitView: accepted recommendations, going to preview")
 				m.initState.currentStep = InitStepPreview
 				m.initState.selected = 0
+			case 1:
+				// Selected "Customize configuration" option
+				logging.Info("InitView: entering customization")
+				m.initState.currentStep = InitStepCustomization
+				m.initState.selected = 0
+			case 2:
+				// Selected "Generate setup script with AI"
+				logging.Info("InitView: generating AI setup script")
+				m.initState.currentStep = InitStepAIGenerating
+				return m, m.generateAISetupScript()
 			}
 			return m, nil
 		case InitStepPreview:
-			// Execute initialization
-			logging.Info("InitView: executing initialization")
-			m.initState.currentStep = InitStepExecuting
-			return m, m.runInitialization()
+			switch m.initState.selected {
+			case 0:
+				// Create configuration
+				logging.Info("InitView: executing initialization")
+				m.initState.currentStep = InitStepExecuting
+				return m, m.runInitialization()
+			case 1:
+				// Back to customize
+				logging.Info("InitView: back to customization")
+				m.initState.currentStep = InitStepCustomization
+				m.initState.selected = 0
+			case 2:
+				// Cancel
+				logging.Info("InitView: cancelled, back to Dashboard")
+				m.currentView = DashboardView
+				return m, m.loadProjectInfo()
+			}
+			return m, nil
 		case InitStepCreated:
 			if m.initState.selected == 0 {
-				// Edit script option
+				// Edit script option - open in editor and return to dashboard
 				logging.Info("InitView: opening post-create script for editing")
-				m.initState.currentStep = InitStepExecuting
-				return m, m.openPostCreateScript()
+				// Mark as initialized
+				if m.repoInfo != nil {
+					m.repoInfo.IsInitialized = true
+				}
+				m.currentView = DashboardView
+				return m, tea.Batch(m.openPostCreateScript(), m.loadProjectInfo())
 			} else {
-				// Skip and continue option
-				logging.Info("InitView: skipping script editing")
-				m.initState.currentStep = InitStepComplete
+				// Go to dashboard directly
+				logging.Info("InitView: going to dashboard")
+				// Mark as initialized
+				if m.repoInfo != nil {
+					m.repoInfo.IsInitialized = true
+				}
+				m.currentView = DashboardView
+				return m, m.loadProjectInfo()
 			}
 		case InitStepCommitConfirm:
 			// Commit changes
@@ -757,6 +794,69 @@ func (m Model) handleOpenInKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		logging.Debug("OpenInView: returning to Dashboard")
 		m.currentView = DashboardView
 		m.openInState = nil
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleAIResultKeys handles keyboard input for the AI result step
+func (m Model) handleAIResultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.initState == nil {
+		return m, nil
+	}
+
+	// If there was an error, any key goes back to recommendations
+	if m.initState.aiError != "" {
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Enter), key.Matches(msg, m.keys.Back):
+			m.initState.currentStep = InitStepRecommendations
+			m.initState.selected = 2 // Keep AI option selected
+			return m, nil
+		}
+		return m, nil
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return m, tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		m.initState.currentStep = InitStepRecommendations
+		m.initState.selected = 2
+		return m, nil
+	case key.Matches(msg, m.keys.Up):
+		if m.initState.selected > 0 {
+			m.initState.selected--
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Down):
+		if m.initState.selected < 2 { // 3 options
+			m.initState.selected++
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Enter):
+		switch m.initState.selected {
+		case 0:
+			// Use this script - save it and go to preview
+			logging.Info("InitView: using AI-generated script")
+			m.initState.postCreateScript = m.initState.aiGeneratedScript
+			m.initState.currentStep = InitStepPreview
+			m.initState.selected = 0
+		case 1:
+			// Regenerate
+			logging.Info("InitView: regenerating AI script")
+			m.initState.currentStep = InitStepAIGenerating
+			return m, m.generateAISetupScript()
+		case 2:
+			// Edit manually instead - go to customization
+			logging.Info("InitView: editing manually instead")
+			m.initState.currentStep = InitStepCustomization
+			m.initState.customizationMode = "postcreate"
+			m.initState.editingText = m.initState.aiGeneratedScript
+			m.initState.selected = 0
+		}
 		return m, nil
 	}
 

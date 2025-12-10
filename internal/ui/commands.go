@@ -802,3 +802,113 @@ func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
 		return tea.Quit()
 	}
 }
+
+// generateAISetupScript generates a setup script using Claude CLI
+func (m Model) generateAISetupScript() tea.Cmd {
+	return func() tea.Msg {
+		logging.Info("Starting AI setup script generation")
+
+		// Check if Claude CLI is available
+		claudePath, err := exec.LookPath("claude")
+		if err != nil {
+			// Try common locations
+			possiblePaths := []string{
+				"/usr/local/bin/claude",
+				os.ExpandEnv("$HOME/.local/bin/claude"),
+				"/opt/homebrew/bin/claude",
+			}
+			for _, p := range possiblePaths {
+				if _, err := os.Stat(p); err == nil {
+					claudePath = p
+					break
+				}
+			}
+			if claudePath == "" {
+				return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-cli")}
+			}
+		}
+
+		logging.Debug("Found Claude CLI at: %s", claudePath)
+
+		// Gather project context
+		var contextBuilder strings.Builder
+		contextBuilder.WriteString("Analyze this project and generate a bash setup script for a new git worktree.\n\n")
+		contextBuilder.WriteString("Project context:\n")
+
+		// Detected files
+		if m.initState != nil && len(m.initState.detectedFiles) > 0 {
+			contextBuilder.WriteString("\nDetected files to consider:\n")
+			for _, f := range m.initState.detectedFiles {
+				gitIgnored := ""
+				if f.IsGitIgnored {
+					gitIgnored = " (gitignored)"
+				}
+				contextBuilder.WriteString(fmt.Sprintf("- %s%s\n", f.Path, gitIgnored))
+			}
+		}
+
+		// Package manager
+		if m.initState != nil && m.initState.packageManager != "" {
+			contextBuilder.WriteString(fmt.Sprintf("\nDetected package manager: %s\n", m.initState.packageManager))
+		}
+
+		// Check for common project files
+		projectFiles := []string{"package.json", "go.mod", "Cargo.toml", "requirements.txt", "pyproject.toml", "Makefile", ".envrc"}
+		var foundFiles []string
+		for _, f := range projectFiles {
+			if _, err := os.Stat(f); err == nil {
+				foundFiles = append(foundFiles, f)
+			}
+		}
+		if len(foundFiles) > 0 {
+			contextBuilder.WriteString(fmt.Sprintf("\nProject files found: %s\n", strings.Join(foundFiles, ", ")))
+		}
+
+		contextBuilder.WriteString(`
+Requirements for the script:
+1. Copy gitignored environment files (like .env*) from the main worktree using symlinks
+2. Install dependencies using the detected package manager
+3. Run any necessary build or setup commands
+4. Handle direnv if .envrc exists
+5. Be idempotent (safe to run multiple times)
+
+Output ONLY the bash script content, no explanations. Start with #!/bin/bash
+`)
+
+		// Run Claude CLI with the prompt
+		cmd := exec.Command(claudePath, "-p", contextBuilder.String())
+		cmd.Dir, _ = os.Getwd()
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			logging.Error("Claude CLI failed: %v, output: %s", err, string(output))
+			return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %s", string(output))}
+		}
+
+		script := strings.TrimSpace(string(output))
+
+		// Basic validation - should start with shebang
+		if !strings.HasPrefix(script, "#!/") {
+			// Try to extract script from response if Claude added explanation
+			lines := strings.Split(script, "\n")
+			inScript := false
+			var scriptLines []string
+			for _, line := range lines {
+				if strings.HasPrefix(line, "#!/") {
+					inScript = true
+				}
+				if inScript {
+					scriptLines = append(scriptLines, line)
+				}
+			}
+			if len(scriptLines) > 0 {
+				script = strings.Join(scriptLines, "\n")
+			} else {
+				script = "#!/bin/bash\n\n# AI-generated script\n" + script
+			}
+		}
+
+		logging.Info("AI script generated successfully")
+		return aiScriptGeneratedMsg{script: script}
+	}
+}

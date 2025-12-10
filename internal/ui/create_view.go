@@ -33,272 +33,367 @@ func (m Model) createView() string {
 	}
 }
 
-// renderBranchModeStep shows branch mode selection
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 1: Branch Mode Selection
+// ═══════════════════════════════════════════════════════════════════════════
+
 func (m Model) renderBranchModeStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("🌱 Create New Worktree"))
-	content.WriteString("\n\n")
+	// Header
+	b.WriteString(WizardHeader("New Worktree"))
+	b.WriteString("\n\n")
 
-	// Show error if any
+	// Error display
 	if m.err != nil {
-		content.WriteString(ErrorStyle.Render(fmt.Sprintf("❌ %s", m.err.Error())))
-		content.WriteString("\n\n")
+		b.WriteString(ErrorStyle.Render("Error: " + m.err.Error()))
+		b.WriteString("\n\n")
 	}
 
-	content.WriteString(WorktreeNameStyle.Render("Choose branch type:"))
-	content.WriteString("\n\n")
+	// Subtitle
+	b.WriteString(WizardSubtitleStyle.Render("Choose branch type"))
+	b.WriteString("\n\n")
 
 	// Mode options
 	modes := []struct {
 		name string
-		icon string
+		desc string
 	}{
-		{"Create new branch", "🌿"},
-		{"Use existing branch", "🔄"},
+		{"Create new branch", "Start fresh from an existing branch"},
+		{"Use existing branch", "Checkout a branch that already exists"},
 	}
 
 	for i, mode := range modes {
-		prefix := "  "
+		b.WriteString(WizardOption(mode.name, i == m.createState.selectedMode))
+		b.WriteString("\n")
 		if i == m.createState.selectedMode {
-			prefix = "▶ "
+			b.WriteString(WizardDescStyle.Render("   " + mode.desc))
+			b.WriteString("\n")
 		}
-
-		modeLine := fmt.Sprintf("%s%s %s", prefix, mode.icon, mode.name)
-
-		// Apply color styling for selected item
-		if i == m.createState.selectedMode {
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(modeLine))
-		} else {
-			content.WriteString(modeLine)
-		}
-		content.WriteString("\n")
 	}
 
-	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("[↑↓] Navigate  [enter] Select  [esc] Cancel"))
+	// Help
+	b.WriteString("\n")
+	b.WriteString(WizardHelpBar("↑↓ select", "enter confirm", "esc cancel"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
-// renderBranchNameStep shows branch name input
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 2: Branch Name Input
+// ═══════════════════════════════════════════════════════════════════════════
+
 func (m Model) renderBranchNameStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("🌱 Create New Worktree"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("New Worktree"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Enter branch name:"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardSubtitleStyle.Render("Enter branch name"))
+	b.WriteString("\n\n")
 
-	// Branch name input
-	inputStyle := WorktreeItemStyle
-	if m.createState.branchName == "" {
-		inputStyle = WorktreeSelectedStyle
-	}
+	// Input field
+	cursor := "▮"
+	inputContent := m.createState.branchName + cursor
+	b.WriteString(WizardInputStyle.Width(40).Render(inputContent))
+	b.WriteString("\n\n")
 
-	branchInput := fmt.Sprintf("🌿 %s▮", m.createState.branchName)
-	content.WriteString(inputStyle.Width(m.width - 8).Render(branchInput))
-	content.WriteString("\n\n")
-
-	// Validation hints
+	// Validation
 	if m.createState.branchName != "" {
 		if isValidBranchName(m.createState.branchName) {
-			content.WriteString(StatusCleanStyle.Render("✅ Valid branch name"))
+			b.WriteString(WizardSuccessStyle.Render("✓ Valid branch name"))
 		} else {
-			content.WriteString(ErrorStyle.Render("❌ Invalid branch name"))
-			content.WriteString("\n")
-			content.WriteString(WorktreePathStyle.Render("Use only letters, numbers, dashes, and slashes"))
+			b.WriteString(ErrorStyle.Render("✗ Invalid branch name"))
+			b.WriteString("\n")
+			b.WriteString(WizardDescStyle.Render("  Use letters, numbers, dashes, underscores, slashes"))
 		}
-		content.WriteString("\n\n")
+		b.WriteString("\n\n")
 	}
 
-	content.WriteString(WorktreePathStyle.Render("Examples: feature/auth, hotfix/bug-123, experiments/new-ui"))
-	content.WriteString("\n\n")
+	// Examples
+	b.WriteString(WizardDescStyle.Render("Examples: feature/auth, hotfix/bug-123, experiment/new-ui"))
+	b.WriteString("\n\n")
 
-	content.WriteString(HelpStyle.Render("[type] Enter name  [enter] Continue  [esc] Cancel"))
+	b.WriteString(WizardHelpBar("type name", "enter continue", "esc back"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
-// renderExistingBranchStep shows existing branch selection
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 3: Existing Branch Selection
+// ═══════════════════════════════════════════════════════════════════════════
+
 func (m Model) renderExistingBranchStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("🔄 Select Existing Branch"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Select Branch"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Select branch to checkout:"))
-	content.WriteString("\n\n")
-
-	// Show search input
-	if m.createState.isSearching {
-		content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fmt.Sprintf("🔍 %s▮", m.createState.searchQuery)))
-		content.WriteString("\n\n")
-	} else if m.createState.searchQuery != "" {
-		// Show active filter (search mode exited but filter still active)
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("🔍 Filtered: %s", m.createState.searchQuery)))
-		content.WriteString("\n\n")
+	// Search input
+	if m.createState.isSearching || m.createState.searchQuery != "" {
+		searchStyle := WizardInputStyle.Width(30)
+		if m.createState.isSearching {
+			b.WriteString(searchStyle.Render("/ " + m.createState.searchQuery + "▮"))
+		} else {
+			b.WriteString(WizardDescStyle.Render("Filter: " + m.createState.searchQuery))
+		}
+		b.WriteString("\n\n")
 	}
 
-	// Use filtered branches if available
+	// Get branches to display
 	branches := m.createState.filteredAvailableBranches
 	if len(branches) == 0 && m.createState.searchQuery == "" {
 		branches = m.createState.availableBranches
 	}
 
-	if len(branches) == 0 && m.createState.searchQuery == "" {
-		content.WriteString(WorktreePathStyle.Render("No available branches found."))
-		content.WriteString("\n")
-		content.WriteString(WorktreePathStyle.Render("All branches may already have worktrees."))
-		content.WriteString("\n\n")
-		content.WriteString(HelpStyle.Render("[esc] Back"))
-		return HeaderStyle.Width(m.width - 4).Render(content.String())
+	if len(branches) == 0 {
+		if m.createState.searchQuery != "" {
+			b.WriteString(WizardDescStyle.Render("No branches match your search"))
+		} else {
+			b.WriteString(WizardDescStyle.Render("No available branches found"))
+			b.WriteString("\n")
+			b.WriteString(WizardDescStyle.Render("All branches may already have worktrees"))
+		}
+		b.WriteString("\n\n")
+		b.WriteString(WizardHelpBar("esc back"))
+		return m.wrapWizardContent(b.String())
 	}
 
-	// Show "no matches" if search returned nothing
-	if len(branches) == 0 && m.createState.searchQuery != "" {
-		content.WriteString(WorktreePathStyle.Render("No branches match your search."))
-		content.WriteString("\n\n")
-		content.WriteString(HelpStyle.Render("[esc] Cancel search  [backspace] Edit"))
-		return HeaderStyle.Width(m.width - 4).Render(content.String())
-	}
-
-	// Calculate visible window size
-	maxVisible := m.height - 17
+	// Calculate visible window
+	maxVisible := m.height - 18
 	if maxVisible < 5 {
 		maxVisible = 5
 	}
-	if maxVisible > 20 {
-		maxVisible = 20
+	if maxVisible > 15 {
+		maxVisible = 15
 	}
 
-	totalBranches := len(branches)
-	scrollOffset := m.createState.scrollOffset
+	// Branch list
+	b.WriteString(m.renderBranchList(branches, maxVisible, false))
 
-	// Ensure scroll offset is valid
-	if scrollOffset > totalBranches-maxVisible {
-		scrollOffset = totalBranches - maxVisible
-	}
-	if scrollOffset < 0 {
-		scrollOffset = 0
-	}
-
-	// Show scroll indicator at top if needed
-	if scrollOffset > 0 {
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("  ↑ %d more above", scrollOffset)))
-		content.WriteString("\n")
-	}
-
-	// Branch list with status indicators (simple list style)
-	endIndex := scrollOffset + maxVisible
-	if endIndex > totalBranches {
-		endIndex = totalBranches
-	}
-
-	for i := scrollOffset; i < endIndex; i++ {
-		status := branches[i]
-		// Status indicator
-		statusIcon := "🟢"
-		statusText := ""
-		if !status.IsClean {
-			statusIcon = "⚠️"
-			statusText = fmt.Sprintf(" (%d uncommitted, %d untracked)",
-				status.UncommittedFiles, status.UntrackedFiles)
-		}
-
-		// Current branch indicator
-		currentIndicator := ""
-		if status.IsCurrent {
-			currentIndicator = " (current)"
-		}
-
-		// Ahead/behind indicator
-		aheadBehind := ""
-		if status.AheadCount > 0 {
-			aheadBehind += fmt.Sprintf(" ↑%d", status.AheadCount)
-		}
-		if status.BehindCount > 0 {
-			aheadBehind += fmt.Sprintf(" ↓%d", status.BehindCount)
-		}
-
-		// Selection prefix
-		prefix := "  "
-		if i == m.createState.selectedBranch {
-			prefix = "▶ "
-		}
-
-		branchLine := fmt.Sprintf("%s%s %s%s%s%s",
-			prefix, statusIcon, status.Name, currentIndicator, statusText, aheadBehind)
-
-		// Apply color styling for selected item
-		if i == m.createState.selectedBranch {
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(branchLine))
-		} else {
-			content.WriteString(branchLine)
-		}
-		content.WriteString("\n")
-	}
-
-	// Show scroll indicator at bottom if needed
-	remaining := totalBranches - endIndex
-	if remaining > 0 {
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)))
-		content.WriteString("\n")
-	}
-
-	content.WriteString("\n")
+	// Help
+	b.WriteString("\n")
 	if m.createState.isSearching {
-		content.WriteString(HelpStyle.Render("[enter] Select  [esc] Cancel search"))
+		b.WriteString(WizardHelpBar("type filter", "enter select", "esc cancel"))
 	} else {
-		content.WriteString(HelpStyle.Render("[enter] Continue  [/] Search  [↑↓] Select  [esc] Back"))
+		b.WriteString(WizardHelpBar("↑↓ select", "/ search", "enter confirm", "esc back"))
 	}
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
-// renderBaseBranchStep shows base branch selection with warnings
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 4: Base Branch Selection
+// ═══════════════════════════════════════════════════════════════════════════
+
 func (m Model) renderBaseBranchStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("🌳 Select Base Branch"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Select Base Branch"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render(fmt.Sprintf("Create '%s' from:", m.createState.branchName)))
-	content.WriteString("\n\n")
+	b.WriteString(WizardSubtitleStyle.Render(fmt.Sprintf("Create '%s' from:", m.createState.branchName)))
+	b.WriteString("\n\n")
 
-	// Show search input
-	if m.createState.isSearching {
-		content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fmt.Sprintf("🔍 %s▮", m.createState.searchQuery)))
-		content.WriteString("\n\n")
-	} else if m.createState.searchQuery != "" {
-		// Show active filter (search mode exited but filter still active)
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("🔍 Filtered: %s", m.createState.searchQuery)))
-		content.WriteString("\n\n")
+	// Search input
+	if m.createState.isSearching || m.createState.searchQuery != "" {
+		searchStyle := WizardInputStyle.Width(30)
+		if m.createState.isSearching {
+			b.WriteString(searchStyle.Render("/ " + m.createState.searchQuery + "▮"))
+		} else {
+			b.WriteString(WizardDescStyle.Render("Filter: " + m.createState.searchQuery))
+		}
+		b.WriteString("\n\n")
 	}
 
-	// Use filtered branches if search is active, otherwise use all branches
+	// Get branches
 	branches := m.createState.filteredBranches
 	if len(branches) == 0 && m.createState.searchQuery == "" {
 		branches = m.createState.branchStatuses
 	}
 
-	// Show "no matches" if search returned nothing
 	if len(branches) == 0 && m.createState.searchQuery != "" {
-		content.WriteString(WorktreePathStyle.Render("No branches match your search."))
-		content.WriteString("\n\n")
-		content.WriteString(HelpStyle.Render("[esc] Cancel search  [backspace] Edit"))
-		return HeaderStyle.Width(m.width - 4).Render(content.String())
+		b.WriteString(WizardDescStyle.Render("No branches match your search"))
+		b.WriteString("\n\n")
+		b.WriteString(WizardHelpBar("esc cancel", "backspace edit"))
+		return m.wrapWizardContent(b.String())
 	}
 
-	// Calculate visible window size (leave room for header, footer, warnings)
-	maxVisible := m.height - 17 // Adjusted for search input
+	// Calculate visible window
+	maxVisible := m.height - 20
 	if maxVisible < 5 {
 		maxVisible = 5
 	}
-	if maxVisible > 20 {
-		maxVisible = 20
+	if maxVisible > 12 {
+		maxVisible = 12
 	}
+
+	// Branch list
+	b.WriteString(m.renderBranchList(branches, maxVisible, true))
+
+	// Warning for dirty branch
+	if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
+		selectedBranch := branches[m.createState.selectedBranch]
+		if !selectedBranch.IsClean {
+			b.WriteString("\n")
+			warning := fmt.Sprintf("⚠ '%s' has uncommitted changes\n  Worktree will be based on last commit only", selectedBranch.Name)
+			b.WriteString(WizardWarningStyle.Render(warning))
+			b.WriteString("\n")
+		}
+	}
+
+	// Help
+	b.WriteString("\n")
+	if m.createState.isSearching {
+		b.WriteString(WizardHelpBar("type filter", "enter select", "esc cancel"))
+	} else {
+		needsWarningAccept := len(branches) > 0 &&
+			m.createState.selectedBranch < len(branches) &&
+			!branches[m.createState.selectedBranch].IsClean &&
+			!m.createState.warningAccepted
+
+		if needsWarningAccept {
+			b.WriteString(WizardHelpBar("↑↓ select", "y accept warning", "/ search", "esc back"))
+		} else {
+			b.WriteString(WizardHelpBar("↑↓ select", "/ search", "enter confirm", "esc back"))
+		}
+	}
+
+	return m.wrapWizardContent(b.String())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 5: Confirmation
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (m Model) renderConfirmStep() string {
+	var b strings.Builder
+
+	b.WriteString(WizardHeader("Confirm Creation"))
+	b.WriteString("\n\n")
+
+	// Summary box
+	sanitizedName := sanitizeBranchForPath(m.createState.branchName)
+	worktreePath := m.getWorktreePath(m.createState.branchName)
+
+	summaryStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder).
+		Padding(0, 1)
+
+	var summary strings.Builder
+	summary.WriteString(WizardSubtitleStyle.Render("Worktree: ") + sanitizedName + "\n")
+	if m.createState.createMode == CreateModeNewBranch {
+		summary.WriteString(WizardSubtitleStyle.Render("Branch:   ") + WorktreeBranchStyle.Render(m.createState.branchName) + "\n")
+		summary.WriteString(WizardSubtitleStyle.Render("Based on: ") + m.createState.baseBranch + "\n")
+	} else {
+		summary.WriteString(WizardSubtitleStyle.Render("Branch:   ") + WorktreeBranchStyle.Render(m.createState.branchName) + "\n")
+	}
+	summary.WriteString(WizardSubtitleStyle.Render("Path:     ") + WizardDescStyle.Render(worktreePath))
+
+	b.WriteString(summaryStyle.Render(summary.String()))
+	b.WriteString("\n\n")
+
+	// Post-create info
+	b.WriteString(WizardDescStyle.Render("After creation, .gren/post-create.sh will run"))
+	b.WriteString("\n\n")
+
+	b.WriteString(WizardHelpBar("enter create", "esc back"))
+
+	return m.wrapWizardContent(b.String())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 6: Creating (Progress)
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (m Model) renderCreatingStep() string {
+	var b strings.Builder
+
+	b.WriteString(WizardHeader("Creating Worktree"))
+	b.WriteString("\n\n")
+
+	// Progress indicators
+	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+	doneStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
+	pendingStyle := WizardDescStyle
+
+	b.WriteString(spinnerStyle.Render("◐ Creating git worktree..."))
+	b.WriteString("\n")
+	b.WriteString(pendingStyle.Render("○ Running post-create hook..."))
+	b.WriteString("\n")
+	b.WriteString(pendingStyle.Render("○ Installing dependencies..."))
+	b.WriteString("\n\n")
+
+	_ = doneStyle // Will be used when we track actual progress
+
+	b.WriteString(WizardDescStyle.Render("Path: " + m.getWorktreePath(m.createState.branchName)))
+
+	return m.wrapWizardContent(b.String())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Step 7: Complete
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (m Model) renderCreateCompleteStep() string {
+	var b strings.Builder
+
+	b.WriteString(WizardHeader("Worktree Created"))
+	b.WriteString("\n\n")
+
+	b.WriteString(WizardSuccessStyle.Render("✓ " + m.createState.branchName))
+	b.WriteString("\n\n")
+
+	// Path
+	worktreePath := m.getWorktreePath(m.createState.branchName)
+	b.WriteString(WizardDescStyle.Render("Path: " + worktreePath))
+	b.WriteString("\n\n")
+
+	// Actions
+	b.WriteString(WizardSubtitleStyle.Render("Open in:"))
+	b.WriteString("\n\n")
+
+	actions := m.getAvailableActions()
+	if len(actions) == 1 {
+		b.WriteString(WizardDescStyle.Render("No editors detected in PATH"))
+		b.WriteString("\n\n")
+	}
+
+	for i, action := range actions {
+		label := action.Icon + " " + action.Name
+		b.WriteString(WizardOption(label, i == m.createState.selectedAction))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(WizardHelpBar("↑↓ select", "enter open", "esc dashboard"))
+
+	return m.wrapWizardContent(b.String())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+// wrapWizardContent wraps wizard content in a consistent container
+func (m Model) wrapWizardContent(content string) string {
+	// Calculate container dimensions
+	width := m.width - 4
+	if width > 80 {
+		width = 80
+	}
+
+	containerStyle := lipgloss.NewStyle().
+		Width(width).
+		Padding(1, 2)
+
+	return containerStyle.Render(content)
+}
+
+// renderBranchList renders a scrollable list of branches
+func (m Model) renderBranchList(branches []BranchStatus, maxVisible int, showWarnings bool) string {
+	var b strings.Builder
 
 	totalBranches := len(branches)
 	scrollOffset := m.createState.scrollOffset
@@ -311,210 +406,67 @@ func (m Model) renderBaseBranchStep() string {
 		scrollOffset = 0
 	}
 
-	// Show scroll indicator at top if needed
+	// Scroll indicator (top)
 	if scrollOffset > 0 {
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("  ↑ %d more above", scrollOffset)))
-		content.WriteString("\n")
+		b.WriteString(WizardDescStyle.Render(fmt.Sprintf("  ↑ %d more", scrollOffset)))
+		b.WriteString("\n")
 	}
 
-	// Branch list with status indicators (simple list style)
+	// Branch items
 	endIndex := scrollOffset + maxVisible
 	if endIndex > totalBranches {
 		endIndex = totalBranches
 	}
 
 	for i := scrollOffset; i < endIndex; i++ {
-		status := branches[i]
+		branch := branches[i]
+		selected := i == m.createState.selectedBranch
+
+		// Build branch line
+		var line strings.Builder
+
 		// Status indicator
-		statusIcon := "🟢"
-		statusText := ""
-		if !status.IsClean {
-			statusIcon = "⚠️"
-			statusText = fmt.Sprintf(" (%d uncommitted, %d untracked)",
-				status.UncommittedFiles, status.UntrackedFiles)
-		}
-
-		// Current branch indicator
-		currentIndicator := ""
-		if status.IsCurrent {
-			currentIndicator = " (current)"
-		}
-
-		// Ahead/behind indicator
-		aheadBehind := ""
-		if status.AheadCount > 0 {
-			aheadBehind += fmt.Sprintf(" ↑%d", status.AheadCount)
-		}
-		if status.BehindCount > 0 {
-			aheadBehind += fmt.Sprintf(" ↓%d", status.BehindCount)
-		}
-
-		// Selection prefix
-		prefix := "  "
-		if i == m.createState.selectedBranch {
-			prefix = "▶ "
-		}
-
-		branchLine := fmt.Sprintf("%s%s %s%s%s%s",
-			prefix, statusIcon, status.Name, currentIndicator, statusText, aheadBehind)
-
-		// Apply color styling for selected item
-		if i == m.createState.selectedBranch {
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(branchLine))
+		if branch.IsClean {
+			line.WriteString(StatusCleanStyle.Render("✓"))
 		} else {
-			content.WriteString(branchLine)
+			line.WriteString(StatusWarningStyle.Render("!"))
 		}
-		content.WriteString("\n")
+		line.WriteString(" ")
+
+		// Branch name
+		line.WriteString(branch.Name)
+
+		// Current indicator
+		if branch.IsCurrent {
+			line.WriteString(WizardDescStyle.Render(" (current)"))
+		}
+
+		// Ahead/behind
+		if branch.AheadCount > 0 {
+			line.WriteString(StatusUnpushedStyle.Render(fmt.Sprintf(" ↑%d", branch.AheadCount)))
+		}
+		if branch.BehindCount > 0 {
+			line.WriteString(StatusModifiedStyle.Render(fmt.Sprintf(" ↓%d", branch.BehindCount)))
+		}
+
+		// Uncommitted changes
+		if !branch.IsClean {
+			changes := branch.UncommittedFiles + branch.UntrackedFiles
+			if changes > 0 {
+				line.WriteString(WizardDescStyle.Render(fmt.Sprintf(" ~%d", changes)))
+			}
+		}
+
+		b.WriteString(WizardOption(line.String(), selected))
+		b.WriteString("\n")
 	}
 
-	// Show scroll indicator at bottom if needed
+	// Scroll indicator (bottom)
 	remaining := totalBranches - endIndex
 	if remaining > 0 {
-		content.WriteString(HelpStyle.Render(fmt.Sprintf("  ↓ %d more below", remaining)))
-		content.WriteString("\n")
+		b.WriteString(WizardDescStyle.Render(fmt.Sprintf("  ↓ %d more", remaining)))
+		b.WriteString("\n")
 	}
 
-	// Warning for dirty branches
-	if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
-		selectedStatus := branches[m.createState.selectedBranch]
-		if !selectedStatus.IsClean {
-			content.WriteString("\n")
-
-			warningStyle := ErrorStyle.Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#f59e0b")).
-				Padding(1, 2)
-
-			warningText := fmt.Sprintf("⚠️  Warning: '%s' has uncommitted changes\n"+
-				"   Worktree will be based on last commit only\n"+
-				"   Local changes stay in current repository", selectedStatus.Name)
-
-			content.WriteString(warningStyle.Render(warningText))
-			content.WriteString("\n\n")
-
-			if m.createState.isSearching {
-				content.WriteString(HelpStyle.Render("[enter] Select  [esc] Cancel search"))
-			} else if !m.createState.warningAccepted {
-				content.WriteString(HelpStyle.Render("[y] Accept warning  [/] Search  [↑↓] Navigate  [esc] Back"))
-			} else {
-				content.WriteString(HelpStyle.Render("[enter] Continue  [/] Search  [↑↓] Navigate  [esc] Back"))
-			}
-		} else {
-			content.WriteString("\n")
-			if m.createState.isSearching {
-				content.WriteString(HelpStyle.Render("[enter] Select  [esc] Cancel search"))
-			} else {
-				content.WriteString(HelpStyle.Render("[enter] Continue  [/] Search  [↑↓] Navigate  [esc] Back"))
-			}
-		}
-	}
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
-}
-
-// renderConfirmStep shows final confirmation
-func (m Model) renderConfirmStep() string {
-	var content strings.Builder
-
-	content.WriteString(TitleStyle.Render("✅ Confirm Worktree Creation"))
-	content.WriteString("\n\n")
-
-	// Summary - different format for new vs existing branch
-	sanitizedName := sanitizeBranchForPath(m.createState.branchName)
-	worktreePath := m.getWorktreePath(m.createState.branchName)
-	var summary string
-	if m.createState.createMode == CreateModeNewBranch {
-		summary = fmt.Sprintf("📁 Worktree: %s\n"+
-			"🌿 New Branch: %s\n"+
-			"🔗 Based on: %s\n"+
-			"📍 Path: %s/",
-			sanitizedName,
-			m.createState.branchName,
-			m.createState.baseBranch,
-			worktreePath)
-	} else {
-		summary = fmt.Sprintf("📁 Worktree: %s\n"+
-			"🔄 Existing Branch: %s\n"+
-			"📍 Path: %s/",
-			sanitizedName,
-			m.createState.branchName,
-			worktreePath)
-	}
-
-	content.WriteString(WorktreeItemStyle.Render(summary))
-	content.WriteString("\n\n")
-
-	// Post-create hook info
-	content.WriteString(WorktreeNameStyle.Render("After creation:"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("📜 .gren/post-create.sh will run"))
-	content.WriteString("\n\n")
-
-	content.WriteString(HelpStyle.Render("[enter] Create Worktree  [esc] Back"))
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
-}
-
-// renderCreatingStep shows progress
-func (m Model) renderCreatingStep() string {
-	var content strings.Builder
-
-	content.WriteString(TitleStyle.Render("🔄 Creating Worktree"))
-	content.WriteString("\n\n")
-
-	content.WriteString(SpinnerStyle.Render("⠋ Creating git worktree..."))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("⏳ Running post-create hook..."))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("⏸️ Installing dependencies..."))
-	content.WriteString("\n\n")
-
-	content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("📍 Path: %s/", m.getWorktreePath(m.createState.branchName))))
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
-}
-
-// renderCreateCompleteStep shows completion
-func (m Model) renderCreateCompleteStep() string {
-	var content strings.Builder
-
-	content.WriteString(TitleStyle.Render("🎉 Worktree Created!"))
-	content.WriteString("\n\n")
-
-	content.WriteString(StatusCleanStyle.Render(fmt.Sprintf("✅ Worktree '%s' ready", m.createState.branchName)))
-	content.WriteString("\n\n")
-
-	// Show worktree path
-	worktreePath := m.getWorktreePath(m.createState.branchName)
-	content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("📍 Path: %s", worktreePath)))
-	content.WriteString("\n\n")
-
-	// Show message if no editors are available
-	actions := m.getAvailableActions()
-	if len(actions) == 1 { // Only "Return to dashboard" is available
-		content.WriteString(WorktreePathStyle.Render("💡 No editors detected in PATH"))
-		content.WriteString("\n")
-		content.WriteString(WorktreePathStyle.Render("   You can manually navigate to the worktree directory"))
-		content.WriteString("\n\n")
-	}
-
-	// Show available actions as simple list
-	content.WriteString(WorktreeNameStyle.Render("What would you like to do next?"))
-	content.WriteString("\n\n")
-
-	for i, action := range actions {
-		prefix := "  "
-		if i == m.createState.selectedAction {
-			prefix = "▶ "
-			// Just change text color, no border/box
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name)))
-		} else {
-			content.WriteString(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name))
-		}
-		content.WriteString("\n")
-	}
-
-	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("↑↓ Navigate • Enter Select • Esc Back"))
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return b.String()
 }

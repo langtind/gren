@@ -32,7 +32,7 @@ var (
 
 // Layout constants
 const (
-	HeaderHeight = 3
+	HeaderHeight = 8 // Logo (6 lines) + spacing
 	FooterHeight = 2
 )
 
@@ -130,6 +130,9 @@ var (
 
 	StatusBuildingStyle = lipgloss.NewStyle().
 				Foreground(ColorAccent)
+
+	StatusWarningStyle = lipgloss.NewStyle().
+				Foreground(ColorWarning)
 )
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -362,4 +365,94 @@ func StatusBadgeDetailed(status string, staged, modified, untracked, unpushed in
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wizard / View Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	// WizardContainerStyle wraps wizard content with consistent padding
+	WizardContainerStyle = lipgloss.NewStyle().
+				Padding(1, 2)
+
+	// WizardTitleStyle for main wizard titles
+	WizardTitleStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary).
+				Bold(true).
+				MarginBottom(1)
+
+	// WizardSubtitleStyle for secondary titles
+	WizardSubtitleStyle = lipgloss.NewStyle().
+				Foreground(ColorText).
+				Bold(true)
+
+	// WizardDescStyle for descriptions
+	WizardDescStyle = lipgloss.NewStyle().
+			Foreground(ColorTextMuted)
+
+	// WizardInputStyle for text input fields
+	WizardInputStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorPrimary).
+				Padding(0, 1)
+
+	// WizardListItemStyle for list items
+	WizardListItemStyle = lipgloss.NewStyle().
+				Foreground(ColorText)
+
+	// WizardListItemSelectedStyle for selected list items
+	WizardListItemSelectedStyle = lipgloss.NewStyle().
+					Foreground(ColorPrimary).
+					Bold(true)
+
+	// WizardWarningStyle for warning boxes
+	WizardWarningStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorWarning).
+				Foreground(ColorWarning).
+				Padding(0, 1)
+
+	// WizardSuccessStyle for success messages
+	WizardSuccessStyle = lipgloss.NewStyle().
+				Foreground(ColorSuccess).
+				Bold(true)
+
+	// WizardDangerStyle for dangerous action confirmations
+	WizardDangerStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorError).
+				Foreground(ColorError).
+				Padding(0, 1)
+
+	// ConfirmModalStyle for confirmation modals
+	ConfirmModalStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorError).
+				Padding(1, 2)
+)
+
+// WizardHeader creates a styled wizard header with title
+func WizardHeader(title string) string {
+	return WizardTitleStyle.Render(title)
+}
+
+// WizardOption renders a selectable option in a list
+func WizardOption(label string, selected bool) string {
+	prefix := "  "
+	if selected {
+		prefix = "▶ "
+		return WizardListItemSelectedStyle.Render(prefix + label)
+	}
+	return WizardListItemStyle.Render(prefix + label)
+}
+
+// WizardHelpBar creates a help bar for wizard views
+func WizardHelpBar(items ...string) string {
+	separator := HelpSeparatorStyle.Render(" • ")
+	var styledItems []string
+	for _, item := range items {
+		styledItems = append(styledItems, HelpTextStyle.Render(item))
+	}
+	return strings.Join(styledItems, separator)
 }

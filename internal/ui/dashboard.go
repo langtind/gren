@@ -717,6 +717,11 @@ func (m Model) renderWithModal(baseView, modalContent string) string {
 	return strings.Join(result, "\n")
 }
 
+// renderDeleteModal renders delete confirmation as a modal overlay
+func (m Model) renderDeleteModal(baseView string) string {
+	return m.renderWithModal(baseView, m.renderDeleteConfirmModal())
+}
+
 // renderOpenInModal renders the "Open in..." modal content
 func (m Model) renderOpenInModal() string {
 	if m.openInState == nil {

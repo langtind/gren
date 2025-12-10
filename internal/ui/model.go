@@ -195,6 +195,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stay in config view after opening file
 		return m, nil
+
+	case aiScriptGeneratedMsg:
+		if m.initState != nil {
+			if msg.err != nil {
+				m.initState.aiError = msg.err.Error()
+			} else {
+				m.initState.aiGeneratedScript = msg.script
+				m.initState.aiError = ""
+			}
+			m.initState.currentStep = InitStepAIResult
+			m.initState.selected = 0
+		}
+		return m, nil
 	}
 
 	// Handle keyboard input based on current view
@@ -328,6 +341,11 @@ func (m Model) View() string {
 	case CreateView:
 		baseView = m.createView()
 	case DeleteView:
+		// Delete confirmation is shown as modal overlay on dashboard
+		if m.deleteState != nil && m.deleteState.currentStep == DeleteStepConfirm {
+			baseView = m.dashboardView()
+			return m.renderDeleteModal(baseView)
+		}
 		baseView = m.deleteView()
 	case InitView:
 		baseView = m.initView()

@@ -27,6 +27,10 @@ func (m Model) initView() string {
 		return m.renderCommitConfirmStep()
 	case InitStepFinal:
 		return m.renderFinalStep()
+	case InitStepAIGenerating:
+		return m.renderAIGeneratingStep()
+	case InitStepAIResult:
+		return m.renderAIResultStep()
 	default:
 		return "Unknown step"
 	}

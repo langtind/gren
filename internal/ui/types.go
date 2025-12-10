@@ -50,6 +50,8 @@ const (
 	InitStepComplete
 	InitStepCommitConfirm
 	InitStepFinal
+	InitStepAIGenerating
+	InitStepAIResult
 )
 
 // InitState holds the state for project initialization
@@ -64,6 +66,8 @@ type InitState struct {
 	analysisComplete  bool   // whether project analysis is complete
 	packageManager    string // detected package manager
 	postCreateCmd     string // detected post-create command
+	aiGeneratedScript string // AI-generated setup script content
+	aiError           string // Error message from AI generation
 }
 
 // DetectedFile represents a detected file that could be useful for worktrees
