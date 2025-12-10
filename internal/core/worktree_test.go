@@ -386,49 +386,6 @@ func TestDeleteWorktree(t *testing.T) {
 	})
 }
 
-func TestCreateWorktreeReadme(t *testing.T) {
-	manager := &WorktreeManager{}
-
-	// Create temp directory
-	dir, err := os.MkdirTemp("", "gren-readme-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(dir)
-
-	t.Run("creates readme", func(t *testing.T) {
-		err := manager.createWorktreeReadme(dir)
-		if err != nil {
-			t.Fatalf("createWorktreeReadme() error: %v", err)
-		}
-
-		readmePath := filepath.Join(dir, "README.md")
-		if _, err := os.Stat(readmePath); err != nil {
-			t.Error("README.md was not created")
-		}
-
-		content, _ := os.ReadFile(readmePath)
-		if len(content) == 0 {
-			t.Error("README.md is empty")
-		}
-	})
-
-	t.Run("does not overwrite existing readme", func(t *testing.T) {
-		readmePath := filepath.Join(dir, "README.md")
-		existingContent := "# Custom README\n"
-		os.WriteFile(readmePath, []byte(existingContent), 0644)
-
-		err := manager.createWorktreeReadme(dir)
-		if err != nil {
-			t.Fatalf("createWorktreeReadme() error: %v", err)
-		}
-
-		content, _ := os.ReadFile(readmePath)
-		if string(content) != existingContent {
-			t.Error("README.md was overwritten")
-		}
-	})
-}
 
 func TestCopyDir(t *testing.T) {
 	// Create source directory

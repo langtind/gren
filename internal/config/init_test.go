@@ -206,6 +206,39 @@ func TestInitialize(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(".gren", "post-create.sh")); err != nil {
 			t.Errorf("post-create.sh not created: %v", err)
 		}
+
+		// Verify README.md exists
+		readmePath := filepath.Join(".gren", "README.md")
+		if _, err := os.Stat(readmePath); err != nil {
+			t.Errorf("README.md not created: %v", err)
+		}
+
+		// Verify README.md contains expected content
+		readmeContent, err := os.ReadFile(readmePath)
+		if err != nil {
+			t.Fatalf("failed to read README.md: %v", err)
+		}
+		if !contains(string(readmeContent), "github.com/langtind/gren") {
+			t.Error("README.md should contain link to gren repository")
+		}
+		if !contains(string(readmeContent), "brew install langtind/tap/gren") {
+			t.Error("README.md should contain homebrew install command")
+		}
+
+		// Verify post-create.sh has gren header
+		hookContent, err := os.ReadFile(filepath.Join(".gren", "post-create.sh"))
+		if err != nil {
+			t.Fatalf("failed to read post-create.sh: %v", err)
+		}
+		if !contains(string(hookContent), "gren - Git Worktree Manager") {
+			t.Error("post-create.sh should contain gren header")
+		}
+		if !contains(string(hookContent), "https://github.com/langtind/gren") {
+			t.Error("post-create.sh should contain link to gren repository")
+		}
+		if !contains(string(hookContent), "brew install langtind/tap/gren") {
+			t.Error("post-create.sh should contain homebrew install command")
+		}
 	})
 
 	t.Run("empty project name fails", func(t *testing.T) {
@@ -269,6 +302,115 @@ func TestInitialize(t *testing.T) {
 			t.Error("Existing hook was overwritten")
 		}
 	})
+
+	t.Run("readme not recreated if exists", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "gren-init-readme-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		originalDir, _ := os.Getwd()
+		defer os.Chdir(originalDir)
+		os.Chdir(tempDir)
+
+		// Initialize git repo (required for getRepoRoot)
+		exec.Command("git", "init").Run()
+		exec.Command("git", "config", "user.email", "test@test.com").Run()
+		exec.Command("git", "config", "user.name", "Test User").Run()
+
+		// Pre-create README with custom content
+		os.MkdirAll(".gren", 0755)
+		customReadme := "# My Custom README\n"
+		readmePath := filepath.Join(".gren", "README.md")
+		os.WriteFile(readmePath, []byte(customReadme), 0644)
+
+		result := Initialize("test-project")
+
+		if !result.Success {
+			t.Errorf("Initialize() failed: %v", result.Error)
+		}
+
+		// README content should be unchanged
+		content, _ := os.ReadFile(readmePath)
+		if string(content) != customReadme {
+			t.Error("Existing README was overwritten")
+		}
+	})
+}
+
+func TestCreateGrenReadme(t *testing.T) {
+	t.Run("creates readme with expected content", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "gren-readme-test-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		originalDir, _ := os.Getwd()
+		defer os.Chdir(originalDir)
+		os.Chdir(tempDir)
+
+		// Create .gren directory
+		os.MkdirAll(ConfigDir, 0755)
+
+		err = createGrenReadme()
+		if err != nil {
+			t.Fatalf("createGrenReadme() error: %v", err)
+		}
+
+		readmePath := filepath.Join(ConfigDir, "README.md")
+		content, err := os.ReadFile(readmePath)
+		if err != nil {
+			t.Fatalf("failed to read README.md: %v", err)
+		}
+
+		// Check for expected content
+		if !contains(string(content), "gren") {
+			t.Error("README should mention gren")
+		}
+		if !contains(string(content), "github.com/langtind/gren") {
+			t.Error("README should contain link to gren repository")
+		}
+		if !contains(string(content), "brew install langtind/tap/gren") {
+			t.Error("README should contain homebrew install command")
+		}
+		if !contains(string(content), "config.json") {
+			t.Error("README should describe config.json")
+		}
+		if !contains(string(content), "post-create.sh") {
+			t.Error("README should describe post-create.sh")
+		}
+	})
+
+	t.Run("does not overwrite existing readme", func(t *testing.T) {
+		tempDir, err := os.MkdirTemp("", "gren-readme-overwrite-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		originalDir, _ := os.Getwd()
+		defer os.Chdir(originalDir)
+		os.Chdir(tempDir)
+
+		// Create .gren directory with existing README
+		os.MkdirAll(ConfigDir, 0755)
+		customContent := "# My Custom README\n"
+		readmePath := filepath.Join(ConfigDir, "README.md")
+		os.WriteFile(readmePath, []byte(customContent), 0644)
+
+		err = createGrenReadme()
+		if err != nil {
+			t.Fatalf("createGrenReadme() error: %v", err)
+		}
+
+		// Content should be unchanged
+		content, _ := os.ReadFile(readmePath)
+		if string(content) != customContent {
+			t.Error("Existing README was overwritten")
+		}
+	})
 }
 
 func TestDetectConfigFiles(t *testing.T) {
@@ -319,6 +461,29 @@ func TestDetectClaudeMd(t *testing.T) {
 }
 
 func TestGenerateHookContent(t *testing.T) {
+	t.Run("hook has gren header with install info", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir:    "../worktrees",
+			PackageManager: "npm",
+			Version:        "1.0.0",
+		}
+
+		detected := DetectedFiles{}
+
+		content := generateHookContentWithSymlinks(config, detected)
+
+		// Check for gren branding header
+		if !contains(content, "gren - Git Worktree Manager") {
+			t.Error("Hook should contain gren title")
+		}
+		if !contains(content, "https://github.com/langtind/gren") {
+			t.Error("Hook should contain link to gren repository")
+		}
+		if !contains(content, "brew install langtind/tap/gren") {
+			t.Error("Hook should contain homebrew install command")
+		}
+	})
+
 	t.Run("with bun and detected files", func(t *testing.T) {
 		config := &Config{
 			WorktreeDir:    "../worktrees",
