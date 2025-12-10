@@ -83,7 +83,7 @@ func (m Model) renderBranchModeStep() string {
 
 	// Style content to fill space
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(1, 2).
 		Render(content.String())
@@ -138,7 +138,7 @@ func (m Model) renderBranchNameStep() string {
 
 	// Style content
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(1, 2).
 		Render(content.String())
@@ -220,7 +220,7 @@ func (m Model) renderExistingBranchStep() string {
 
 	// Style content
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(0, 2).
 		Render(content.String())
@@ -322,7 +322,7 @@ func (m Model) renderBaseBranchStep() string {
 
 	// Style content
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(0, 2).
 		Render(content.String())
@@ -377,7 +377,7 @@ func (m Model) renderConfirmStep() string {
 
 	// Style content
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(1, 2).
 		Render(content.String())
@@ -413,7 +413,7 @@ func (m Model) renderCreatingStep() string {
 
 	// Style content
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(1, 2).
 		Render(content.String())
@@ -470,7 +470,7 @@ func (m Model) renderCreateCompleteStep() string {
 
 	// Style content
 	contentStyled := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Height(contentHeight).
 		Padding(1, 2).
 		Render(content.String())

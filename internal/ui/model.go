@@ -400,7 +400,6 @@ func (m Model) View() string {
 	return baseView
 }
 
-
 // generateDefaultWorktreeDir creates a default worktree directory name based on current working directory
 func (m Model) generateDefaultWorktreeDir() string {
 	// Get current working directory

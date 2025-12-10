@@ -418,25 +418,30 @@ func (m Model) renderNarrowWorktreeList(sortedWorktrees []Worktree, width, heigh
 		name := truncate(wt.Name, nameWidth)
 		branch := truncate(wt.Branch, branchWidth)
 
-		// Style based on selection
-		var rowContent string
+		// Style based on selection and current status
+		var nameStyle, branchStyle lipgloss.Style
 		if i == m.selected {
-			// Selected row - highlight
-			nameStyle := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
-			branchStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
-			rowContent = fmt.Sprintf("%s%-*s  %s",
-				indicator,
-				nameWidth, nameStyle.Render(name),
-				branchStyle.Render(branch))
+			// Selected row - use current style if current, otherwise primary
+			if wt.IsCurrent {
+				nameStyle = DashboardNameCurrentStyle
+			} else {
+				nameStyle = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+			}
+			branchStyle = DashboardBranchStyle
 		} else {
 			// Normal row
-			nameStyle := lipgloss.NewStyle().Foreground(ColorText)
-			branchStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-			rowContent = fmt.Sprintf("%s%-*s  %s",
-				indicator,
-				nameWidth, nameStyle.Render(name),
-				branchStyle.Render(branch))
+			if wt.IsCurrent {
+				nameStyle = DashboardNameCurrentStyle
+			} else {
+				nameStyle = DashboardNameStyle
+			}
+			branchStyle = DashboardBranchStyle
 		}
+
+		rowContent := fmt.Sprintf("%s%-*s  %s",
+			indicator,
+			nameWidth, nameStyle.Render(name),
+			branchStyle.Render(branch))
 
 		rows = append(rows, rowContent)
 	}
@@ -450,70 +455,80 @@ func (m Model) renderNarrowWorktreeList(sortedWorktrees []Worktree, width, heigh
 }
 
 func (m Model) renderTableHeader(width int) string {
-	// Column widths (proportional)
-	nameWidth := width * 20 / 100
-	branchWidth := width * 22 / 100
+	// Column widths (proportional) - no NAME column, branch is the identifier
+	branchWidth := width * 35 / 100
 	lastCommitWidth := width * 12 / 100
 	statusWidth := width * 12 / 100
-	pathWidth := width - nameWidth - branchWidth - lastCommitWidth - statusWidth
+	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
 
-	nameCol := TableHeaderStyle.Width(nameWidth).Render("NAME")
 	branchCol := TableHeaderStyle.Width(branchWidth).Render("BRANCH")
 	lastCommitCol := TableHeaderStyle.Width(lastCommitWidth).Render("LAST COMMIT")
 	statusCol := TableHeaderStyle.Width(statusWidth).Render("STATUS")
 	pathCol := TableHeaderStyle.Width(pathWidth).Render("PATH")
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, nameCol, branchCol, lastCommitCol, statusCol, pathCol)
+	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, pathCol)
 }
 
 func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	// Column widths (proportional) - must match header
-	nameWidth := width * 20 / 100
-	branchWidth := width * 22 / 100
+	branchWidth := width * 35 / 100
 	lastCommitWidth := width * 12 / 100
 	statusWidth := width * 12 / 100
-	pathWidth := width - nameWidth - branchWidth - lastCommitWidth - statusWidth
+	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
 
-	// Name with indicator
-	name := wt.Name
+	// Branch with current indicator
+	branch := wt.Branch
 	if wt.IsCurrent {
-		name = "● " + name
+		branch = "● " + branch
 	} else {
-		name = "  " + name
+		branch = "  " + branch
 	}
 
 	// Shorten path (use ~ for home directory)
-	path := shortenPath(wt.Path, pathWidth-2)
-
-	// Status badge with details
-	status := StatusBadgeDetailed(wt.Status, wt.StagedCount, wt.ModifiedCount, wt.UntrackedCount, wt.UnpushedCount)
+	// Add [main] suffix for main worktree
+	mainTag := ""
+	if wt.IsMain {
+		mainTag = " [main]"
+	}
+	path := shortenPath(wt.Path, pathWidth-2-len(mainTag))
 
 	// Style based on selection and current status
 	var rowStyle lipgloss.Style
+	var bgColor lipgloss.AdaptiveColor
 	if wt.IsCurrent && selected {
 		rowStyle = TableRowCurrentSelectedStyle
+		bgColor = ColorBgCurrentSelected
 	} else if wt.IsCurrent {
 		rowStyle = TableRowCurrentStyle
+		bgColor = ColorBgCurrent
 	} else if selected {
 		rowStyle = TableRowSelectedStyle
+		bgColor = ColorBgSelected
 	} else {
 		rowStyle = TableRowStyle
+		bgColor = lipgloss.AdaptiveColor{} // No background for normal rows
 	}
 
-	var nameStyle lipgloss.Style
+	// Status badge with details - pass background color for consistent styling
+	status := StatusBadgeDetailed(wt.Status, wt.StagedCount, wt.ModifiedCount, wt.UntrackedCount, wt.UnpushedCount, bgColor)
+
+	// Use Dashboard-specific styles for consistent coloring
+	var branchStyle lipgloss.Style
 	if wt.IsCurrent {
-		nameStyle = WorktreeNameCurrentStyle
+		branchStyle = DashboardNameCurrentStyle
 	} else {
-		nameStyle = WorktreeNameStyle
+		branchStyle = DashboardBranchStyle
 	}
 
-	nameCol := rowStyle.Width(nameWidth).Render(nameStyle.Render(truncate(name, nameWidth-2)))
-	branchCol := rowStyle.Width(branchWidth).Render(WorktreeBranchStyle.Render(truncate(wt.Branch, branchWidth-2)))
-	lastCommitCol := rowStyle.Width(lastCommitWidth).Render(WorktreePathStyle.Render(truncate(wt.LastCommit, lastCommitWidth-2)))
-	statusCol := rowStyle.Width(statusWidth).Render(status)
-	pathCol := rowStyle.Width(pathWidth).Render(WorktreePathStyle.Render(path))
+	// Build path with optional [main] tag - combine into single string for consistent background
+	pathText := path + mainTag
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, nameCol, branchCol, lastCommitCol, statusCol, pathCol)
+	branchCol := rowStyle.Width(branchWidth).Render(branchStyle.Render(truncate(branch, branchWidth-2)))
+	lastCommitCol := rowStyle.Width(lastCommitWidth).Render(DashboardCommitStyle.Render(truncate(wt.LastCommit, lastCommitWidth-2)))
+	statusCol := rowStyle.Width(statusWidth).Render(status)
+	pathCol := rowStyle.Width(pathWidth).Render(DashboardPathStyle.Render(pathText))
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, pathCol)
 }
 
 // shortenPath replaces home directory with ~ and truncates if needed
@@ -724,34 +739,42 @@ func (m Model) renderPreviewPanel(wt *Worktree, width, height int) string {
 		Bold(true).
 		MarginBottom(1)
 
-	if wt.IsCurrent {
-		lines = append(lines, titleStyle.Render("● "+wt.Name+" (current)"))
-	} else {
-		lines = append(lines, titleStyle.Render(wt.Name))
+	// Build title with indicators
+	title := wt.Name
+	var suffix string
+	if wt.IsCurrent && wt.IsMain {
+		title = "● " + title
+		suffix = " (current, main)"
+	} else if wt.IsCurrent {
+		title = "● " + title
+		suffix = " (current)"
+	} else if wt.IsMain {
+		suffix = " (main)"
 	}
+	lines = append(lines, titleStyle.Render(title+suffix))
 
 	lines = append(lines, "") // spacing
 
-	// Branch info
+	// Use consistent label and value styles
 	labelStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
-	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
 
+	// Branch info
 	lines = append(lines, labelStyle.Render("Branch"))
-	lines = append(lines, "  "+WorktreeBranchStyle.Render(wt.Branch))
+	lines = append(lines, "  "+DashboardBranchStyle.Render(wt.Branch))
 	lines = append(lines, "")
 
 	// Path
 	lines = append(lines, labelStyle.Render("Path"))
 	shortPath := shortenPath(wt.Path, width-4)
-	lines = append(lines, "  "+valueStyle.Render(shortPath))
+	lines = append(lines, "  "+DashboardPathStyle.Render(shortPath))
 	lines = append(lines, "")
 
 	// Last commit
 	lines = append(lines, labelStyle.Render("Last Commit"))
 	if wt.LastCommit != "" {
-		lines = append(lines, "  "+valueStyle.Render(wt.LastCommit))
+		lines = append(lines, "  "+DashboardCommitStyle.Render(wt.LastCommit))
 	} else {
-		lines = append(lines, "  "+WorktreePathStyle.Render("unknown"))
+		lines = append(lines, "  "+DashboardPathStyle.Render("unknown"))
 	}
 	lines = append(lines, "")
 
@@ -853,23 +876,8 @@ func getRecentCommits(worktreePath string, count int, maxWidth int) []string {
 
 // renderWithModal overlays a modal on top of a base view
 func (m Model) renderWithModal(baseView, modalContent string) string {
-	// Split base view into lines
-	baseLines := strings.Split(baseView, "\n")
-
-	// Modal dimensions
-	modalWidth := 40
-	modalHeight := strings.Count(modalContent, "\n") + 1
-
-	// Calculate modal position (centered)
-	startX := (m.width - modalWidth) / 2
-	startY := (m.height - modalHeight) / 2
-
-	if startX < 0 {
-		startX = 0
-	}
-	if startY < 0 {
-		startY = 0
-	}
+	// Modal width - fixed size that fits help content
+	modalWidth := 50
 
 	// Style for the modal box
 	modalStyle := lipgloss.NewStyle().
@@ -881,6 +889,21 @@ func (m Model) renderWithModal(baseView, modalContent string) string {
 	styledModal := modalStyle.Render(modalContent)
 	modalLines := strings.Split(styledModal, "\n")
 
+	// Split base view into lines
+	baseLines := strings.Split(baseView, "\n")
+
+	// Calculate modal position (centered)
+	modalVisualWidth := lipgloss.Width(modalLines[0])
+	startX := (m.width - modalVisualWidth) / 2
+	startY := (m.height - len(modalLines)) / 2
+
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
 	// Overlay modal on base view
 	result := make([]string, len(baseLines))
 	copy(result, baseLines)
@@ -890,32 +913,13 @@ func (m Model) renderWithModal(baseView, modalContent string) string {
 		result = append(result, strings.Repeat(" ", m.width))
 	}
 
-	// Overlay each modal line
+	// Overlay each modal line - use simple padding approach
 	for i, modalLine := range modalLines {
 		y := startY + i
 		if y >= 0 && y < len(result) {
-			baseLine := result[y]
-			// Pad base line if needed
-			for len(baseLine) < startX+lipgloss.Width(modalLine) {
-				baseLine += " "
-			}
-
-			// Create new line with modal overlaid
-			newLine := ""
-			if startX > 0 && startX < len(baseLine) {
-				newLine = baseLine[:startX]
-			} else if startX > 0 {
-				newLine = strings.Repeat(" ", startX)
-			}
-			newLine += modalLine
-
-			// Add remaining part of base line if any
-			endX := startX + lipgloss.Width(modalLine)
-			if endX < len(baseLine) {
-				newLine += baseLine[endX:]
-			}
-
-			result[y] = newLine
+			// Build line: left padding + modal + right side is ignored (modal covers it)
+			leftPad := strings.Repeat(" ", startX)
+			result[y] = leftPad + modalLine
 		}
 	}
 

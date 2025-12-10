@@ -10,36 +10,50 @@ func TestNewDefaultConfig(t *testing.T) {
 	tests := []struct {
 		name        string
 		projectName string
+		repoRoot    string
 		wantErr     bool
 		wantDir     string
+		wantMain    string
 	}{
 		{
 			name:        "valid project name",
 			projectName: "my-project",
+			repoRoot:    "/home/user/repos/my-project",
 			wantErr:     false,
-			wantDir:     "../my-project-worktrees",
+			wantDir:     "/home/user/repos/my-project-worktrees",
+			wantMain:    "/home/user/repos/my-project",
 		},
 		{
 			name:        "project with spaces preserved",
 			projectName: "  spaced-project  ",
+			repoRoot:    "/home/user/repos/spaced",
 			wantErr:     false,
-			wantDir:     "../  spaced-project  -worktrees",
+			wantDir:     "/home/user/repos/  spaced-project  -worktrees",
+			wantMain:    "/home/user/repos/spaced",
 		},
 		{
 			name:        "empty project name",
 			projectName: "",
+			repoRoot:    "/home/user/repos/test",
 			wantErr:     true,
 		},
 		{
 			name:        "whitespace only project name",
 			projectName: "   ",
+			repoRoot:    "/home/user/repos/test",
+			wantErr:     true,
+		},
+		{
+			name:        "empty repo root",
+			projectName: "my-project",
+			repoRoot:    "",
 			wantErr:     true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config, err := NewDefaultConfig(tt.projectName)
+			config, err := NewDefaultConfig(tt.projectName, tt.repoRoot)
 
 			if tt.wantErr {
 				if err == nil {
@@ -55,6 +69,10 @@ func TestNewDefaultConfig(t *testing.T) {
 
 			if config.WorktreeDir != tt.wantDir {
 				t.Errorf("WorktreeDir = %q, want %q", config.WorktreeDir, tt.wantDir)
+			}
+
+			if config.MainWorktree != tt.wantMain {
+				t.Errorf("MainWorktree = %q, want %q", config.MainWorktree, tt.wantMain)
 			}
 
 			if config.Version != DefaultVersion {
@@ -91,6 +109,7 @@ func TestManagerLoadSave(t *testing.T) {
 
 	t.Run("save and load config", func(t *testing.T) {
 		config := &Config{
+			MainWorktree:   tempDir,
 			WorktreeDir:    "../test-worktrees",
 			PackageManager: "bun",
 			PostCreateHook: ".gren/post-create.sh",
@@ -176,8 +195,9 @@ func TestManagerExists(t *testing.T) {
 
 	t.Run("config exists after save", func(t *testing.T) {
 		config := &Config{
-			WorktreeDir: "../test",
-			Version:     "1.0.0",
+			MainWorktree: tempDir,
+			WorktreeDir:  "../test",
+			Version:      "1.0.0",
 		}
 		if err := manager.Save(config); err != nil {
 			t.Fatalf("Save() error: %v", err)
@@ -223,10 +243,10 @@ func TestLoadInvalidConfig(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(tempDir)
 
-	// Create .gren directory with valid JSON but invalid config (empty worktree_dir)
+	// Create .gren directory with valid JSON but invalid config (empty main_worktree)
 	os.MkdirAll(ConfigDir, 0755)
 	configPath := filepath.Join(ConfigDir, ConfigFile)
-	os.WriteFile(configPath, []byte(`{"worktree_dir": "", "version": "1.0.0"}`), 0644)
+	os.WriteFile(configPath, []byte(`{"main_worktree": "", "worktree_dir": "../test", "version": "1.0.0"}`), 0644)
 
 	manager := NewManager()
 	_, err = manager.Load()
@@ -248,10 +268,11 @@ func TestSaveInvalidConfig(t *testing.T) {
 
 	manager := NewManager()
 
-	// Try to save config with empty worktree_dir
+	// Try to save config with empty main_worktree
 	config := &Config{
-		WorktreeDir: "",
-		Version:     "1.0.0",
+		MainWorktree: "",
+		WorktreeDir:  "../test",
+		Version:      "1.0.0",
 	}
 	err = manager.Save(config)
 	if err == nil {
@@ -270,6 +291,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: &Config{
+				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "npm",
 				Version:        "1.0.0",
@@ -279,6 +301,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config with auto package manager",
 			config: &Config{
+				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "auto",
 				Version:        "1.0.0",
@@ -288,6 +311,7 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config with bun",
 			config: &Config{
+				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "bun",
 				Version:        "1.0.0",
@@ -295,24 +319,36 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "empty main worktree",
+			config: &Config{
+				MainWorktree: "",
+				WorktreeDir:  "../worktrees",
+				Version:      "1.0.0",
+			},
+			wantErr: true,
+		},
+		{
 			name: "empty worktree dir",
 			config: &Config{
-				WorktreeDir: "",
-				Version:     "1.0.0",
+				MainWorktree: "/home/user/repo",
+				WorktreeDir:  "",
+				Version:      "1.0.0",
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty version",
 			config: &Config{
-				WorktreeDir: "../worktrees",
-				Version:     "",
+				MainWorktree: "/home/user/repo",
+				WorktreeDir:  "../worktrees",
+				Version:      "",
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid package manager",
 			config: &Config{
+				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "invalid",
 				Version:        "1.0.0",

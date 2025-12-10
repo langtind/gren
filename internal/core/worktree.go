@@ -38,12 +38,17 @@ type CreateWorktreeRequest struct {
 
 // WorktreeInfo represents basic worktree information
 type WorktreeInfo struct {
-	Name       string
-	Path       string
-	Branch     string
-	IsCurrent  bool
-	Status     string
-	LastCommit string // Relative time of last commit (e.g., "2 hours ago")
+	Name           string
+	Path           string
+	Branch         string
+	IsCurrent      bool
+	IsMain         bool   // True if this is the main worktree (where .git directory lives)
+	Status         string // "clean", "modified", "untracked", "mixed", "unpushed", "missing"
+	LastCommit     string // Relative time of last commit (e.g., "2 hours ago")
+	StagedCount    int    // Number of staged files (ready to commit)
+	ModifiedCount  int    // Number of modified files (not staged)
+	UntrackedCount int    // Number of untracked files
+	UnpushedCount  int    // Number of unpushed commits
 }
 
 // CheckPrerequisites verifies that required tools are available
@@ -108,10 +113,6 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
 			logging.Error("Failed to create worktree directory: %v", err)
 			return fmt.Errorf("failed to create worktree directory: %w", err)
-		}
-		// Create README.md in the worktree directory
-		if err := wm.createWorktreeReadme(worktreeDir); err != nil {
-			logging.Warn("Failed to create README.md in worktree directory: %v", err)
 		}
 	}
 
@@ -256,7 +257,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	return nil
 }
 
-// ListWorktrees returns a list of all worktrees
+// ListWorktrees returns a list of all worktrees with full status information
 func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, error) {
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
 	output, err := cmd.CombinedOutput()
@@ -265,7 +266,193 @@ func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, e
 		return nil, fmt.Errorf("failed to list worktrees: %w (git output: %s)", err, string(output))
 	}
 
-	return wm.parseWorktreeList(string(output)), nil
+	worktrees := wm.parseWorktreeList(string(output))
+
+	// Mark main worktree using config if available, otherwise detect by .git directory
+	cfg, _ := wm.configManager.Load()
+	mainWorktreePath := ""
+	if cfg != nil && cfg.MainWorktree != "" {
+		mainWorktreePath = cfg.MainWorktree
+	}
+
+	for i := range worktrees {
+		// Check if this is the main worktree
+		if mainWorktreePath != "" && worktrees[i].Path == mainWorktreePath {
+			worktrees[i].IsMain = true
+		} else if mainWorktreePath == "" {
+			// Fallback: detect main worktree by checking if .git is a directory (not a file)
+			gitPath := filepath.Join(worktrees[i].Path, ".git")
+			if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
+				worktrees[i].IsMain = true
+			}
+		}
+	}
+
+	// Enrich worktrees with status information
+	for i := range worktrees {
+		wm.enrichWorktreeStatus(&worktrees[i])
+	}
+
+	return worktrees, nil
+}
+
+// enrichWorktreeStatus adds detailed status information to a worktree
+func (wm *WorktreeManager) enrichWorktreeStatus(wt *WorktreeInfo) {
+	// Skip if worktree is missing
+	if wt.Status == "missing" {
+		return
+	}
+
+	// Get file counts
+	wt.StagedCount, wt.ModifiedCount, wt.UntrackedCount = getFileCounts(wt.Path, wt.IsCurrent)
+
+	// Get unpushed count
+	wt.UnpushedCount = getUnpushedCount(wt.Path, wt.IsCurrent)
+
+	// Determine status based on counts
+	hasModified := wt.StagedCount > 0 || wt.ModifiedCount > 0
+	hasUntracked := wt.UntrackedCount > 0
+
+	if hasModified && hasUntracked {
+		wt.Status = "mixed"
+	} else if hasModified {
+		wt.Status = "modified"
+	} else if hasUntracked {
+		wt.Status = "untracked"
+	} else if wt.UnpushedCount > 0 || isNotPushedToRemote(wt.Path, wt.IsCurrent) {
+		wt.Status = "unpushed"
+	} else {
+		wt.Status = "clean"
+	}
+
+	// Get last commit time
+	wt.LastCommit = getLastCommitTime(wt.Path)
+}
+
+// getFileCounts returns staged, modified, and untracked file counts
+func getFileCounts(worktreePath string, isCurrent bool) (staged, modified, untracked int) {
+	var cmd *exec.Cmd
+	if isCurrent {
+		cmd = exec.Command("git", "status", "--porcelain")
+	} else {
+		cmd = exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if len(line) < 2 {
+			continue
+		}
+		indexStatus := line[0] // Staging area (index) status
+		workStatus := line[1]  // Working tree status
+
+		// Untracked files
+		if indexStatus == '?' && workStatus == '?' {
+			untracked++
+			continue
+		}
+
+		// Staged changes (first column has M, A, D, R, C)
+		if indexStatus != ' ' && indexStatus != '?' {
+			staged++
+		}
+
+		// Unstaged changes (second column has M, D)
+		if workStatus != ' ' && workStatus != '?' {
+			modified++
+		}
+	}
+
+	return staged, modified, untracked
+}
+
+// getUnpushedCount returns the number of unpushed commits
+func getUnpushedCount(worktreePath string, isCurrent bool) int {
+	var cmd *exec.Cmd
+	if isCurrent {
+		cmd = exec.Command("git", "log", "@{u}..HEAD", "--oneline")
+	} else {
+		cmd = exec.Command("git", "-C", worktreePath, "log", "@{u}..HEAD", "--oneline")
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		return len(lines)
+	}
+	return 0
+}
+
+// isNotPushedToRemote checks if branch doesn't exist on remote
+func isNotPushedToRemote(worktreePath string, isCurrent bool) bool {
+	// Get current branch
+	var branchCmd *exec.Cmd
+	if isCurrent {
+		branchCmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	} else {
+		branchCmd = exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	}
+	branchOutput, err := branchCmd.Output()
+	if err != nil {
+		return false
+	}
+	branch := strings.TrimSpace(string(branchOutput))
+
+	if branch == "" || branch == "HEAD" {
+		return false
+	}
+
+	// Check if branch exists on remote
+	var remoteCheckCmd *exec.Cmd
+	if isCurrent {
+		remoteCheckCmd = exec.Command("git", "rev-parse", "--verify", "origin/"+branch)
+	} else {
+		remoteCheckCmd = exec.Command("git", "-C", worktreePath, "rev-parse", "--verify", "origin/"+branch)
+	}
+	return remoteCheckCmd.Run() != nil
+}
+
+// getLastCommitTime returns a human-readable relative time for the last commit
+func getLastCommitTime(worktreePath string) string {
+	cmd := exec.Command("git", "-C", worktreePath, "log", "-1", "--format=%cr")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	result := strings.TrimSpace(string(output))
+
+	// Shorten common phrases for compact display
+	replacements := map[string]string{
+		" seconds ago": "s ago",
+		" second ago":  "s ago",
+		" minutes ago": "m ago",
+		" minute ago":  "m ago",
+		" hours ago":   "h ago",
+		" hour ago":    "h ago",
+		" days ago":    "d ago",
+		" day ago":     "d ago",
+		" weeks ago":   "w ago",
+		" week ago":    "w ago",
+		" months ago":  "mo ago",
+		" month ago":   "mo ago",
+		" years ago":   "y ago",
+		" year ago":    "y ago",
+	}
+	for old, new := range replacements {
+		result = strings.ReplaceAll(result, old, new)
+	}
+
+	return result
 }
 
 // DeleteWorktree deletes a worktree by name or path
@@ -303,7 +490,14 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		}
 	}
 
-	// 2. Remove worktree using git
+	// 2. Remove .gren symlink if it exists (created by gren during worktree creation)
+	// This prevents "untracked files" errors during removal
+	grenSymlink := filepath.Join(targetWorktree.Path, ".gren")
+	if info, err := os.Lstat(grenSymlink); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		os.Remove(grenSymlink)
+	}
+
+	// 3. Remove worktree using git
 	// Note: --force is required for worktrees with submodules (even after deinit)
 	var cmd *exec.Cmd
 	if hasSubmodules {
@@ -343,7 +537,9 @@ func (wm *WorktreeManager) parseWorktreeList(output string) []WorktreeInfo {
 			current.Path = strings.TrimPrefix(line, "worktree ")
 			current.Name = filepath.Base(current.Path)
 		} else if strings.HasPrefix(line, "branch ") {
-			current.Branch = strings.TrimPrefix(line, "branch ")
+			branch := strings.TrimPrefix(line, "branch ")
+			// Strip refs/heads/ prefix for cleaner display
+			current.Branch = strings.TrimPrefix(branch, "refs/heads/")
 		} else if line == "bare" {
 			current.Branch = "(bare)"
 		} else if line == "detached" {
@@ -401,49 +597,4 @@ func copyDir(src, dst string) error {
 
 		return os.WriteFile(dstPath, data, info.Mode())
 	})
-}
-
-// createWorktreeReadme creates a README.md file in the worktree directory
-func (wm *WorktreeManager) createWorktreeReadme(worktreeDir string) error {
-	readmePath := filepath.Join(worktreeDir, "README.md")
-
-	// Don't overwrite existing README.md
-	if _, err := os.Stat(readmePath); err == nil {
-		return nil
-	}
-
-	content := `# Git Worktrees
-
-This directory contains git worktrees managed by [gren](https://github.com/langtind/gren).
-
-## What are git worktrees?
-
-Git worktrees allow you to have multiple working directories from the same repository, each checked out to different branches. This is useful for:
-
-- Working on multiple features simultaneously
-- Testing different branches without stashing changes
-- Maintaining clean separation between different work streams
-
-## About gren
-
-Gren is a Git Worktree Manager that makes it easy to create, manage, and work with git worktrees.
-
-- **Repository**: https://github.com/langtind/gren
-- **Documentation**: See the repository README for usage instructions
-
-## Directory Structure
-
-Each subdirectory in this folder represents a separate worktree:
-
-- Each worktree has its own working directory
-- Each worktree can be on a different branch
-- Changes in one worktree don't affect others
-- All worktrees share the same git history and remotes
-
----
-
-*This file was automatically created by gren. You can safely delete it if not needed.*
-`
-
-	return os.WriteFile(readmePath, []byte(content), 0644)
 }

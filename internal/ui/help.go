@@ -106,6 +106,35 @@ func (m Model) renderHelpContent() string {
 		}
 	}
 
+	// Legend section
+	b.WriteString("\n")
+	b.WriteString(sectionStyle.Render("Legend"))
+	b.WriteString("\n")
+
+	legendItems := []struct {
+		symbol string
+		desc   string
+	}{
+		{"●", "Current worktree (you are here)"},
+		{"[main]", "Main worktree (original repo)"},
+		{"+N", "Staged files"},
+		{"~N", "Modified files"},
+		{"?N", "Untracked files"},
+		{"↑N", "Unpushed commits"},
+		{"✓", "Clean (no changes)"},
+	}
+
+	symbolStyle := lipgloss.NewStyle().
+		Foreground(ColorPrimary).
+		Width(8)
+
+	for _, item := range legendItems {
+		b.WriteString("  ")
+		b.WriteString(symbolStyle.Render(item.symbol))
+		b.WriteString(descStyle.Render(item.desc))
+		b.WriteString("\n")
+	}
+
 	// Footer
 	b.WriteString("\n")
 	footerStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)

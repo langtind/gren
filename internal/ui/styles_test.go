@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestHelpItem(t *testing.T) {
@@ -147,43 +149,46 @@ func TestStatusBadge(t *testing.T) {
 }
 
 func TestStatusBadgeDetailed(t *testing.T) {
+	// Use empty AdaptiveColor for tests (no background)
+	noBg := lipgloss.AdaptiveColor{}
+
 	t.Run("all zeros returns clean", func(t *testing.T) {
-		result := StatusBadgeDetailed("clean", 0, 0, 0, 0)
+		result := StatusBadgeDetailed("clean", 0, 0, 0, 0, noBg)
 		if !strings.Contains(result, "✓") {
 			t.Errorf("StatusBadgeDetailed with all zeros should show ✓, got %q", result)
 		}
 	})
 
 	t.Run("staged only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 3, 0, 0, 0)
+		result := StatusBadgeDetailed("modified", 3, 0, 0, 0, noBg)
 		if !strings.Contains(result, "+3") {
 			t.Errorf("StatusBadgeDetailed should show +3 for staged, got %q", result)
 		}
 	})
 
 	t.Run("modified only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 0, 2, 0, 0)
+		result := StatusBadgeDetailed("modified", 0, 2, 0, 0, noBg)
 		if !strings.Contains(result, "~2") {
 			t.Errorf("StatusBadgeDetailed should show ~2 for modified, got %q", result)
 		}
 	})
 
 	t.Run("untracked only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 0, 0, 5, 0)
+		result := StatusBadgeDetailed("modified", 0, 0, 5, 0, noBg)
 		if !strings.Contains(result, "?5") {
 			t.Errorf("StatusBadgeDetailed should show ?5 for untracked, got %q", result)
 		}
 	})
 
 	t.Run("unpushed only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 0, 0, 0, 4)
+		result := StatusBadgeDetailed("modified", 0, 0, 0, 4, noBg)
 		if !strings.Contains(result, "↑4") {
 			t.Errorf("StatusBadgeDetailed should show ↑4 for unpushed, got %q", result)
 		}
 	})
 
 	t.Run("mixed status", func(t *testing.T) {
-		result := StatusBadgeDetailed("mixed", 1, 2, 3, 4)
+		result := StatusBadgeDetailed("mixed", 1, 2, 3, 4, noBg)
 		if !strings.Contains(result, "+1") {
 			t.Error("StatusBadgeDetailed should show +1 for staged")
 		}

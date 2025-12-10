@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -20,15 +21,22 @@ type InitResult struct {
 func Initialize(projectName string) InitResult {
 	result := InitResult{}
 
+	// Get the repository root (main worktree path)
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get repository root: %w", err)
+		return result
+	}
+
 	// Create .gren directory
-	err := os.MkdirAll(".gren", 0755)
+	err = os.MkdirAll(".gren", 0755)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create .gren directory: %w", err)
 		return result
 	}
 
 	// Create default configuration
-	config, err := NewDefaultConfig(projectName)
+	config, err := NewDefaultConfig(projectName, repoRoot)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create default config: %w", err)
 		return result
@@ -55,6 +63,12 @@ func Initialize(projectName string) InitResult {
 			return result
 		}
 		result.HookCreated = true
+	}
+
+	// Create README.md in .gren directory
+	if err := createGrenReadme(); err != nil {
+		// Non-fatal error, just log warning
+		_ = err // ignore error, README is optional
 	}
 
 	result.Success = true
@@ -144,9 +158,16 @@ func generateHookContentWithSymlinks(config *Config, detected DetectedFiles) str
 	var builder strings.Builder
 
 	builder.WriteString("#!/usr/bin/env bash\n")
-	builder.WriteString("# gren post-create hook\n")
-	builder.WriteString("# This script runs after creating a new worktree\n")
-	builder.WriteString("# Edit this file to customize your worktree setup\n\n")
+	builder.WriteString("# =============================================================================\n")
+	builder.WriteString("# gren - Git Worktree Manager\n")
+	builder.WriteString("# https://github.com/langtind/gren\n")
+	builder.WriteString("#\n")
+	builder.WriteString("# Install: brew install langtind/tap/gren\n")
+	builder.WriteString("# =============================================================================\n")
+	builder.WriteString("#\n")
+	builder.WriteString("# This script runs after creating a new worktree.\n")
+	builder.WriteString("# Customize it to fit your project's needs.\n")
+	builder.WriteString("#\n\n")
 	builder.WriteString("set -euo pipefail\n\n")
 	builder.WriteString("WORKTREE_PATH=\"$1\"\n")
 	builder.WriteString("BRANCH_NAME=\"${2:-}\"\n")
@@ -262,4 +283,41 @@ func isGitIgnored(path string) bool {
 	}
 
 	return false
+}
+
+// createGrenReadme creates a README.md file in the .gren directory
+func createGrenReadme() error {
+	readmePath := filepath.Join(ConfigDir, "README.md")
+
+	// Don't overwrite existing README.md
+	if fileExists(readmePath) {
+		return nil
+	}
+
+	content := `# gren configuration
+
+This folder was created by [gren](https://github.com/langtind/gren), a Git Worktree Manager.
+
+## Install
+
+` + "```" + `
+brew install langtind/tap/gren
+` + "```" + `
+
+## Files
+
+- ` + "`config.json`" + ` - Project configuration (worktree directory, hooks)
+- ` + "`post-create.sh`" + ` - Script that runs after creating new worktrees
+`
+	return os.WriteFile(readmePath, []byte(content), 0644)
+}
+
+// getRepoRoot returns the absolute path to the repository root (main worktree)
+func getRepoRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("not a git repository: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }

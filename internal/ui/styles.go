@@ -7,27 +7,61 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Modern color palette inspired by lazygit, gitui, and modern terminal aesthetics
+// ═══════════════════════════════════════════════════════════════════════════
+// COLOR PALETTE - Edit these to change the entire app's look
+// ═══════════════════════════════════════════════════════════════════════════
+
 var (
-	// Base colors - softer, more refined
-	ColorPrimary   = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#22c55e"} // Green
-	ColorSecondary = lipgloss.AdaptiveColor{Light: "#6366f1", Dark: "#818cf8"} // Indigo
-	ColorAccent    = lipgloss.AdaptiveColor{Light: "#f59e0b", Dark: "#fbbf24"} // Amber
-	ColorSuccess   = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#4ade80"} // Green
-	ColorWarning   = lipgloss.AdaptiveColor{Light: "#ea580c", Dark: "#fb923c"} // Orange
-	ColorError     = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"} // Red
+	// Brand / Primary colors
+	ColorPrimary   = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#22c55e"} // Green - main brand color
+	ColorSecondary = lipgloss.AdaptiveColor{Light: "#6366f1", Dark: "#818cf8"} // Indigo - accent color
+	ColorAccent    = lipgloss.AdaptiveColor{Light: "#f59e0b", Dark: "#fbbf24"} // Amber - highlights
 
-	// Neutral colors
-	ColorText       = lipgloss.AdaptiveColor{Light: "#1f2937", Dark: "#f3f4f6"}
-	ColorTextMuted  = lipgloss.AdaptiveColor{Light: "#6b7280", Dark: "#9ca3af"}
-	ColorTextSubtle = lipgloss.AdaptiveColor{Light: "#9ca3af", Dark: "#6b7280"}
-	ColorBorder     = lipgloss.AdaptiveColor{Light: "#d1d5db", Dark: "#374151"}
-	ColorBorderDim  = lipgloss.AdaptiveColor{Light: "#e5e7eb", Dark: "#1f2937"}
-	ColorHighlight  = lipgloss.AdaptiveColor{Light: "#dbeafe", Dark: "#1e3a5f"}
-	ColorSurface    = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#111827"}
+	// Semantic colors
+	ColorSuccess = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#4ade80"} // Green - positive status
+	ColorWarning = lipgloss.AdaptiveColor{Light: "#ea580c", Dark: "#fb923c"} // Orange - warnings
+	ColorError   = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"} // Red - errors
 
-	// Special purpose
-	ColorCurrentBranch = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"} // Purple for current
+	// Text hierarchy (light to dark on dark theme)
+	ColorTextPrimary   = lipgloss.AdaptiveColor{Light: "#1f2937", Dark: "#f9fafb"} // Brightest - names, important
+	ColorTextSecondary = lipgloss.AdaptiveColor{Light: "#374151", Dark: "#e5e7eb"} // Slightly dimmer
+	ColorTextMuted     = lipgloss.AdaptiveColor{Light: "#6b7280", Dark: "#9ca3af"} // Dimmer - timestamps, labels
+	ColorTextSubtle    = lipgloss.AdaptiveColor{Light: "#9ca3af", Dark: "#9ca3af"} // Subtle but still readable - paths
+
+	// Backgrounds
+	ColorBgNormal          = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#111827"} // Normal background
+	ColorBgSelected        = lipgloss.AdaptiveColor{Light: "#dbeafe", Dark: "#1e3a5f"} // Selected row (blue tint)
+	ColorBgCurrent         = lipgloss.AdaptiveColor{Light: "#ecfdf5", Dark: "#052e16"} // Current worktree (green tint)
+	ColorBgCurrentSelected = lipgloss.AdaptiveColor{Light: "#bbf7d0", Dark: "#14532d"} // Current + selected
+
+	// Borders
+	ColorBorder    = lipgloss.AdaptiveColor{Light: "#d1d5db", Dark: "#374151"} // Normal borders
+	ColorBorderDim = lipgloss.AdaptiveColor{Light: "#e5e7eb", Dark: "#1f2937"} // Subtle borders
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DASHBOARD TABLE COLORS - Specific colors for each column
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	// Column text colors - tweak these to adjust dashboard appearance
+	DashboardNameColor        = ColorTextPrimary // Worktree name - brightest
+	DashboardNameCurrentColor = ColorPrimary     // Current worktree name - green
+	DashboardBranchColor      = ColorSecondary   // Branch name - indigo
+	DashboardCommitColor      = ColorTextMuted   // Last commit time - muted
+	DashboardPathColor        = ColorTextMuted   // File path - same as commit for readability
+	DashboardMainTagColor     = ColorTextSubtle  // [main] tag - slightly dimmer
+
+	// Header color
+	DashboardHeaderColor = ColorTextMuted
+)
+
+// Legacy aliases for backward compatibility
+var (
+	ColorText          = ColorTextPrimary
+	ColorHighlight     = ColorBgSelected
+	ColorSurface       = ColorBgNormal
+	ColorCurrentBranch = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"} // Purple
 )
 
 // Layout constants
@@ -63,7 +97,7 @@ var (
 
 var (
 	TableHeaderStyle = lipgloss.NewStyle().
-				Foreground(ColorTextMuted).
+				Foreground(DashboardHeaderColor).
 				Bold(true).
 				BorderStyle(lipgloss.NormalBorder()).
 				BorderBottom(true).
@@ -74,17 +108,15 @@ var (
 			Padding(0, 1)
 
 	TableRowSelectedStyle = lipgloss.NewStyle().
-				Background(ColorHighlight).
-				Foreground(ColorText).
+				Background(ColorBgSelected).
 				Padding(0, 1)
 
 	TableRowCurrentStyle = lipgloss.NewStyle().
-				Background(lipgloss.AdaptiveColor{Light: "#ecfdf5", Dark: "#052e16"}).
+				Background(ColorBgCurrent).
 				Padding(0, 1)
 
 	TableRowCurrentSelectedStyle = lipgloss.NewStyle().
-					Background(lipgloss.AdaptiveColor{Light: "#bbf7d0", Dark: "#14532d"}).
-					Foreground(ColorText).
+					Background(ColorBgCurrentSelected).
 					Padding(0, 1)
 
 	TableCellStyle = lipgloss.NewStyle().
@@ -92,23 +124,42 @@ var (
 )
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Worktree Item Styles
+// Dashboard Column Styles - Used in renderWorktreeRow
 // ═══════════════════════════════════════════════════════════════════════════
 
 var (
-	WorktreeNameStyle = lipgloss.NewStyle().
-				Foreground(ColorText).
+	// Name column
+	DashboardNameStyle = lipgloss.NewStyle().
+				Foreground(DashboardNameColor).
 				Bold(true)
 
-	WorktreeNameCurrentStyle = lipgloss.NewStyle().
-					Foreground(ColorCurrentBranch).
+	DashboardNameCurrentStyle = lipgloss.NewStyle().
+					Foreground(DashboardNameCurrentColor).
 					Bold(true)
 
-	WorktreePathStyle = lipgloss.NewStyle().
-				Foreground(ColorTextSubtle)
+	// Branch column
+	DashboardBranchStyle = lipgloss.NewStyle().
+				Foreground(DashboardBranchColor)
 
-	WorktreeBranchStyle = lipgloss.NewStyle().
-				Foreground(ColorSecondary)
+	// Last commit column
+	DashboardCommitStyle = lipgloss.NewStyle().
+				Foreground(DashboardCommitColor)
+
+	// Path column
+	DashboardPathStyle = lipgloss.NewStyle().
+				Foreground(DashboardPathColor)
+
+	// Main tag style
+	DashboardMainTagStyle = lipgloss.NewStyle().
+				Foreground(DashboardMainTagColor)
+)
+
+// Legacy worktree styles (for backward compatibility)
+var (
+	WorktreeNameStyle        = DashboardNameStyle
+	WorktreeNameCurrentStyle = DashboardNameCurrentStyle
+	WorktreeBranchStyle      = DashboardBranchStyle
+	WorktreePathStyle        = DashboardPathStyle
 )
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -194,7 +245,7 @@ var (
 				MarginBottom(1)
 
 	DialogTextStyle = lipgloss.NewStyle().
-			Foreground(ColorText)
+			Foreground(ColorTextPrimary)
 )
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -226,8 +277,8 @@ var (
 			Padding(0, 2)
 
 	MenuItemSelectedStyle = lipgloss.NewStyle().
-				Background(ColorHighlight).
-				Foreground(ColorText).
+				Background(ColorBgSelected).
+				Foreground(ColorTextPrimary).
 				Padding(0, 2)
 
 	MenuItemDisabledStyle = lipgloss.NewStyle().
@@ -269,7 +320,7 @@ var (
 	TextColor       = lipgloss.Color("#f3f4f6")
 
 	BaseStyle = lipgloss.NewStyle().
-			Foreground(ColorText)
+			Foreground(ColorTextPrimary)
 
 	HeaderStyle = PanelStyle.Copy()
 
@@ -340,31 +391,56 @@ func StatusBadge(status string) string {
 
 // StatusBadgeDetailed returns styled status with counts in git-style format
 // Uses: +N staged, ~N modified, ?N untracked, ↑N unpushed (like warp/lazygit)
-func StatusBadgeDetailed(status string, staged, modified, untracked, unpushed int) string {
+// bgColor is optional - pass empty AdaptiveColor{} for no background
+func StatusBadgeDetailed(status string, staged, modified, untracked, unpushed int, bgColor lipgloss.AdaptiveColor) string {
 	var parts []string
+
+	// Create styles with background color to maintain row background
+	cleanStyle := StatusCleanStyle
+	modifiedStyle := StatusModifiedStyle
+	unpushedStyle := StatusUnpushedStyle
+
+	if bgColor.Dark != "" || bgColor.Light != "" {
+		cleanStyle = cleanStyle.Background(bgColor)
+		modifiedStyle = modifiedStyle.Background(bgColor)
+		unpushedStyle = unpushedStyle.Background(bgColor)
+	}
 
 	// Staged files (ready to commit) - green with +
 	if staged > 0 {
-		parts = append(parts, StatusCleanStyle.Render(fmt.Sprintf("+%d", staged)))
+		parts = append(parts, cleanStyle.Render(fmt.Sprintf("+%d", staged)))
 	}
 	// Modified files (not staged) - yellow/orange with ~
 	if modified > 0 {
-		parts = append(parts, StatusModifiedStyle.Render(fmt.Sprintf("~%d", modified)))
+		prefix := ""
+		if len(parts) > 0 {
+			prefix = " "
+		}
+		parts = append(parts, modifiedStyle.Render(fmt.Sprintf("%s~%d", prefix, modified)))
 	}
 	// Untracked files - yellow/orange with ?
 	if untracked > 0 {
-		parts = append(parts, StatusModifiedStyle.Render(fmt.Sprintf("?%d", untracked)))
+		prefix := ""
+		if len(parts) > 0 {
+			prefix = " "
+		}
+		parts = append(parts, modifiedStyle.Render(fmt.Sprintf("%s?%d", prefix, untracked)))
 	}
 	// Unpushed commits - blue with ↑
 	if unpushed > 0 {
-		parts = append(parts, StatusUnpushedStyle.Render(fmt.Sprintf("↑%d", unpushed)))
+		prefix := ""
+		if len(parts) > 0 {
+			prefix = " "
+		}
+		parts = append(parts, unpushedStyle.Render(fmt.Sprintf("%s↑%d", prefix, unpushed)))
 	}
 
 	if len(parts) == 0 {
-		return StatusCleanStyle.Render("✓")
+		return cleanStyle.Render("✓")
 	}
 
-	return strings.Join(parts, " ")
+	// Join without separator - spacing is included in each part
+	return strings.Join(parts, "")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -384,7 +460,7 @@ var (
 
 	// WizardSubtitleStyle for secondary titles
 	WizardSubtitleStyle = lipgloss.NewStyle().
-				Foreground(ColorText).
+				Foreground(ColorTextPrimary).
 				Bold(true)
 
 	// WizardDescStyle for descriptions
@@ -399,7 +475,7 @@ var (
 
 	// WizardListItemStyle for list items
 	WizardListItemStyle = lipgloss.NewStyle().
-				Foreground(ColorText)
+				Foreground(ColorTextPrimary)
 
 	// WizardListItemSelectedStyle for selected list items
 	WizardListItemSelectedStyle = lipgloss.NewStyle().

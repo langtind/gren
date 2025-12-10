@@ -1,14 +1,14 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/git"
 )
 
@@ -58,268 +58,33 @@ func (m *Model) refreshWorktrees() error {
 		return nil
 	}
 
-	// Get list of worktrees using git command
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
-	output, err := cmd.Output()
+	// Use core.WorktreeManager to get worktrees with full status
+	worktreeManager := core.NewWorktreeManager(m.gitRepo, m.configManager)
+	ctx := context.Background()
+	coreWorktrees, err := worktreeManager.ListWorktrees(ctx)
 	if err != nil {
-		// If git worktree fails, probably no worktrees
 		m.worktrees = nil
 		return nil
 	}
 
-	m.worktrees = m.parseWorktreeList(string(output))
+	// Convert core.WorktreeInfo to ui.Worktree
+	m.worktrees = make([]Worktree, len(coreWorktrees))
+	for i, wt := range coreWorktrees {
+		m.worktrees[i] = Worktree{
+			Name:           wt.Name,
+			Path:           wt.Path,
+			Branch:         wt.Branch,
+			Status:         wt.Status,
+			IsCurrent:      wt.IsCurrent,
+			IsMain:         wt.IsMain,
+			LastCommit:     wt.LastCommit,
+			StagedCount:    wt.StagedCount,
+			ModifiedCount:  wt.ModifiedCount,
+			UntrackedCount: wt.UntrackedCount,
+			UnpushedCount:  wt.UnpushedCount,
+		}
+	}
 	return nil
-}
-
-// parseWorktreeList parses git worktree list --porcelain output
-func (m Model) parseWorktreeList(output string) []Worktree {
-	var worktrees []Worktree
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-
-	var currentWorktree *Worktree
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			if currentWorktree != nil {
-				worktrees = append(worktrees, *currentWorktree)
-				currentWorktree = nil
-			}
-			continue
-		}
-
-		if strings.HasPrefix(line, "worktree ") {
-			if currentWorktree != nil {
-				worktrees = append(worktrees, *currentWorktree)
-			}
-			path := strings.TrimPrefix(line, "worktree ")
-			currentWorktree = &Worktree{
-				Name:      filepath.Base(path),
-				Path:      path,
-				Status:    "clean",
-				IsCurrent: false,
-			}
-		} else if strings.HasPrefix(line, "HEAD ") && currentWorktree != nil {
-			// Skip HEAD line - we'll use the branch line instead
-		} else if strings.HasPrefix(line, "branch ") && currentWorktree != nil {
-			branchRef := strings.TrimPrefix(line, "branch ")
-			// Extract branch name from refs/heads/branchname
-			if strings.HasPrefix(branchRef, "refs/heads/") {
-				currentWorktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
-			} else {
-				currentWorktree.Branch = branchRef
-			}
-		} else if line == "bare" && currentWorktree != nil {
-			// Skip bare worktrees for now
-		} else if line == "detached" && currentWorktree != nil {
-			currentWorktree.Branch = "detached"
-		} else if strings.HasPrefix(line, "prunable") && currentWorktree != nil {
-			// Mark worktree as missing/prunable
-			currentWorktree.Status = "missing"
-		}
-	}
-
-	// Add the last worktree if exists
-	if currentWorktree != nil {
-		worktrees = append(worktrees, *currentWorktree)
-	}
-
-	// Mark current worktree and get status for all worktrees
-	if len(worktrees) > 0 {
-		cwd, _ := os.Getwd()
-		for i := range worktrees {
-			isCurrent := worktrees[i].Path == cwd
-			worktrees[i].IsCurrent = isCurrent
-			// Get detailed status for all worktrees
-			statusInfo := m.getWorktreeStatusInfo(worktrees[i].Path, isCurrent)
-			worktrees[i].Status = statusInfo.Status
-			worktrees[i].UnpushedCount = statusInfo.UnpushedCount
-			// Get file counts (staged, modified, untracked)
-			staged, modified, untracked := getFileCounts(worktrees[i].Path, isCurrent)
-			worktrees[i].StagedCount = staged
-			worktrees[i].ModifiedCount = modified
-			worktrees[i].UntrackedCount = untracked
-			// Get last commit time
-			worktrees[i].LastCommit = getLastCommitTime(worktrees[i].Path)
-		}
-	}
-
-	return worktrees
-}
-
-// getFileCounts returns the number of staged, modified and untracked files
-// Git status porcelain format: XY filename
-// X = staging area status, Y = working tree status
-// ' ' = unmodified, M = modified, A = added, D = deleted, R = renamed, C = copied, U = unmerged, ? = untracked
-func getFileCounts(worktreePath string, isCurrent bool) (staged, modified, untracked int) {
-	var cmd *exec.Cmd
-	if isCurrent {
-		cmd = exec.Command("git", "status", "--porcelain")
-	} else {
-		cmd = exec.Command("git", "-C", worktreePath, "status", "--porcelain")
-	}
-
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, 0, 0
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		if len(line) < 2 {
-			continue
-		}
-		indexStatus := line[0]  // Staging area (index) status
-		workStatus := line[1]   // Working tree status
-
-		// Untracked files
-		if indexStatus == '?' && workStatus == '?' {
-			untracked++
-			continue
-		}
-
-		// Staged changes (first column has M, A, D, R, C)
-		if indexStatus != ' ' && indexStatus != '?' {
-			staged++
-		}
-
-		// Unstaged changes (second column has M, D)
-		if workStatus != ' ' && workStatus != '?' {
-			modified++
-		}
-	}
-
-	return staged, modified, untracked
-}
-
-// getLastCommitTime returns a human-readable relative time for the last commit
-func getLastCommitTime(worktreePath string) string {
-	// Use git log to get last commit time in relative format
-	cmd := exec.Command("git", "-C", worktreePath, "log", "-1", "--format=%cr")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-
-	result := strings.TrimSpace(string(output))
-
-	// Shorten common phrases for compact display
-	result = strings.ReplaceAll(result, " seconds ago", "s ago")
-	result = strings.ReplaceAll(result, " second ago", "s ago")
-	result = strings.ReplaceAll(result, " minutes ago", "m ago")
-	result = strings.ReplaceAll(result, " minute ago", "m ago")
-	result = strings.ReplaceAll(result, " hours ago", "h ago")
-	result = strings.ReplaceAll(result, " hour ago", "h ago")
-	result = strings.ReplaceAll(result, " days ago", "d ago")
-	result = strings.ReplaceAll(result, " day ago", "d ago")
-	result = strings.ReplaceAll(result, " weeks ago", "w ago")
-	result = strings.ReplaceAll(result, " week ago", "w ago")
-	result = strings.ReplaceAll(result, " months ago", "mo ago")
-	result = strings.ReplaceAll(result, " month ago", "mo ago")
-	result = strings.ReplaceAll(result, " years ago", "y ago")
-	result = strings.ReplaceAll(result, " year ago", "y ago")
-
-	return result
-}
-
-// WorktreeStatusInfo contains detailed status information for a worktree
-type WorktreeStatusInfo struct {
-	Status              string // "clean", "modified", "untracked", "mixed", "unpushed", "missing"
-	HasModified         bool
-	HasUntracked        bool
-	UnpushedCount       int
-	IsNotPushedToRemote bool // Branch doesn't exist on remote at all
-}
-
-// getWorktreeStatus gets the git status for a worktree
-func (m Model) getWorktreeStatus(worktreePath string, isCurrent bool) (string, error) {
-	info := m.getWorktreeStatusInfo(worktreePath, isCurrent)
-	return info.Status, nil
-}
-
-// getWorktreeStatusInfo gets detailed status information for a worktree
-func (m Model) getWorktreeStatusInfo(worktreePath string, isCurrent bool) WorktreeStatusInfo {
-	info := WorktreeStatusInfo{Status: "clean"}
-
-	// Get git status for uncommitted/untracked changes
-	var cmd *exec.Cmd
-	if isCurrent {
-		cmd = exec.Command("git", "status", "--porcelain")
-	} else {
-		cmd = exec.Command("git", "-C", worktreePath, "status", "--porcelain")
-	}
-
-	output, err := cmd.Output()
-	if err == nil {
-		statusLines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range statusLines {
-			if len(line) < 2 {
-				continue
-			}
-			// Check staged/modified status
-			if line[0] != ' ' && line[0] != '?' {
-				info.HasModified = true
-			}
-			if line[1] != ' ' && line[1] != '?' {
-				info.HasModified = true
-			}
-			// Check untracked status
-			if line[0] == '?' && line[1] == '?' {
-				info.HasUntracked = true
-			}
-		}
-	}
-
-	// Check for unpushed commits
-	var unpushedCmd *exec.Cmd
-	if isCurrent {
-		unpushedCmd = exec.Command("git", "log", "@{u}..HEAD", "--oneline")
-	} else {
-		unpushedCmd = exec.Command("git", "-C", worktreePath, "log", "@{u}..HEAD", "--oneline")
-	}
-
-	unpushedOutput, err := unpushedCmd.Output()
-	if err != nil {
-		// No upstream - check if branch exists on remote
-		var branchCmd *exec.Cmd
-		if isCurrent {
-			branchCmd = exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-		} else {
-			branchCmd = exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
-		}
-		branchOutput, _ := branchCmd.Output()
-		branch := strings.TrimSpace(string(branchOutput))
-
-		if branch != "" && branch != "HEAD" {
-			// Check if branch exists on remote
-			var remoteCheckCmd *exec.Cmd
-			if isCurrent {
-				remoteCheckCmd = exec.Command("git", "rev-parse", "--verify", "origin/"+branch)
-			} else {
-				remoteCheckCmd = exec.Command("git", "-C", worktreePath, "rev-parse", "--verify", "origin/"+branch)
-			}
-			if remoteCheckCmd.Run() != nil {
-				info.IsNotPushedToRemote = true
-			}
-		}
-	} else {
-		unpushedLines := strings.Split(strings.TrimSpace(string(unpushedOutput)), "\n")
-		if len(unpushedLines) > 0 && unpushedLines[0] != "" {
-			info.UnpushedCount = len(unpushedLines)
-		}
-	}
-
-	// Determine overall status
-	if info.HasModified && info.HasUntracked {
-		info.Status = "mixed"
-	} else if info.HasModified {
-		info.Status = "modified"
-	} else if info.HasUntracked {
-		info.Status = "untracked"
-	} else if info.UnpushedCount > 0 || info.IsNotPushedToRemote {
-		info.Status = "unpushed"
-	}
-
-	return info
 }
 
 // setupCreateState initializes create state from message
