@@ -876,23 +876,8 @@ func getRecentCommits(worktreePath string, count int, maxWidth int) []string {
 
 // renderWithModal overlays a modal on top of a base view
 func (m Model) renderWithModal(baseView, modalContent string) string {
-	// Split base view into lines
-	baseLines := strings.Split(baseView, "\n")
-
-	// Modal dimensions
-	modalWidth := 40
-	modalHeight := strings.Count(modalContent, "\n") + 1
-
-	// Calculate modal position (centered)
-	startX := (m.width - modalWidth) / 2
-	startY := (m.height - modalHeight) / 2
-
-	if startX < 0 {
-		startX = 0
-	}
-	if startY < 0 {
-		startY = 0
-	}
+	// Modal width - fixed size that fits help content
+	modalWidth := 50
 
 	// Style for the modal box
 	modalStyle := lipgloss.NewStyle().
@@ -904,6 +889,21 @@ func (m Model) renderWithModal(baseView, modalContent string) string {
 	styledModal := modalStyle.Render(modalContent)
 	modalLines := strings.Split(styledModal, "\n")
 
+	// Split base view into lines
+	baseLines := strings.Split(baseView, "\n")
+
+	// Calculate modal position (centered)
+	modalVisualWidth := lipgloss.Width(modalLines[0])
+	startX := (m.width - modalVisualWidth) / 2
+	startY := (m.height - len(modalLines)) / 2
+
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
 	// Overlay modal on base view
 	result := make([]string, len(baseLines))
 	copy(result, baseLines)
@@ -913,32 +913,13 @@ func (m Model) renderWithModal(baseView, modalContent string) string {
 		result = append(result, strings.Repeat(" ", m.width))
 	}
 
-	// Overlay each modal line
+	// Overlay each modal line - use simple padding approach
 	for i, modalLine := range modalLines {
 		y := startY + i
 		if y >= 0 && y < len(result) {
-			baseLine := result[y]
-			// Pad base line if needed
-			for len(baseLine) < startX+lipgloss.Width(modalLine) {
-				baseLine += " "
-			}
-
-			// Create new line with modal overlaid
-			newLine := ""
-			if startX > 0 && startX < len(baseLine) {
-				newLine = baseLine[:startX]
-			} else if startX > 0 {
-				newLine = strings.Repeat(" ", startX)
-			}
-			newLine += modalLine
-
-			// Add remaining part of base line if any
-			endX := startX + lipgloss.Width(modalLine)
-			if endX < len(baseLine) {
-				newLine += baseLine[endX:]
-			}
-
-			result[y] = newLine
+			// Build line: left padding + modal + right side is ignored (modal covers it)
+			leftPad := strings.Repeat(" ", startX)
+			result[y] = leftPad + modalLine
 		}
 	}
 
