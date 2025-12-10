@@ -487,22 +487,29 @@ func (m Model) openPostCreateScript() tea.Cmd {
 	return func() tea.Msg {
 		scriptPath := ".gren/post-create.sh"
 
-		// Try different editors in order of preference
-		editors := []string{"code", "cursor", "nano", "vi"}
-		var cmd *exec.Cmd
+		// First check EDITOR environment variable
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = os.Getenv("VISUAL")
+		}
 
-		for _, editor := range editors {
-			if isCommandAvailable(editor) {
-				cmd = exec.Command(editor, scriptPath)
-				break
+		// If no env var set, try common editors
+		if editor == "" {
+			fallbackEditors := []string{"code", "zed", "vim", "nano"}
+			for _, e := range fallbackEditors {
+				if isCommandAvailable(e) {
+					editor = e
+					break
+				}
 			}
 		}
 
-		if cmd == nil {
-			return scriptEditCompleteMsg{err: fmt.Errorf("no suitable editor found")}
+		if editor == "" {
+			return scriptEditCompleteMsg{err: fmt.Errorf("no editor found. Set EDITOR environment variable")}
 		}
 
-		err := cmd.Run()
+		cmd := exec.Command(editor, scriptPath)
+		err := cmd.Start()
 		return scriptEditCompleteMsg{err: err}
 	}
 }
@@ -709,44 +716,40 @@ func (m *Model) initializeActionsList() {
 // openConfigFile opens a configuration file in an available editor
 func (m Model) openConfigFile(filePath string) tea.Cmd {
 	return func() tea.Msg {
-		// Try to detect available editors in order of preference
-		editors := []struct {
-			name    string
-			command string
-		}{
-			{"Visual Studio Code", "code"},
-			{"Zed", "zed"},
-			{"Vim", "vim"},
-			{"Nano", "nano"},
-		}
-
-		var foundEditor string
-		for _, editor := range editors {
-			if _, err := exec.LookPath(editor.command); err == nil {
-				foundEditor = editor.command
-				break
-			}
-		}
-
-		if foundEditor == "" {
-			return configFileOpenedMsg{err: fmt.Errorf("no suitable editor found (tried: code, zed, vim, nano)")}
-		}
-
 		// Check if file exists
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			return configFileOpenedMsg{err: fmt.Errorf("config file does not exist: %s", filePath)}
 		}
 
-		// Execute the editor
-		cmd := exec.Command(foundEditor, filePath)
-		if err := cmd.Start(); err != nil {
-			return configFileOpenedMsg{err: fmt.Errorf("failed to open %s: %w", foundEditor, err)}
+		// First check EDITOR environment variable
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			// Fall back to VISUAL
+			editor = os.Getenv("VISUAL")
 		}
 
-		// For GUI editors like code/zed, we don't wait
-		// For terminal editors like vim/nano, we should wait but that would block the UI
-		// For now, we'll treat all editors the same way
-		return configFileOpenedMsg{err: nil} // Success
+		// If no env var set, try common editors
+		if editor == "" {
+			fallbackEditors := []string{"code", "zed", "vim", "nano"}
+			for _, e := range fallbackEditors {
+				if _, err := exec.LookPath(e); err == nil {
+					editor = e
+					break
+				}
+			}
+		}
+
+		if editor == "" {
+			return configFileOpenedMsg{err: fmt.Errorf("no editor found. Set EDITOR environment variable or install code/vim/nano")}
+		}
+
+		// Execute the editor
+		cmd := exec.Command(editor, filePath)
+		if err := cmd.Start(); err != nil {
+			return configFileOpenedMsg{err: fmt.Errorf("failed to open %s: %w", editor, err)}
+		}
+
+		return configFileOpenedMsg{err: nil}
 	}
 }
 
