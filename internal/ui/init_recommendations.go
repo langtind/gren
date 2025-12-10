@@ -30,7 +30,7 @@ func (m Model) renderRecommendationsStep() string {
 
 	// Detected files
 	if len(m.initState.detectedFiles) > 0 {
-		b.WriteString(WizardSubtitleStyle.Render("Files to copy"))
+		b.WriteString(WizardSubtitleStyle.Render("Files to symlink"))
 		b.WriteString("\n")
 
 		for _, file := range m.initState.detectedFiles {
@@ -58,7 +58,7 @@ func (m Model) renderRecommendationsStep() string {
 	options := []string{
 		"Accept and create configuration",
 		"Customize settings",
-		"Generate setup script with AI",
+		"Generate setup script with Claude Code",
 	}
 
 	for i, option := range options {

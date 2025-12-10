@@ -21,7 +21,7 @@ func (m Model) renderCompleteStep() string {
 
 	b.WriteString(WizardSubtitleStyle.Render("Each worktree will:"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  • Copy environment files"))
+	b.WriteString(WizardDescStyle.Render("  • Symlink environment files"))
 	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("  • Install dependencies"))
 	b.WriteString("\n")

@@ -11,7 +11,7 @@ Gren makes it easy to create, manage, and switch between Git worktrees with an i
 - ✨ Beautiful, intuitive TUI interface built with Bubble Tea
 - 🚀 Fast worktree creation and management
 - 🔧 Configurable post-create hooks and automation
-- 📁 Smart file copying (env files, configs, etc.)
+- 🔗 Smart file symlinking (env files, configs, etc.)
 - 🎯 Project-specific setup workflows
 - 🎨 Clean, modern terminal design with responsive layout
 - ⌨️ Keyboard-driven navigation with built-in help overlay

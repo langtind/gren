@@ -103,18 +103,17 @@ When creating new worktrees, a README.md file is automatically generated in the 
 ## Configuration System
 
 Projects can be initialized with `gren init` which creates:
-- `.gren/config.json` - Project configuration with worktree directory, copy patterns, and post-create hooks
+- `.gren/config.json` - Project configuration with worktree directory and post-create hooks
 - `.gren/post-create.sh` - Executable hook script with smart dependency installation
 
 The config includes:
-- File patterns to copy to new worktrees (e.g., `.env*`, `.claude/**/*`)
 - Auto-detected package manager and post-create commands
 - Configurable worktree directory location
 
 ### Post-Create Hook Features
 The generated post-create script includes:
-- Environment file copying (`.env*` patterns)
-- Claude configuration copying (if gitignored)
+- Symlinking environment files (`.env*` patterns) to main worktree
+- Symlinking Claude configuration (if gitignored)
 - Smart package manager detection and dependency installation
 - Direnv integration if `.envrc` exists
 

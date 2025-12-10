@@ -18,7 +18,7 @@ func (m Model) renderWelcomeStep() string {
 
 • Creating separate directories for different branches
 • Automatically setting up dependencies
-• Copying environment files`
+• Symlinking environment files`
 
 	b.WriteString(WizardDescStyle.Render(intro))
 	b.WriteString("\n\n")

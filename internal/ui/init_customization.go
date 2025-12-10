@@ -35,7 +35,7 @@ func (m Model) renderCustomizationMenu() string {
 		desc string
 	}{
 		{"Worktree location", fmt.Sprintf("Currently: %s", m.initState.worktreeDir)},
-		{"Files to copy", fmt.Sprintf("%d files detected", len(m.initState.detectedFiles))},
+		{"Files to symlink", fmt.Sprintf("%d files detected", len(m.initState.detectedFiles))},
 		{"Setup command", fmt.Sprintf("Currently: %s", m.initState.postCreateCmd)},
 	}
 
@@ -89,14 +89,14 @@ func (m Model) renderWorktreeCustomization() string {
 func (m Model) renderPatternsCustomization() string {
 	var b strings.Builder
 
-	b.WriteString(WizardHeader("Files to Copy"))
+	b.WriteString(WizardHeader("Files to Symlink"))
 	b.WriteString("\n\n")
 
 	if len(m.initState.detectedFiles) == 0 {
 		b.WriteString(WizardDescStyle.Render("No gitignored files detected."))
 		b.WriteString("\n\n")
 	} else {
-		b.WriteString(WizardSubtitleStyle.Render("These files will be copied to new worktrees:"))
+		b.WriteString(WizardSubtitleStyle.Render("These files will be symlinked in new worktrees:"))
 		b.WriteString("\n\n")
 
 		for _, file := range m.initState.detectedFiles {
@@ -114,7 +114,7 @@ func (m Model) renderPatternsCustomization() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(WizardDescStyle.Render("Edit .gren/post-create.sh to customize file copying"))
+	b.WriteString(WizardDescStyle.Render("Edit .gren/post-create.sh to customize file symlinking"))
 	b.WriteString("\n\n")
 
 	b.WriteString(WizardHelpBar("esc back"))

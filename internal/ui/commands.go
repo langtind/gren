@@ -865,7 +865,7 @@ func (m Model) generateAISetupScript() tea.Cmd {
 				}
 			}
 			if claudePath == "" {
-				return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-cli")}
+				return aiScriptGeneratedMsg{err: fmt.Errorf("Claude Code CLI not found.\n\nInstall it from: https://claude.ai/code\n\nAlternatively, choose 'Customize settings' to manually create a setup script.")}
 			}
 		}
 
@@ -906,14 +906,31 @@ func (m Model) generateAISetupScript() tea.Cmd {
 		}
 
 		contextBuilder.WriteString(`
-Requirements for the script:
-1. Copy gitignored environment files (like .env*) from the main worktree using symlinks
-2. Install dependencies using the detected package manager
-3. Run any necessary build or setup commands
-4. Handle direnv if .envrc exists
-5. Be idempotent (safe to run multiple times)
+The script receives these arguments:
+- $1 = WORKTREE_PATH (absolute path to the new worktree)
+- $2 = BRANCH_NAME (name of the branch)
+- $3 = BASE_BRANCH (the branch it was created from)
+- $4 = REPO_ROOT (absolute path to the main repository)
 
-Output ONLY the bash script content, no explanations. Start with #!/bin/bash
+Requirements for the script:
+1. Use symlinks (ln -sf) to link gitignored files from REPO_ROOT to WORKTREE_PATH
+   - This keeps files in sync and avoids duplication
+   - Example: ln -sf "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
+2. Symlink ALL gitignored environment files (.env, .env.local, .env.*.local, etc.)
+3. Symlink gitignored config directories (like .claude/) if they exist
+4. Install dependencies using the detected package manager
+5. Handle direnv: run "direnv allow" if .envrc exists and direnv is installed
+6. Be idempotent (safe to run multiple times)
+
+Example symlink section:
+  # Symlink environment files
+  [ -f "$REPO_ROOT/.env" ] && ln -sf "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
+  [ -f "$REPO_ROOT/.env.local" ] && ln -sf "$REPO_ROOT/.env.local" "$WORKTREE_PATH/.env.local"
+
+  # Symlink config directories
+  [ -d "$REPO_ROOT/.claude" ] && ln -sf "$REPO_ROOT/.claude" "$WORKTREE_PATH/.claude"
+
+Output ONLY the bash script content, no explanations. Start with #!/usr/bin/env bash
 `)
 
 		// Run Claude CLI with the prompt

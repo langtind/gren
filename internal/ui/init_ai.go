@@ -14,9 +14,11 @@ func (m Model) renderAIGeneratingStep() string {
 	b.WriteString("\n\n")
 
 	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
-	b.WriteString(spinnerStyle.Render("◐ Analyzing project with Claude..."))
+	b.WriteString(spinnerStyle.Render("◐ Analyzing project with Claude Code..."))
 	b.WriteString("\n\n")
 
+	b.WriteString(WizardDescStyle.Render("Using Claude Code CLI to generate a setup script"))
+	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("This may take a few seconds"))
 	b.WriteString("\n")
 
@@ -39,7 +41,7 @@ func (m Model) renderAIResultStep() string {
 		return m.wrapWizardContent(b.String())
 	}
 
-	b.WriteString(WizardHeader("AI-Generated Script"))
+	b.WriteString(WizardHeader("Claude Code Generated Script"))
 	b.WriteString("\n\n")
 
 	b.WriteString(WizardSuccessStyle.Render("Script generated successfully"))

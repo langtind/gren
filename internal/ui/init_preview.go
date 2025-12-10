@@ -23,7 +23,7 @@ func (m Model) renderPreviewStep() string {
 	var summary strings.Builder
 	summary.WriteString(WizardSubtitleStyle.Render("Location: ") + m.initState.worktreeDir + "\n")
 	summary.WriteString(WizardSubtitleStyle.Render("Command:  ") + m.initState.postCreateCmd + "\n")
-	summary.WriteString(WizardSubtitleStyle.Render("Files:    ") + fmt.Sprintf("%d to copy", len(m.initState.detectedFiles)))
+	summary.WriteString(WizardSubtitleStyle.Render("Files:    ") + fmt.Sprintf("%d to symlink", len(m.initState.detectedFiles)))
 
 	b.WriteString(summaryStyle.Render(summary.String()))
 	b.WriteString("\n\n")
