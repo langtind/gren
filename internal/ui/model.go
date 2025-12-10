@@ -212,6 +212,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle keyboard input based on current view
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		// Handle help toggle globally on dashboard
+		if m.currentView == DashboardView && key.Matches(keyMsg, m.keys.Help) {
+			m.helpVisible = !m.helpVisible
+			return m, nil
+		}
+
+		// Close help with esc
+		if m.helpVisible && key.Matches(keyMsg, m.keys.Back) {
+			m.helpVisible = false
+			return m, nil
+		}
+
+		// If help is visible, ignore other keys
+		if m.helpVisible {
+			return m, nil
+		}
+
 		if m.currentView == InitView {
 			return m.handleInitKeys(keyMsg)
 		}
@@ -338,6 +355,10 @@ func (m Model) View() string {
 	switch m.currentView {
 	case DashboardView:
 		baseView = m.dashboardView()
+		// Show help overlay if visible
+		if m.helpVisible {
+			return m.renderHelpOverlay(baseView)
+		}
 	case CreateView:
 		baseView = m.createView()
 	case DeleteView:

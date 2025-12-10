@@ -348,7 +348,7 @@ func (m Model) renderFooter() string {
 	nav := HelpItem("↑↓", "nav")
 	actions := HelpItem("n", "new") + " " + HelpItem("d", "del") + " " + HelpItem("p", "prune")
 	open := HelpItem("enter", "open") + " " + HelpItem("g", "goto")
-	other := HelpItem("c", "cfg") + " " + HelpItem("q", "quit")
+	other := HelpItem("c", "cfg") + " " + HelpItem("?", "help") + " " + HelpItem("q", "quit")
 
 	sep := HelpSeparatorStyle.Render(" │ ")
 	helpText := nav + sep + actions + sep + open + sep + other

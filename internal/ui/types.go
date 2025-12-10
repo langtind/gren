@@ -222,6 +222,9 @@ type Model struct {
 
 	// Key bindings
 	keys KeyMap
+
+	// Help overlay
+	helpVisible bool
 }
 
 // KeyMap defines key bindings for the application
@@ -239,6 +242,12 @@ type KeyMap struct {
 	Config   key.Binding
 	Prune    key.Binding
 	Navigate key.Binding
+	Help     key.Binding
+}
+
+// HelpState holds the state for the help overlay
+type HelpState struct {
+	visible bool
 }
 
 // DefaultKeyMap returns default key bindings
@@ -295,6 +304,10 @@ func DefaultKeyMap() KeyMap {
 		Navigate: key.NewBinding(
 			key.WithKeys("g"),
 			key.WithHelp("g", "navigate to worktree"),
+		),
+		Help: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "help"),
 		),
 	}
 }
