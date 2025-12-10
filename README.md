@@ -6,6 +6,12 @@ Gren makes it easy to create, manage, and switch between Git worktrees with an i
 
 ![gren screenshot](assets/screenshot.png)
 
+## About the Name
+
+**gren** (pronounced "grain" /ɡreːn/) is the Norwegian word for "branch" 🌿
+
+Just as git uses branches to organize code, gren helps you manage the physical directories (worktrees) where those branches live.
+
 ## Features
 
 - ✨ Beautiful, intuitive TUI interface built with Bubble Tea
