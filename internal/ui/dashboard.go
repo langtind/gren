@@ -176,9 +176,9 @@ func (m Model) renderWorktreeTable() string {
 
 // renderNarrowLayout renders vertical layout for narrow screens (list on top, preview below)
 func (m Model) renderNarrowLayout(sortedWorktrees []Worktree, selectedWorktree *Worktree, width, height int) string {
-	// Section header style
+	// Section header style - white/bright with icon
 	sectionHeaderStyle := lipgloss.NewStyle().
-		Foreground(ColorTextMuted).
+		Foreground(lipgloss.Color("#ffffff")).
 		Bold(true)
 
 	// Calculate heights: list section takes up to 40%, details get the rest
@@ -201,18 +201,18 @@ func (m Model) renderNarrowLayout(sortedWorktrees []Worktree, selectedWorktree *
 		detailsContentHeight = 5
 	}
 
-	// Render list section
-	listHeader := sectionHeaderStyle.Render("Worktrees")
+	// Render list section with icon
+	listHeader := sectionHeaderStyle.Render("◈ Worktrees")
 	list := m.renderNarrowWorktreeList(sortedWorktrees, width, listContentHeight)
 
-	// Separator with "Details" label
+	// Separator line
 	separatorLine := strings.Repeat("─", width)
 	separator := lipgloss.NewStyle().
 		Foreground(ColorBorderDim).
 		Render(separatorLine)
 
-	// Details header
-	detailsHeader := sectionHeaderStyle.Render("Details")
+	// Details header with icon
+	detailsHeader := sectionHeaderStyle.Render("◇ Details")
 
 	// Render preview/details panel (full width in narrow mode)
 	preview := m.renderNarrowPreviewPanel(selectedWorktree, width, detailsContentHeight)
