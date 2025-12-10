@@ -45,12 +45,12 @@ var (
 
 var (
 	// Column text colors - tweak these to adjust dashboard appearance
-	DashboardNameColor        = ColorTextPrimary   // Worktree name - brightest
-	DashboardNameCurrentColor = ColorPrimary       // Current worktree name - green
-	DashboardBranchColor      = ColorSecondary     // Branch name - indigo
-	DashboardCommitColor      = ColorTextMuted     // Last commit time - muted
-	DashboardPathColor        = ColorTextMuted     // File path - same as commit for readability
-	DashboardMainTagColor     = ColorTextSubtle    // [main] tag - slightly dimmer
+	DashboardNameColor        = ColorTextPrimary // Worktree name - brightest
+	DashboardNameCurrentColor = ColorPrimary     // Current worktree name - green
+	DashboardBranchColor      = ColorSecondary   // Branch name - indigo
+	DashboardCommitColor      = ColorTextMuted   // Last commit time - muted
+	DashboardPathColor        = ColorTextMuted   // File path - same as commit for readability
+	DashboardMainTagColor     = ColorTextSubtle  // [main] tag - slightly dimmer
 
 	// Header color
 	DashboardHeaderColor = ColorTextMuted
@@ -58,9 +58,9 @@ var (
 
 // Legacy aliases for backward compatibility
 var (
-	ColorText       = ColorTextPrimary
-	ColorHighlight  = ColorBgSelected
-	ColorSurface    = ColorBgNormal
+	ColorText          = ColorTextPrimary
+	ColorHighlight     = ColorBgSelected
+	ColorSurface       = ColorBgNormal
 	ColorCurrentBranch = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"} // Purple
 )
 

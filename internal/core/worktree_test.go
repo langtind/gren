@@ -386,7 +386,6 @@ func TestDeleteWorktree(t *testing.T) {
 	})
 }
 
-
 func TestCopyDir(t *testing.T) {
 	// Create source directory
 	srcDir, err := os.MkdirTemp("", "gren-copy-src-*")
