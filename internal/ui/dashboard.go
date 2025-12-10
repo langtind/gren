@@ -474,7 +474,7 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	statusWidth := width * 12 / 100
 	pathWidth := width - nameWidth - branchWidth - lastCommitWidth - statusWidth
 
-	// Name with indicator
+	// Name with current indicator
 	name := wt.Name
 	if wt.IsCurrent {
 		name = "● " + name
@@ -483,7 +483,12 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	}
 
 	// Shorten path (use ~ for home directory)
-	path := shortenPath(wt.Path, pathWidth-2)
+	// Add [main] suffix for main worktree
+	pathSuffix := ""
+	if wt.IsMain {
+		pathSuffix = " [main]"
+	}
+	path := shortenPath(wt.Path, pathWidth-2-len(pathSuffix)) + pathSuffix
 
 	// Status badge with details
 	status := StatusBadgeDetailed(wt.Status, wt.StagedCount, wt.ModifiedCount, wt.UntrackedCount, wt.UnpushedCount)
@@ -724,11 +729,19 @@ func (m Model) renderPreviewPanel(wt *Worktree, width, height int) string {
 		Bold(true).
 		MarginBottom(1)
 
-	if wt.IsCurrent {
-		lines = append(lines, titleStyle.Render("● "+wt.Name+" (current)"))
-	} else {
-		lines = append(lines, titleStyle.Render(wt.Name))
+	// Build title with indicators
+	title := wt.Name
+	var suffix string
+	if wt.IsCurrent && wt.IsMain {
+		title = "● " + title
+		suffix = " (current, main)"
+	} else if wt.IsCurrent {
+		title = "● " + title
+		suffix = " (current)"
+	} else if wt.IsMain {
+		suffix = " (main)"
 	}
+	lines = append(lines, titleStyle.Render(title+suffix))
 
 	lines = append(lines, "") // spacing
 

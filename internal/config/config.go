@@ -21,6 +21,7 @@ const (
 
 // Config represents the gren configuration.
 type Config struct {
+	MainWorktree   string `json:"main_worktree"`
 	WorktreeDir    string `json:"worktree_dir"`
 	PackageManager string `json:"package_manager"`
 	PostCreateHook string `json:"post_create_hook"`
@@ -40,13 +41,21 @@ func NewManager() *Manager {
 }
 
 // NewDefaultConfig returns a default configuration for the given project.
-func NewDefaultConfig(projectName string) (*Config, error) {
+// repoRoot should be the absolute path to the main worktree (where .git directory lives).
+func NewDefaultConfig(projectName, repoRoot string) (*Config, error) {
 	if strings.TrimSpace(projectName) == "" {
 		return nil, fmt.Errorf("project name cannot be empty")
 	}
+	if strings.TrimSpace(repoRoot) == "" {
+		return nil, fmt.Errorf("repo root cannot be empty")
+	}
+
+	// Use absolute path for worktree directory, sibling to main worktree
+	worktreeDir := filepath.Join(filepath.Dir(repoRoot), projectName+"-worktrees")
 
 	return &Config{
-		WorktreeDir:    filepath.Join("..", projectName+"-worktrees"),
+		MainWorktree:   repoRoot,
+		WorktreeDir:    worktreeDir,
 		PackageManager: "auto",
 		PostCreateHook: filepath.Join(ConfigDir, DefaultHookFile),
 		Version:        DefaultVersion,
@@ -115,6 +124,10 @@ func (m *Manager) Exists() bool {
 
 // validateConfig validates the configuration fields.
 func (m *Manager) validateConfig(config *Config) error {
+	if strings.TrimSpace(config.MainWorktree) == "" {
+		return fmt.Errorf("main_worktree cannot be empty")
+	}
+
 	if strings.TrimSpace(config.WorktreeDir) == "" {
 		return fmt.Errorf("worktree_dir cannot be empty")
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -76,7 +77,7 @@ func TestDetectPackageManager(t *testing.T) {
 			}
 
 			// Create default config and detect
-			config, _ := NewDefaultConfig("test-project")
+			config, _ := NewDefaultConfig("test-project", tempDir)
 			config, _ = detectProjectSettings(config)
 
 			if config.PackageManager != tt.expected {
@@ -106,7 +107,7 @@ func TestDetectEnvFiles(t *testing.T) {
 	os.WriteFile(".env.local", []byte("SECRET=value"), 0644)
 	os.WriteFile(".env.test.local", []byte("TEST=value"), 0644)
 
-	config, _ := NewDefaultConfig("test")
+	config, _ := NewDefaultConfig("test", tempDir)
 	_, detected := detectProjectSettings(config)
 
 	// Should detect .env.local (other patterns may or may not match depending on glob)
@@ -137,7 +138,7 @@ func TestDetectClaudeDir(t *testing.T) {
 		os.Mkdir(".claude", 0755)
 		os.WriteFile(".gitignore", []byte(".claude\n"), 0644)
 
-		config, _ := NewDefaultConfig("test")
+		config, _ := NewDefaultConfig("test", tempDir)
 		_, detected := detectProjectSettings(config)
 
 		if !detected.ClaudeDir {
@@ -151,7 +152,7 @@ func TestDetectClaudeDir(t *testing.T) {
 		os.Mkdir(".claude", 0755)
 		// No .gitignore
 
-		config, _ := NewDefaultConfig("test")
+		config, _ := NewDefaultConfig("test", tempDir)
 		_, detected := detectProjectSettings(config)
 
 		if detected.ClaudeDir {
@@ -171,6 +172,11 @@ func TestInitialize(t *testing.T) {
 		originalDir, _ := os.Getwd()
 		defer os.Chdir(originalDir)
 		os.Chdir(tempDir)
+
+		// Initialize git repo (required for getRepoRoot)
+		exec.Command("git", "init").Run()
+		exec.Command("git", "config", "user.email", "test@test.com").Run()
+		exec.Command("git", "config", "user.name", "Test User").Run()
 
 		result := Initialize("test-project")
 
@@ -235,6 +241,11 @@ func TestInitialize(t *testing.T) {
 		defer os.Chdir(originalDir)
 		os.Chdir(tempDir)
 
+		// Initialize git repo (required for getRepoRoot)
+		exec.Command("git", "init").Run()
+		exec.Command("git", "config", "user.email", "test@test.com").Run()
+		exec.Command("git", "config", "user.name", "Test User").Run()
+
 		// Pre-create hook with custom content
 		os.MkdirAll(".gren", 0755)
 		customHook := "#!/bin/bash\n# Custom hook\n"
@@ -276,7 +287,7 @@ func TestDetectConfigFiles(t *testing.T) {
 	os.WriteFile(".envrc", []byte("export FOO=bar"), 0644)
 	os.WriteFile(".nvmrc", []byte("18"), 0644)
 
-	config, _ := NewDefaultConfig("test")
+	config, _ := NewDefaultConfig("test", tempDir)
 	_, detected := detectProjectSettings(config)
 
 	if len(detected.ConfigFiles) != 2 {
@@ -299,7 +310,7 @@ func TestDetectClaudeMd(t *testing.T) {
 	os.WriteFile(".gitignore", []byte("CLAUDE.md\n"), 0644)
 	os.WriteFile("CLAUDE.md", []byte("# Instructions"), 0644)
 
-	config, _ := NewDefaultConfig("test")
+	config, _ := NewDefaultConfig("test", tempDir)
 	_, detected := detectProjectSettings(config)
 
 	if !detected.ClaudeMd {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,9 +47,11 @@ func setupTestEnvironment(t *testing.T) (string, *WorktreeManager, func()) {
 	grenDir := filepath.Join(dir, ".gren")
 	os.MkdirAll(grenDir, 0755)
 
+	worktreeDir := filepath.Join(filepath.Dir(dir), "test-worktrees")
 	configPath := filepath.Join(grenDir, "config.json")
 	configContent := `{
-		"worktree_dir": "../test-worktrees",
+		"main_worktree": "` + dir + `",
+		"worktree_dir": "` + worktreeDir + `",
 		"package_manager": "auto",
 		"version": "1.0.0"
 	}`
@@ -61,7 +64,6 @@ func setupTestEnvironment(t *testing.T) (string, *WorktreeManager, func()) {
 		os.Chdir(originalDir)
 		os.RemoveAll(dir)
 		// Also clean up worktrees directory
-		worktreeDir := filepath.Join(filepath.Dir(dir), "test-worktrees")
 		os.RemoveAll(worktreeDir)
 	}
 
@@ -165,8 +167,8 @@ branch refs/heads/main
 			t.Errorf("Name = %q, want repo", worktrees[0].Name)
 		}
 
-		if worktrees[0].Branch != "refs/heads/main" {
-			t.Errorf("Branch = %q, want refs/heads/main", worktrees[0].Branch)
+		if worktrees[0].Branch != "main" {
+			t.Errorf("Branch = %q, want main", worktrees[0].Branch)
 		}
 	})
 
@@ -644,8 +646,8 @@ branch refs/heads/main
 			t.Fatalf("got %d worktrees, want 1", len(worktrees))
 		}
 
-		if worktrees[0].Branch != "refs/heads/main" {
-			t.Errorf("Branch = %q, want refs/heads/main", worktrees[0].Branch)
+		if worktrees[0].Branch != "main" {
+			t.Errorf("Branch = %q, want main", worktrees[0].Branch)
 		}
 	})
 }
@@ -760,11 +762,12 @@ echo "Hook executed" > "$1/.hook-executed"
 
 		// Update config to use the hook
 		configPath := filepath.Join(dir, ".gren", "config.json")
-		configContent := `{
+		configContent := fmt.Sprintf(`{
+			"main_worktree": %q,
 			"worktree_dir": "../test-worktrees",
 			"post_create_hook": ".gren/post-create.sh",
 			"version": "1.0.0"
-		}`
+		}`, dir)
 		os.WriteFile(configPath, []byte(configContent), 0644)
 
 		req := CreateWorktreeRequest{
@@ -801,11 +804,12 @@ echo "Hook executed" > "$1/.hook-executed"
 	t.Run("handles missing hook gracefully", func(t *testing.T) {
 		// Update config to point to nonexistent hook
 		configPath := filepath.Join(dir, ".gren", "config.json")
-		configContent := `{
+		configContent := fmt.Sprintf(`{
+			"main_worktree": %q,
 			"worktree_dir": "../test-worktrees",
 			"post_create_hook": ".gren/nonexistent-hook.sh",
 			"version": "1.0.0"
-		}`
+		}`, dir)
 		os.WriteFile(configPath, []byte(configContent), 0644)
 
 		req := CreateWorktreeRequest{
@@ -905,7 +909,7 @@ func TestWorktreeInfoFields(t *testing.T) {
 		info := WorktreeInfo{
 			Name:       "test",
 			Path:       "/path/to/test",
-			Branch:     "refs/heads/test",
+			Branch:     "test",
 			IsCurrent:  true,
 			Status:     "clean",
 			LastCommit: "2 hours ago",
@@ -917,8 +921,8 @@ func TestWorktreeInfoFields(t *testing.T) {
 		if info.Path != "/path/to/test" {
 			t.Errorf("Path = %q, want '/path/to/test'", info.Path)
 		}
-		if info.Branch != "refs/heads/test" {
-			t.Errorf("Branch = %q, want 'refs/heads/test'", info.Branch)
+		if info.Branch != "test" {
+			t.Errorf("Branch = %q, want 'test'", info.Branch)
 		}
 		if !info.IsCurrent {
 			t.Error("IsCurrent = false, want true")

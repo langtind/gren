@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -20,15 +21,22 @@ type InitResult struct {
 func Initialize(projectName string) InitResult {
 	result := InitResult{}
 
+	// Get the repository root (main worktree path)
+	repoRoot, err := getRepoRoot()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get repository root: %w", err)
+		return result
+	}
+
 	// Create .gren directory
-	err := os.MkdirAll(".gren", 0755)
+	err = os.MkdirAll(".gren", 0755)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create .gren directory: %w", err)
 		return result
 	}
 
 	// Create default configuration
-	config, err := NewDefaultConfig(projectName)
+	config, err := NewDefaultConfig(projectName, repoRoot)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create default config: %w", err)
 		return result
@@ -262,4 +270,14 @@ func isGitIgnored(path string) bool {
 	}
 
 	return false
+}
+
+// getRepoRoot returns the absolute path to the repository root (main worktree)
+func getRepoRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("not a git repository: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }

@@ -30,6 +30,7 @@ type Worktree struct {
 	Branch         string
 	Status         string // "clean", "modified", "building", etc.
 	IsCurrent      bool   // true if this is the current worktree
+	IsMain         bool   // true if this is the main worktree (where .git directory lives)
 	LastCommit     string // Relative time of last commit (e.g., "2h ago")
 	StagedCount    int    // Number of staged files (ready to commit)
 	ModifiedCount  int    // Number of modified files (not staged)
