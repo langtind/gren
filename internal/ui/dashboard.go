@@ -10,6 +10,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Layout breakpoints
+const (
+	NarrowWidthThreshold = 100 // Below this: vertical layout
+)
+
+// isNarrowLayout returns true if the screen is too narrow for horizontal layout
+func (m Model) isNarrowLayout() bool {
+	return m.width < NarrowWidthThreshold
+}
+
 // dashboardView renders the main dashboard with modern table layout
 func (m Model) dashboardView() string {
 	// Handle error/loading states first
@@ -146,12 +156,56 @@ func (m Model) renderWorktreeTable() string {
 		contentHeight = 5
 	}
 
+	// Sort worktrees: current first, then by last commit (most recent first)
+	sortedWorktrees := m.getSortedWorktrees()
+
+	// Get selected worktree for preview
+	var selectedWorktree *Worktree
+	if m.selected >= 0 && m.selected < len(sortedWorktrees) {
+		selectedWorktree = &sortedWorktrees[m.selected]
+	}
+
+	// Check if we should use narrow/vertical layout
+	if m.isNarrowLayout() {
+		return m.renderNarrowLayout(sortedWorktrees, selectedWorktree, totalWidth, contentHeight)
+	}
+
+	// Wide layout: horizontal table + preview
+	return m.renderWideLayout(sortedWorktrees, selectedWorktree, totalWidth, contentHeight)
+}
+
+// renderNarrowLayout renders vertical layout for narrow screens (list on top, preview below)
+func (m Model) renderNarrowLayout(sortedWorktrees []Worktree, selectedWorktree *Worktree, width, height int) string {
+	// Calculate heights: list takes up to half, preview gets the rest
+	listHeight := len(sortedWorktrees)
+	if listHeight > height/2 {
+		listHeight = height / 2
+	}
+	if listHeight < 3 {
+		listHeight = 3
+	}
+	previewHeight := height - listHeight - 1 // -1 for separator
+
+	// Render list
+	list := m.renderNarrowWorktreeList(sortedWorktrees, width, listHeight)
+
+	// Horizontal separator
+	separator := lipgloss.NewStyle().
+		Foreground(ColorBorderDim).
+		Render(strings.Repeat("─", width))
+
+	// Render preview panel (full width in narrow mode)
+	preview := m.renderPreviewPanel(selectedWorktree, width, previewHeight)
+
+	// Stack vertically
+	return lipgloss.JoinVertical(lipgloss.Left, list, separator, preview)
+}
+
+// renderWideLayout renders horizontal layout for wide screens (table + preview side by side)
+func (m Model) renderWideLayout(sortedWorktrees []Worktree, selectedWorktree *Worktree, totalWidth, contentHeight int) string {
 	// Split: 65% table, 35% preview
 	tableWidth := totalWidth * 65 / 100
 	previewWidth := totalWidth - tableWidth - 3 // -3 for separator
-
-	// Sort worktrees: current first, then by last commit (most recent first)
-	sortedWorktrees := m.getSortedWorktrees()
 
 	// Build table
 	var tableRows []string
@@ -179,10 +233,6 @@ func (m Model) renderWorktreeTable() string {
 		Render(tableContent)
 
 	// Build preview panel
-	var selectedWorktree *Worktree
-	if m.selected >= 0 && m.selected < len(sortedWorktrees) {
-		selectedWorktree = &sortedWorktrees[m.selected]
-	}
 	preview := m.renderPreviewPanel(selectedWorktree, previewWidth, contentHeight)
 
 	// Vertical separator
@@ -242,6 +292,57 @@ func commitTimeScore(timeStr string) int {
 		return 1
 	}
 	return 0
+}
+
+// renderNarrowWorktreeList renders a simple list for narrow screens
+func (m Model) renderNarrowWorktreeList(sortedWorktrees []Worktree, width, height int) string {
+	var rows []string
+
+	for i, wt := range sortedWorktrees {
+		// Current indicator
+		indicator := "  "
+		if wt.IsCurrent {
+			indicator = "• "
+		}
+
+		// Calculate widths for name and branch
+		availableWidth := width - 4 // Account for indicator and spacing
+		nameWidth := availableWidth * 45 / 100
+		branchWidth := availableWidth - nameWidth - 2
+
+		// Truncate name and branch
+		name := truncate(wt.Name, nameWidth)
+		branch := truncate(wt.Branch, branchWidth)
+
+		// Style based on selection
+		var rowContent string
+		if i == m.selected {
+			// Selected row - highlight
+			nameStyle := lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true)
+			branchStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
+			rowContent = fmt.Sprintf("%s%-*s  %s",
+				indicator,
+				nameWidth, nameStyle.Render(name),
+				branchStyle.Render(branch))
+		} else {
+			// Normal row
+			nameStyle := lipgloss.NewStyle().Foreground(ColorText)
+			branchStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+			rowContent = fmt.Sprintf("%s%-*s  %s",
+				indicator,
+				nameWidth, nameStyle.Render(name),
+				branchStyle.Render(branch))
+		}
+
+		rows = append(rows, rowContent)
+	}
+
+	// Join rows and ensure height
+	content := strings.Join(rows, "\n")
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Render(content)
 }
 
 func (m Model) renderTableHeader(width int) string {
