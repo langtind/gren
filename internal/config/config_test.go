@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -232,8 +233,8 @@ func TestLoadInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestLoadInvalidConfig(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "gren-invalid-config-*")
+func TestLoadMigratesEmptyMainWorktree(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-migrate-config-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -243,15 +244,39 @@ func TestLoadInvalidConfig(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(tempDir)
 
-	// Create .gren directory with valid JSON but invalid config (empty main_worktree)
+	// Get the actual working directory (resolves symlinks on macOS)
+	actualDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+
+	// Create .gren directory with old config format (missing main_worktree)
 	os.MkdirAll(ConfigDir, 0755)
 	configPath := filepath.Join(ConfigDir, ConfigFile)
-	os.WriteFile(configPath, []byte(`{"main_worktree": "", "worktree_dir": "../test", "version": "1.0.0"}`), 0644)
+	os.WriteFile(configPath, []byte(`{"worktree_dir": "../test", "version": "1.0.0"}`), 0644)
 
 	manager := NewManager()
-	_, err = manager.Load()
-	if err == nil {
-		t.Error("Load() expected error for invalid config, got nil")
+	config, err := manager.Load()
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+
+	// Verify main_worktree was migrated to current directory
+	if config.MainWorktree != actualDir {
+		t.Errorf("MainWorktree = %q, want %q", config.MainWorktree, actualDir)
+	}
+
+	// Verify the config was saved with the migrated value
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read migrated config: %v", err)
+	}
+	var savedConfig Config
+	if err := json.Unmarshal(data, &savedConfig); err != nil {
+		t.Fatalf("failed to parse migrated config: %v", err)
+	}
+	if savedConfig.MainWorktree != actualDir {
+		t.Errorf("saved MainWorktree = %q, want %q", savedConfig.MainWorktree, actualDir)
 	}
 }
 

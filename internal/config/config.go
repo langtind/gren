@@ -79,6 +79,20 @@ func (m *Manager) Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Migrate old configs that don't have main_worktree
+	if strings.TrimSpace(config.MainWorktree) == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current directory for config migration: %w", err)
+		}
+		config.MainWorktree = cwd
+
+		// Save the migrated config
+		if err := m.Save(&config); err != nil {
+			return nil, fmt.Errorf("failed to save migrated config: %w", err)
+		}
+	}
+
 	if err := m.validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
