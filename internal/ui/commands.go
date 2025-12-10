@@ -484,30 +484,49 @@ func (m Model) initializeOpenInState(worktreePath string) tea.Cmd {
 
 // openPostCreateScript opens the post-create script in an external editor
 func (m Model) openPostCreateScript() tea.Cmd {
-	return func() tea.Msg {
-		scriptPath := ".gren/post-create.sh"
+	scriptPath := ".gren/post-create.sh"
 
-		// First check EDITOR environment variable
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			editor = os.Getenv("VISUAL")
-		}
+	// First check EDITOR environment variable
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
 
-		// If no env var set, try common editors
-		if editor == "" {
-			fallbackEditors := []string{"code", "zed", "vim", "nano"}
-			for _, e := range fallbackEditors {
-				if isCommandAvailable(e) {
-					editor = e
-					break
-				}
+	// If no env var set, try common editors
+	if editor == "" {
+		fallbackEditors := []string{"code", "zed", "vim", "nano"}
+		for _, e := range fallbackEditors {
+			if isCommandAvailable(e) {
+				editor = e
+				break
 			}
 		}
+	}
 
-		if editor == "" {
+	if editor == "" {
+		return func() tea.Msg {
 			return scriptEditCompleteMsg{err: fmt.Errorf("no editor found. Set EDITOR environment variable")}
 		}
+	}
 
+	// Check if it's a terminal editor (vim, nvim, nano, etc.)
+	terminalEditors := map[string]bool{
+		"vim": true, "nvim": true, "vi": true, "nano": true, "emacs": true, "helix": true, "hx": true,
+	}
+
+	// Get the base command name (in case EDITOR contains a path)
+	editorBase := filepath.Base(editor)
+
+	if terminalEditors[editorBase] {
+		// Use tea.ExecProcess for terminal editors - this suspends the TUI
+		cmd := exec.Command(editor, scriptPath)
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return scriptEditCompleteMsg{err: err}
+		})
+	}
+
+	// For GUI editors, just start them in background
+	return func() tea.Msg {
 		cmd := exec.Command(editor, scriptPath)
 		err := cmd.Start()
 		return scriptEditCompleteMsg{err: err}
@@ -715,40 +734,57 @@ func (m *Model) initializeActionsList() {
 
 // openConfigFile opens a configuration file in an available editor
 func (m Model) openConfigFile(filePath string) tea.Cmd {
-	return func() tea.Msg {
-		// Check if file exists
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return func() tea.Msg {
 			return configFileOpenedMsg{err: fmt.Errorf("config file does not exist: %s", filePath)}
 		}
+	}
 
-		// First check EDITOR environment variable
-		editor := os.Getenv("EDITOR")
-		if editor == "" {
-			// Fall back to VISUAL
-			editor = os.Getenv("VISUAL")
-		}
+	// First check EDITOR environment variable
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
 
-		// If no env var set, try common editors
-		if editor == "" {
-			fallbackEditors := []string{"code", "zed", "vim", "nano"}
-			for _, e := range fallbackEditors {
-				if _, err := exec.LookPath(e); err == nil {
-					editor = e
-					break
-				}
+	// If no env var set, try common editors
+	if editor == "" {
+		fallbackEditors := []string{"code", "zed", "vim", "nano"}
+		for _, e := range fallbackEditors {
+			if _, err := exec.LookPath(e); err == nil {
+				editor = e
+				break
 			}
 		}
+	}
 
-		if editor == "" {
+	if editor == "" {
+		return func() tea.Msg {
 			return configFileOpenedMsg{err: fmt.Errorf("no editor found. Set EDITOR environment variable or install code/vim/nano")}
 		}
+	}
 
-		// Execute the editor
+	// Check if it's a terminal editor (vim, nvim, nano, etc.)
+	terminalEditors := map[string]bool{
+		"vim": true, "nvim": true, "vi": true, "nano": true, "emacs": true, "helix": true, "hx": true,
+	}
+
+	editorBase := filepath.Base(editor)
+
+	if terminalEditors[editorBase] {
+		// Use tea.ExecProcess for terminal editors - this suspends the TUI
+		cmd := exec.Command(editor, filePath)
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return configFileOpenedMsg{err: err}
+		})
+	}
+
+	// For GUI editors, just start them in background
+	return func() tea.Msg {
 		cmd := exec.Command(editor, filePath)
 		if err := cmd.Start(); err != nil {
 			return configFileOpenedMsg{err: fmt.Errorf("failed to open %s: %w", editor, err)}
 		}
-
 		return configFileOpenedMsg{err: nil}
 	}
 }
