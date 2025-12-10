@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/git"
 )
@@ -151,8 +152,9 @@ type CreateState struct {
 	selectedMode              int    // For branch mode selection
 	showWarning               bool
 	warningAccepted           bool
-	selectedAction            int        // For the post-create actions
-	actionsList               list.Model // Dropdown menu for post-create actions
+	selectedAction            int           // For the post-create actions
+	actionsList               list.Model    // Dropdown menu for post-create actions
+	spinner                   spinner.Model // Spinner for creating step
 }
 
 // DeleteStep represents the current step in worktree deletion

@@ -38,21 +38,21 @@ func (m Model) createView() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderBranchModeStep() string {
-	var b strings.Builder
+	// Build header
+	header := m.renderWizardHeader("New Worktree")
 
-	// Header
-	b.WriteString(WizardHeader("New Worktree"))
-	b.WriteString("\n\n")
+	// Build content
+	var content strings.Builder
 
 	// Error display
 	if m.err != nil {
-		b.WriteString(ErrorStyle.Render("Error: " + m.err.Error()))
-		b.WriteString("\n\n")
+		content.WriteString(ErrorStyle.Render("Error: " + m.err.Error()))
+		content.WriteString("\n\n")
 	}
 
 	// Subtitle
-	b.WriteString(WizardSubtitleStyle.Render("Choose branch type"))
-	b.WriteString("\n\n")
+	content.WriteString(WizardSubtitleStyle.Render("Choose branch type"))
+	content.WriteString("\n\n")
 
 	// Mode options
 	modes := []struct {
@@ -64,19 +64,32 @@ func (m Model) renderBranchModeStep() string {
 	}
 
 	for i, mode := range modes {
-		b.WriteString(WizardOption(mode.name, i == m.createState.selectedMode))
-		b.WriteString("\n")
+		content.WriteString(WizardOption(mode.name, i == m.createState.selectedMode))
+		content.WriteString("\n")
 		if i == m.createState.selectedMode {
-			b.WriteString(WizardDescStyle.Render("   " + mode.desc))
-			b.WriteString("\n")
+			content.WriteString(WizardDescStyle.Render("   " + mode.desc))
+			content.WriteString("\n")
 		}
 	}
 
-	// Help
-	b.WriteString("\n")
-	b.WriteString(WizardHelpBar("↑↓ select", "enter confirm", "esc cancel"))
+	// Build footer
+	footer := m.renderWizardFooter("↑↓", "select", "enter", "confirm", "esc", "cancel")
 
-	return m.wrapWizardContent(b.String())
+	// Calculate content height to fill available space
+	contentHeight := m.height - 4 - FooterHeight // header lines + footer
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Style content to fill space
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(1, 2).
+		Render(content.String())
+
+	// Combine with vertical join
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -84,39 +97,53 @@ func (m Model) renderBranchModeStep() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderBranchNameStep() string {
-	var b strings.Builder
+	// Build header
+	header := m.renderWizardHeader("New Worktree")
 
-	b.WriteString(WizardHeader("New Worktree"))
-	b.WriteString("\n\n")
+	// Build content
+	var content strings.Builder
 
-	b.WriteString(WizardSubtitleStyle.Render("Enter branch name"))
-	b.WriteString("\n\n")
+	content.WriteString(WizardSubtitleStyle.Render("Enter branch name"))
+	content.WriteString("\n\n")
 
 	// Input field
 	cursor := "▮"
 	inputContent := m.createState.branchName + cursor
-	b.WriteString(WizardInputStyle.Width(40).Render(inputContent))
-	b.WriteString("\n\n")
+	content.WriteString(WizardInputStyle.Width(40).Render(inputContent))
+	content.WriteString("\n\n")
 
 	// Validation
 	if m.createState.branchName != "" {
 		if isValidBranchName(m.createState.branchName) {
-			b.WriteString(WizardSuccessStyle.Render("✓ Valid branch name"))
+			content.WriteString(WizardSuccessStyle.Render("✓ Valid branch name"))
 		} else {
-			b.WriteString(ErrorStyle.Render("✗ Invalid branch name"))
-			b.WriteString("\n")
-			b.WriteString(WizardDescStyle.Render("  Use letters, numbers, dashes, underscores, slashes"))
+			content.WriteString(ErrorStyle.Render("✗ Invalid branch name"))
+			content.WriteString("\n")
+			content.WriteString(WizardDescStyle.Render("  Use letters, numbers, dashes, underscores, slashes"))
 		}
-		b.WriteString("\n\n")
+		content.WriteString("\n\n")
 	}
 
 	// Examples
-	b.WriteString(WizardDescStyle.Render("Examples: feature/auth, hotfix/bug-123, experiment/new-ui"))
-	b.WriteString("\n\n")
+	content.WriteString(WizardDescStyle.Render("Examples: feature/auth, hotfix/bug-123, experiment/new-ui"))
 
-	b.WriteString(WizardHelpBar("type name", "enter continue", "esc back"))
+	// Build footer
+	footer := m.renderWizardFooter("type", "name", "enter", "continue", "esc", "back")
 
-	return m.wrapWizardContent(b.String())
+	// Calculate content height
+	contentHeight := m.height - 4 - FooterHeight
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Style content
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(1, 2).
+		Render(content.String())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -124,21 +151,8 @@ func (m Model) renderBranchNameStep() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderExistingBranchStep() string {
-	var b strings.Builder
-
-	b.WriteString(WizardHeader("Select Branch"))
-	b.WriteString("\n\n")
-
-	// Search input
-	if m.createState.isSearching || m.createState.searchQuery != "" {
-		searchStyle := WizardInputStyle.Width(30)
-		if m.createState.isSearching {
-			b.WriteString(searchStyle.Render("/ " + m.createState.searchQuery + "▮"))
-		} else {
-			b.WriteString(WizardDescStyle.Render("Filter: " + m.createState.searchQuery))
-		}
-		b.WriteString("\n\n")
-	}
+	// Build header
+	header := m.renderWizardHeader("Select Branch")
 
 	// Get branches to display
 	branches := m.createState.filteredAvailableBranches
@@ -146,40 +160,72 @@ func (m Model) renderExistingBranchStep() string {
 		branches = m.createState.availableBranches
 	}
 
+	// Build content
+	var content strings.Builder
+
+	// Search input
+	hasSearch := m.createState.isSearching || m.createState.searchQuery != ""
+	if hasSearch {
+		searchStyle := WizardInputStyle.Width(30)
+		if m.createState.isSearching {
+			content.WriteString(searchStyle.Render("/ " + m.createState.searchQuery + "▮"))
+		} else {
+			content.WriteString(WizardDescStyle.Render("Filter: " + m.createState.searchQuery))
+		}
+		content.WriteString("\n\n")
+	}
+
+	// Build footer based on state
+	var footer string
 	if len(branches) == 0 {
 		if m.createState.searchQuery != "" {
-			b.WriteString(WizardDescStyle.Render("No branches match your search"))
+			content.WriteString(WizardDescStyle.Render("No branches match your search"))
 		} else {
-			b.WriteString(WizardDescStyle.Render("No available branches found"))
-			b.WriteString("\n")
-			b.WriteString(WizardDescStyle.Render("All branches may already have worktrees"))
+			content.WriteString(WizardDescStyle.Render("No available branches found"))
+			content.WriteString("\n")
+			content.WriteString(WizardDescStyle.Render("All branches may already have worktrees"))
 		}
-		b.WriteString("\n\n")
-		b.WriteString(WizardHelpBar("esc back"))
-		return m.wrapWizardContent(b.String())
-	}
-
-	// Calculate visible window
-	maxVisible := m.height - 18
-	if maxVisible < 5 {
-		maxVisible = 5
-	}
-	if maxVisible > 15 {
-		maxVisible = 15
-	}
-
-	// Branch list
-	b.WriteString(m.renderBranchList(branches, maxVisible, false))
-
-	// Help
-	b.WriteString("\n")
-	if m.createState.isSearching {
-		b.WriteString(WizardHelpBar("type filter", "enter select", "esc cancel"))
+		footer = m.renderWizardFooter("esc", "back")
 	} else {
-		b.WriteString(WizardHelpBar("↑↓ select", "/ search", "enter confirm", "esc back"))
+		// Calculate dynamic maxVisible - use all available space
+		headerLines := 3 // header + padding
+		searchLines := 0
+		if hasSearch {
+			searchLines = 3
+		}
+		footerLines := FooterHeight + 1
+
+		maxVisible := m.height - headerLines - searchLines - footerLines
+		if maxVisible < 5 {
+			maxVisible = 5
+		}
+		// No upper limit - fill the screen
+
+		// Branch list
+		content.WriteString(m.renderBranchList(branches, maxVisible, false))
+
+		// Footer based on search state
+		if m.createState.isSearching {
+			footer = m.renderWizardFooter("type", "filter", "enter", "select", "esc", "cancel")
+		} else {
+			footer = m.renderWizardFooter("↑↓", "select", "/", "search", "enter", "confirm", "esc", "back")
+		}
 	}
 
-	return m.wrapWizardContent(b.String())
+	// Calculate content height
+	contentHeight := m.height - 3 - FooterHeight
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Style content
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(0, 2).
+		Render(content.String())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -187,24 +233,8 @@ func (m Model) renderExistingBranchStep() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderBaseBranchStep() string {
-	var b strings.Builder
-
-	b.WriteString(WizardHeader("Select Base Branch"))
-	b.WriteString("\n\n")
-
-	b.WriteString(WizardSubtitleStyle.Render(fmt.Sprintf("Create '%s' from:", m.createState.branchName)))
-	b.WriteString("\n\n")
-
-	// Search input
-	if m.createState.isSearching || m.createState.searchQuery != "" {
-		searchStyle := WizardInputStyle.Width(30)
-		if m.createState.isSearching {
-			b.WriteString(searchStyle.Render("/ " + m.createState.searchQuery + "▮"))
-		} else {
-			b.WriteString(WizardDescStyle.Render("Filter: " + m.createState.searchQuery))
-		}
-		b.WriteString("\n\n")
-	}
+	// Build header
+	header := m.renderWizardHeader("Select Base Branch")
 
 	// Get branches
 	branches := m.createState.filteredBranches
@@ -212,54 +242,92 @@ func (m Model) renderBaseBranchStep() string {
 		branches = m.createState.branchStatuses
 	}
 
-	if len(branches) == 0 && m.createState.searchQuery != "" {
-		b.WriteString(WizardDescStyle.Render("No branches match your search"))
-		b.WriteString("\n\n")
-		b.WriteString(WizardHelpBar("esc cancel", "backspace edit"))
-		return m.wrapWizardContent(b.String())
-	}
+	// Build content
+	var content strings.Builder
 
-	// Calculate visible window
-	maxVisible := m.height - 20
-	if maxVisible < 5 {
-		maxVisible = 5
-	}
-	if maxVisible > 12 {
-		maxVisible = 12
-	}
+	content.WriteString(WizardSubtitleStyle.Render(fmt.Sprintf("Create '%s' from:", m.createState.branchName)))
+	content.WriteString("\n\n")
 
-	// Branch list
-	b.WriteString(m.renderBranchList(branches, maxVisible, true))
-
-	// Warning for dirty branch
-	if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
-		selectedBranch := branches[m.createState.selectedBranch]
-		if !selectedBranch.IsClean {
-			b.WriteString("\n")
-			warning := fmt.Sprintf("⚠ '%s' has uncommitted changes\n  Worktree will be based on last commit only", selectedBranch.Name)
-			b.WriteString(WizardWarningStyle.Render(warning))
-			b.WriteString("\n")
-		}
-	}
-
-	// Help
-	b.WriteString("\n")
-	if m.createState.isSearching {
-		b.WriteString(WizardHelpBar("type filter", "enter select", "esc cancel"))
-	} else {
-		needsWarningAccept := len(branches) > 0 &&
-			m.createState.selectedBranch < len(branches) &&
-			!branches[m.createState.selectedBranch].IsClean &&
-			!m.createState.warningAccepted
-
-		if needsWarningAccept {
-			b.WriteString(WizardHelpBar("↑↓ select", "y accept warning", "/ search", "esc back"))
+	// Search input
+	hasSearch := m.createState.isSearching || m.createState.searchQuery != ""
+	if hasSearch {
+		searchStyle := WizardInputStyle.Width(30)
+		if m.createState.isSearching {
+			content.WriteString(searchStyle.Render("/ " + m.createState.searchQuery + "▮"))
 		} else {
-			b.WriteString(WizardHelpBar("↑↓ select", "/ search", "enter confirm", "esc back"))
+			content.WriteString(WizardDescStyle.Render("Filter: " + m.createState.searchQuery))
+		}
+		content.WriteString("\n\n")
+	}
+
+	// Build footer based on state
+	var footer string
+	if len(branches) == 0 && m.createState.searchQuery != "" {
+		content.WriteString(WizardDescStyle.Render("No branches match your search"))
+		footer = m.renderWizardFooter("esc", "cancel", "backspace", "edit")
+	} else {
+		// Calculate dynamic maxVisible
+		headerLines := 5 // header + subtitle + padding
+		searchLines := 0
+		if hasSearch {
+			searchLines = 3
+		}
+		warningLines := 0
+		if len(branches) > 0 && m.createState.selectedBranch < len(branches) && !branches[m.createState.selectedBranch].IsClean {
+			warningLines = 4
+		}
+		footerLines := FooterHeight + 1
+
+		maxVisible := m.height - headerLines - searchLines - warningLines - footerLines
+		if maxVisible < 5 {
+			maxVisible = 5
+		}
+		// No upper limit
+
+		// Branch list
+		content.WriteString(m.renderBranchList(branches, maxVisible, true))
+
+		// Warning for dirty branch
+		if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
+			selectedBranch := branches[m.createState.selectedBranch]
+			if !selectedBranch.IsClean {
+				content.WriteString("\n")
+				warning := fmt.Sprintf("⚠ '%s' has uncommitted changes\n  Worktree will be based on last commit only", selectedBranch.Name)
+				content.WriteString(WizardWarningStyle.Render(warning))
+			}
+		}
+
+		// Footer based on state
+		if m.createState.isSearching {
+			footer = m.renderWizardFooter("type", "filter", "enter", "select", "esc", "cancel")
+		} else {
+			needsWarningAccept := len(branches) > 0 &&
+				m.createState.selectedBranch < len(branches) &&
+				!branches[m.createState.selectedBranch].IsClean &&
+				!m.createState.warningAccepted
+
+			if needsWarningAccept {
+				footer = m.renderWizardFooter("↑↓", "select", "y", "accept", "/", "search", "esc", "back")
+			} else {
+				footer = m.renderWizardFooter("↑↓", "select", "/", "search", "enter", "confirm", "esc", "back")
+			}
 		}
 	}
 
-	return m.wrapWizardContent(b.String())
+	// Calculate content height
+	contentHeight := m.height - 3 - FooterHeight
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Style content
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(0, 2).
+		Render(content.String())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -267,10 +335,11 @@ func (m Model) renderBaseBranchStep() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderConfirmStep() string {
-	var b strings.Builder
+	// Build header
+	header := m.renderWizardHeader("Confirm Creation")
 
-	b.WriteString(WizardHeader("Confirm Creation"))
-	b.WriteString("\n\n")
+	// Build content
+	var content strings.Builder
 
 	// Summary box
 	sanitizedName := sanitizeBranchForPath(m.createState.branchName)
@@ -291,16 +360,29 @@ func (m Model) renderConfirmStep() string {
 	}
 	summary.WriteString(WizardSubtitleStyle.Render("Path:     ") + WizardDescStyle.Render(worktreePath))
 
-	b.WriteString(summaryStyle.Render(summary.String()))
-	b.WriteString("\n\n")
+	content.WriteString(summaryStyle.Render(summary.String()))
+	content.WriteString("\n\n")
 
 	// Post-create info
-	b.WriteString(WizardDescStyle.Render("After creation, .gren/post-create.sh will run"))
-	b.WriteString("\n\n")
+	content.WriteString(WizardDescStyle.Render("After creation, .gren/post-create.sh will run"))
 
-	b.WriteString(WizardHelpBar("enter create", "esc back"))
+	// Build footer
+	footer := m.renderWizardFooter("enter", "create", "esc", "back")
 
-	return m.wrapWizardContent(b.String())
+	// Calculate content height
+	contentHeight := m.height - 4 - FooterHeight
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Style content
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(1, 2).
+		Render(content.String())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -308,28 +390,38 @@ func (m Model) renderConfirmStep() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderCreatingStep() string {
-	var b strings.Builder
+	// Build header (no step indicator for progress view)
+	header := WizardHeader("Creating Worktree")
 
-	b.WriteString(WizardHeader("Creating Worktree"))
-	b.WriteString("\n\n")
+	// Build content
+	var content strings.Builder
 
-	// Progress indicators
-	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
-	doneStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
-	pendingStyle := WizardDescStyle
+	// Use animated spinner
+	spinnerView := m.createState.spinner.View()
+	content.WriteString(spinnerView + " Creating worktree and running post-create hook...")
+	content.WriteString("\n\n")
 
-	b.WriteString(spinnerStyle.Render("◐ Creating git worktree..."))
-	b.WriteString("\n")
-	b.WriteString(pendingStyle.Render("○ Running post-create hook..."))
-	b.WriteString("\n")
-	b.WriteString(pendingStyle.Render("○ Installing dependencies..."))
-	b.WriteString("\n\n")
+	content.WriteString(WizardDescStyle.Render("Branch: " + m.createState.branchName))
+	content.WriteString("\n")
+	content.WriteString(WizardDescStyle.Render("Path: " + m.getWorktreePath(m.createState.branchName)))
 
-	_ = doneStyle // Will be used when we track actual progress
+	// Calculate content height
+	contentHeight := m.height - 4 - FooterHeight
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
 
-	b.WriteString(WizardDescStyle.Render("Path: " + m.getWorktreePath(m.createState.branchName)))
+	// Style content
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(1, 2).
+		Render(content.String())
 
-	return m.wrapWizardContent(b.String())
+	// Empty footer for progress view
+	footer := FooterBarStyle.Width(m.width - 2).Render("")
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -337,39 +429,53 @@ func (m Model) renderCreatingStep() string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (m Model) renderCreateCompleteStep() string {
-	var b strings.Builder
+	// Build header (no step indicator for completion view)
+	header := WizardHeader("Worktree Created")
 
-	b.WriteString(WizardHeader("Worktree Created"))
-	b.WriteString("\n\n")
+	// Build content
+	var content strings.Builder
 
-	b.WriteString(WizardSuccessStyle.Render("✓ " + m.createState.branchName))
-	b.WriteString("\n\n")
+	content.WriteString(WizardSuccessStyle.Render("✓ " + m.createState.branchName))
+	content.WriteString("\n\n")
 
 	// Path
 	worktreePath := m.getWorktreePath(m.createState.branchName)
-	b.WriteString(WizardDescStyle.Render("Path: " + worktreePath))
-	b.WriteString("\n\n")
+	content.WriteString(WizardDescStyle.Render("Path: " + worktreePath))
+	content.WriteString("\n\n")
 
 	// Actions
-	b.WriteString(WizardSubtitleStyle.Render("Open in:"))
-	b.WriteString("\n\n")
+	content.WriteString(WizardSubtitleStyle.Render("Open in:"))
+	content.WriteString("\n\n")
 
 	actions := m.getAvailableActions()
 	if len(actions) == 1 {
-		b.WriteString(WizardDescStyle.Render("No editors detected in PATH"))
-		b.WriteString("\n\n")
+		content.WriteString(WizardDescStyle.Render("No editors detected in PATH"))
+		content.WriteString("\n\n")
 	}
 
 	for i, action := range actions {
 		label := action.Icon + " " + action.Name
-		b.WriteString(WizardOption(label, i == m.createState.selectedAction))
-		b.WriteString("\n")
+		content.WriteString(WizardOption(label, i == m.createState.selectedAction))
+		content.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(WizardHelpBar("↑↓ select", "enter open", "esc dashboard"))
+	// Build footer
+	footer := m.renderWizardFooter("↑↓", "select", "enter", "open", "esc", "dashboard")
 
-	return m.wrapWizardContent(b.String())
+	// Calculate content height
+	contentHeight := m.height - 4 - FooterHeight
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
+	// Style content
+	contentStyled := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Height(contentHeight).
+		Padding(1, 2).
+		Render(content.String())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, contentStyled, footer)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -389,6 +495,92 @@ func (m Model) wrapWizardContent(content string) string {
 		Padding(1, 2)
 
 	return containerStyle.Render(content)
+}
+
+// getWizardStepInfo returns current step and total steps for the wizard
+func (m Model) getWizardStepInfo() (current int, total int) {
+	if m.createState == nil {
+		return 0, 0
+	}
+
+	isNewBranch := m.createState.createMode == CreateModeNewBranch
+
+	switch m.createState.currentStep {
+	case CreateStepBranchMode:
+		// At step 1, we don't know the flow yet, so show 1 of ?
+		// Actually, we show based on selected mode
+		if m.createState.selectedMode == 0 { // New branch selected
+			return 1, 4
+		}
+		return 1, 3
+	case CreateStepBranchName:
+		return 2, 4 // Only in new branch flow
+	case CreateStepExistingBranch:
+		return 2, 3 // Only in existing branch flow
+	case CreateStepBaseBranch:
+		return 3, 4 // Only in new branch flow
+	case CreateStepConfirm:
+		if isNewBranch {
+			return 4, 4
+		}
+		return 3, 3
+	default:
+		return 0, 0 // Creating/Complete don't show step indicator
+	}
+}
+
+// renderStepIndicator renders the dot-style step indicator
+func (m Model) renderStepIndicator() string {
+	current, total := m.getWizardStepInfo()
+	if current == 0 || total == 0 {
+		return ""
+	}
+
+	var dots strings.Builder
+	for i := 1; i <= total; i++ {
+		if i == current {
+			dots.WriteString(WizardListItemSelectedStyle.Render("●"))
+		} else if i < current {
+			dots.WriteString(StatusCleanStyle.Render("●")) // Completed steps in green
+		} else {
+			dots.WriteString(WizardDescStyle.Render("○"))
+		}
+		if i < total {
+			dots.WriteString(" ")
+		}
+	}
+	return dots.String()
+}
+
+// renderWizardFooter renders a footer bar in dashboard style
+func (m Model) renderWizardFooter(items ...string) string {
+	sep := HelpSeparatorStyle.Render(" │ ")
+	var helpItems []string
+	for i := 0; i+1 < len(items); i += 2 {
+		helpItems = append(helpItems, HelpItem(items[i], items[i+1]))
+	}
+	return FooterBarStyle.Width(m.width - 2).Render(strings.Join(helpItems, sep))
+}
+
+// renderWizardHeader renders the header with title and step indicator
+func (m Model) renderWizardHeader(title string) string {
+	titleText := WizardHeader(title)
+	stepIndicator := m.renderStepIndicator()
+
+	if stepIndicator == "" {
+		return titleText
+	}
+
+	// Calculate padding to right-align step indicator
+	headerWidth := m.width - 6 // Account for padding
+	titleWidth := lipgloss.Width(titleText)
+	indicatorWidth := lipgloss.Width(stepIndicator)
+	padding := headerWidth - titleWidth - indicatorWidth
+	if padding < 1 {
+		padding = 1
+	}
+
+	return titleText + strings.Repeat(" ", padding) + stepIndicator
 }
 
 // renderBranchList renders a scrollable list of branches

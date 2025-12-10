@@ -147,13 +147,11 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		// Branch exists locally - use it directly
 		gitCmd = fmt.Sprintf("git worktree add %s %s", worktreePath, branchName)
 		logging.Info("Using existing local branch: %s", branchName)
-		fmt.Printf("📁 Using existing local branch: %s\n", branchName)
 		cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
 	} else if branchExistsRemote {
 		// Branch exists on remote - create tracking branch
 		gitCmd = fmt.Sprintf("git worktree add --track -b %s %s origin/%s", branchName, worktreePath, branchName)
 		logging.Info("Creating local branch from remote: origin/%s", branchName)
-		fmt.Printf("📁 Creating local branch from origin/%s\n", branchName)
 		cmd = exec.Command("git", "worktree", "add", "--track", "-b", branchName, worktreePath, "origin/"+branchName)
 	} else if req.IsNewBranch {
 		// Branch doesn't exist - create new from base
@@ -168,7 +166,6 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		}
 		gitCmd = fmt.Sprintf("git worktree add -b %s %s %s", branchName, worktreePath, baseBranch)
 		logging.Info("Creating new branch '%s' from base '%s'", branchName, baseBranch)
-		fmt.Printf("📁 Creating new branch '%s' from %s\n", branchName, baseBranch)
 		cmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseBranch)
 	} else {
 		// User explicitly wanted existing branch but it doesn't exist
@@ -190,7 +187,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	if _, err := os.Stat(".gitmodules"); err == nil {
 		submoduleCmd := exec.Command("git", "-C", worktreePath, "submodule", "update", "--init", "--recursive")
 		if err := submoduleCmd.Run(); err != nil {
-			fmt.Printf("Warning: failed to initialize submodules: %v\n", err)
+			logging.Warn("Failed to initialize submodules: %v", err)
 		}
 	}
 
@@ -205,7 +202,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			if err == nil {
 				if err := os.Symlink(relPath, destGrenDir); err != nil {
 					// Log but don't fail for this
-					fmt.Printf("Warning: failed to symlink .gren configuration: %v\n", err)
+					logging.Warn("Failed to symlink .gren configuration: %v", err)
 				}
 			}
 		}
@@ -233,7 +230,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		// Check if hook exists
 		if _, err := os.Stat(fullHookPath); err != nil {
 			logging.Error("Post-create hook not found: %s", fullHookPath)
-			fmt.Printf("Warning: post-create hook not found: %s\n", fullHookPath)
+			logging.Warn("Post-create hook not found: %s", fullHookPath)
 		} else {
 			logging.Info("Running post-create hook: %s", fullHookPath)
 			// Convert worktreePath to absolute for the hook
@@ -243,18 +240,19 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			}
 			hookCmd := exec.Command(fullHookPath, absWorktreePath, branchName, baseBranch, repoRoot)
 			hookCmd.Dir = absWorktreePath
-			hookCmd.Stdout = os.Stdout
-			hookCmd.Stderr = os.Stderr
-			if err := hookCmd.Run(); err != nil {
-				logging.Error("Post-create hook failed: %v", err)
-				fmt.Printf("Warning: post-create hook failed: %v\n", err)
+			// Capture output instead of printing to stdout/stderr
+			// This prevents TUI corruption when running in interactive mode
+			hookOutput, hookErr := hookCmd.CombinedOutput()
+			if hookErr != nil {
+				logging.Error("Post-create hook failed: %v, output: %s", hookErr, string(hookOutput))
 			} else {
 				logging.Info("Post-create hook completed successfully")
+				logging.Debug("Post-create hook output: %s", string(hookOutput))
 			}
 		}
 	}
 
-	fmt.Printf("Created worktree '%s' at %s\n", req.Name, worktreePath)
+	logging.Info("Created worktree '%s' at %s", req.Name, worktreePath)
 	return nil
 }
 
@@ -320,7 +318,7 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 	}
 
 	// Note: Branch is kept - user can delete manually if needed
-	fmt.Printf("Deleted worktree '%s' (branch '%s' is preserved)\n", targetWorktree.Name, targetWorktree.Branch)
+	logging.Info("Deleted worktree '%s' (branch '%s' is preserved)", targetWorktree.Name, targetWorktree.Branch)
 	return nil
 }
 

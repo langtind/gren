@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/logging"
 )
@@ -545,7 +546,12 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case CreateStepConfirm:
 			logging.Info("CreateView: confirmed creation, branch: %s, base: %s", m.createState.branchName, m.createState.baseBranch)
 			m.createState.currentStep = CreateStepCreating
-			return m, m.createWorktree()
+			// Initialize spinner for creating step
+			s := spinner.New()
+			s.Spinner = spinner.Dot
+			s.Style = SpinnerStyle
+			m.createState.spinner = s
+			return m, tea.Batch(m.createWorktree(), m.createState.spinner.Tick)
 		case CreateStepComplete:
 			// Execute the selected action from simple list
 			actions := m.getAvailableActions()

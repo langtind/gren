@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/logging"
 )
@@ -206,6 +207,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.initState.currentStep = InitStepAIResult
 			m.initState.selected = 0
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		// Handle spinner animation for CreateStepCreating
+		if m.createState != nil && m.createState.currentStep == CreateStepCreating {
+			var cmd tea.Cmd
+			m.createState.spinner, cmd = m.createState.spinner.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	}
