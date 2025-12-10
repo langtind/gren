@@ -9,174 +9,105 @@ import (
 
 // renderPreviewStep shows configuration preview before creation
 func (m Model) renderPreviewStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("👀 Configuration Preview"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Review Configuration"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Review your configuration:"))
-	content.WriteString("\n\n")
+	// Summary box
+	summaryStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBorder).
+		Padding(0, 1)
 
-	// Worktree configuration
-	content.WriteString(WorktreeNameStyle.Render("📂 Worktree Settings"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   • Location: %s", m.initState.worktreeDir)))
-	content.WriteString("\n")
-	if m.initState.postCreateCmd != "" {
-		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   • Setup command: %s", m.initState.postCreateCmd)))
-		content.WriteString("\n")
-	}
-	content.WriteString("\n")
+	var summary strings.Builder
+	summary.WriteString(WizardSubtitleStyle.Render("Location: ") + m.initState.worktreeDir + "\n")
+	summary.WriteString(WizardSubtitleStyle.Render("Command:  ") + m.initState.postCreateCmd + "\n")
+	summary.WriteString(WizardSubtitleStyle.Render("Files:    ") + fmt.Sprintf("%d to copy", len(m.initState.detectedFiles)))
 
-	// Detected files to symlink
-	content.WriteString(WorktreeNameStyle.Render("🔗 Files to Symlink"))
-	content.WriteString("\n")
-	if len(m.initState.detectedFiles) == 0 {
-		content.WriteString(WorktreePathStyle.Render("   • No gitignored files detected"))
-	} else {
-		for _, file := range m.initState.detectedFiles {
-			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   • %s (%s)", file.Path, file.Type)))
-			content.WriteString("\n")
-		}
-	}
-	content.WriteString("\n")
+	b.WriteString(summaryStyle.Render(summary.String()))
+	b.WriteString("\n\n")
 
-	// Generated files preview
-	content.WriteString(WorktreeNameStyle.Render("📄 Files to be created"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   • .gren/config.json       (main configuration)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   • .gren/post-create.sh    (setup script)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   • .gitignore              (updated if needed)"))
-	content.WriteString("\n\n")
+	// Files to create
+	b.WriteString(WizardSubtitleStyle.Render("Will create:"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  .gren/config.json"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
+	b.WriteString("\n\n")
 
-	// Options menu
-	content.WriteString(WorktreeNameStyle.Render("Next steps:"))
-	content.WriteString("\n\n")
-
+	// Options
 	options := []string{
-		"Create configuration files",
-		"Back to customization",
-		"Back to recommendations",
-		"Cancel setup",
+		"Create configuration",
+		"Back to customize",
+		"Cancel",
 	}
 
-	for i, option := range options {
-		var style lipgloss.Style
-		if i == m.initState.selected {
-			style = WorktreeSelectedStyle
-		} else {
-			style = WorktreeItemStyle
-		}
-
-		prefix := "   "
-		switch i {
-		case 0:
-			prefix = "✅ "
-		case 1:
-			prefix = "⚙️ "
-		case 2:
-			prefix = "💡 "
-		case 3:
-			prefix = "❌ "
-		}
-
-		content.WriteString(style.Width(m.width - 8).Render(fmt.Sprintf("%s%s", prefix, option)))
-		content.WriteString("\n")
+	for i, opt := range options {
+		b.WriteString(WizardOption(opt, i == m.initState.selected))
+		b.WriteString("\n")
 	}
 
-	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("[enter] Select  [↑↓] Navigate  [esc] Back"))
+	b.WriteString("\n")
+	b.WriteString(WizardHelpBar("↑↓ select", "enter confirm", "esc back"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
 // renderExecutingStep shows files being created
 func (m Model) renderExecutingStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("⚙️ Creating Configuration"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Creating Configuration"))
+	b.WriteString("\n\n")
 
-	content.WriteString(SpinnerStyle.Render("⠋ Creating .gren directory..."))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("⏳ Writing configuration files..."))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("⏸️ Generating setup script..."))
-	content.WriteString("\n\n")
+	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+	b.WriteString(spinnerStyle.Render("◐ Creating .gren directory..."))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("○ Writing config.json..."))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("○ Generating post-create.sh..."))
 
-	content.WriteString(WorktreePathStyle.Render("This will only take a moment..."))
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
 // renderCreatedStep shows completion and options
 func (m Model) renderCreatedStep() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("🎉 Configuration Created!"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Setup Complete"))
+	b.WriteString("\n\n")
 
-	content.WriteString(StatusCleanStyle.Render("✅ Configuration files have been created"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardSuccessStyle.Render("✓ Gren is ready to use"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Files created:"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   📄 .gren/config.json"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   📄 .gren/post-create.sh"))
-	content.WriteString("\n")
-	if needsGitignoreUpdate() {
-		content.WriteString(WorktreePathStyle.Render("   📄 .gitignore (updated)"))
-		content.WriteString("\n")
-	}
-	content.WriteString("\n")
+	b.WriteString(WizardSubtitleStyle.Render("Created files:"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  .gren/config.json"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Current configuration:"))
-	content.WriteString("\n")
-	if m.initState.postCreateCmd != "" {
-		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("⚡ Command: %s", m.initState.postCreateCmd)))
-	} else {
-		content.WriteString(WorktreePathStyle.Render("📝 Custom script (will be created)"))
-	}
-	content.WriteString("\n\n")
+	b.WriteString(WizardSubtitleStyle.Render("Next steps:"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  • Edit post-create.sh to customize setup"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  • Press 'n' to create your first worktree"))
+	b.WriteString("\n\n")
 
-	// Next steps
-	content.WriteString(WorktreeNameStyle.Render("Would you like to:"))
-	content.WriteString("\n\n")
-
+	// Options
 	options := []string{
-		"Edit the post-create script (recommended)",
-		"Skip and continue",
+		"Edit setup script",
+		"Go to dashboard",
 	}
 
-	for i, option := range options {
-		var style lipgloss.Style
-		if i == m.initState.selected {
-			style = WorktreeSelectedStyle
-		} else {
-			style = WorktreeItemStyle
-		}
-
-		prefix := "📝 "
-		description := "Customize the setup commands for your project"
-		if i == 1 {
-			prefix = "⏭️ "
-			description = "Use the generated script as-is"
-		}
-
-		content.WriteString(style.Width(m.width - 8).Render(fmt.Sprintf("%s%s", prefix, option)))
-		content.WriteString("\n")
-		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", description)))
-		content.WriteString("\n")
-		if i < len(options)-1 {
-			content.WriteString("\n")
-		}
+	for i, opt := range options {
+		b.WriteString(WizardOption(opt, i == m.initState.selected))
+		b.WriteString("\n")
 	}
 
-	content.WriteString("\n\n")
-	content.WriteString(HelpStyle.Render("[enter] Select  [↑↓] Navigate  [esc] Back"))
+	b.WriteString("\n")
+	b.WriteString(WizardHelpBar("↑↓ select", "enter confirm"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }

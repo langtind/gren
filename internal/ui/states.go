@@ -129,14 +129,96 @@ func (m Model) parseWorktreeList(output string) []Worktree {
 		for i := range worktrees {
 			isCurrent := worktrees[i].Path == cwd
 			worktrees[i].IsCurrent = isCurrent
-			// Get status for all worktrees (not just current)
-			if status, err := m.getWorktreeStatus(worktrees[i].Path, isCurrent); err == nil {
-				worktrees[i].Status = status
-			}
+			// Get detailed status for all worktrees
+			statusInfo := m.getWorktreeStatusInfo(worktrees[i].Path, isCurrent)
+			worktrees[i].Status = statusInfo.Status
+			worktrees[i].UnpushedCount = statusInfo.UnpushedCount
+			// Get file counts (staged, modified, untracked)
+			staged, modified, untracked := getFileCounts(worktrees[i].Path, isCurrent)
+			worktrees[i].StagedCount = staged
+			worktrees[i].ModifiedCount = modified
+			worktrees[i].UntrackedCount = untracked
+			// Get last commit time
+			worktrees[i].LastCommit = getLastCommitTime(worktrees[i].Path)
 		}
 	}
 
 	return worktrees
+}
+
+// getFileCounts returns the number of staged, modified and untracked files
+// Git status porcelain format: XY filename
+// X = staging area status, Y = working tree status
+// ' ' = unmodified, M = modified, A = added, D = deleted, R = renamed, C = copied, U = unmerged, ? = untracked
+func getFileCounts(worktreePath string, isCurrent bool) (staged, modified, untracked int) {
+	var cmd *exec.Cmd
+	if isCurrent {
+		cmd = exec.Command("git", "status", "--porcelain")
+	} else {
+		cmd = exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		if len(line) < 2 {
+			continue
+		}
+		indexStatus := line[0]  // Staging area (index) status
+		workStatus := line[1]   // Working tree status
+
+		// Untracked files
+		if indexStatus == '?' && workStatus == '?' {
+			untracked++
+			continue
+		}
+
+		// Staged changes (first column has M, A, D, R, C)
+		if indexStatus != ' ' && indexStatus != '?' {
+			staged++
+		}
+
+		// Unstaged changes (second column has M, D)
+		if workStatus != ' ' && workStatus != '?' {
+			modified++
+		}
+	}
+
+	return staged, modified, untracked
+}
+
+// getLastCommitTime returns a human-readable relative time for the last commit
+func getLastCommitTime(worktreePath string) string {
+	// Use git log to get last commit time in relative format
+	cmd := exec.Command("git", "-C", worktreePath, "log", "-1", "--format=%cr")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	result := strings.TrimSpace(string(output))
+
+	// Shorten common phrases for compact display
+	result = strings.ReplaceAll(result, " seconds ago", "s ago")
+	result = strings.ReplaceAll(result, " second ago", "s ago")
+	result = strings.ReplaceAll(result, " minutes ago", "m ago")
+	result = strings.ReplaceAll(result, " minute ago", "m ago")
+	result = strings.ReplaceAll(result, " hours ago", "h ago")
+	result = strings.ReplaceAll(result, " hour ago", "h ago")
+	result = strings.ReplaceAll(result, " days ago", "d ago")
+	result = strings.ReplaceAll(result, " day ago", "d ago")
+	result = strings.ReplaceAll(result, " weeks ago", "w ago")
+	result = strings.ReplaceAll(result, " week ago", "w ago")
+	result = strings.ReplaceAll(result, " months ago", "mo ago")
+	result = strings.ReplaceAll(result, " month ago", "mo ago")
+	result = strings.ReplaceAll(result, " years ago", "y ago")
+	result = strings.ReplaceAll(result, " year ago", "y ago")
+
+	return result
 }
 
 // WorktreeStatusInfo contains detailed status information for a worktree

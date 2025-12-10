@@ -1,59 +1,47 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 )
 
-// configView renders the config file selector
+// configView renders the configuration file selector
 func (m Model) configView() string {
 	if m.configState == nil {
 		return "Loading..."
 	}
 
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("🔧 Configuration Files"))
-	content.WriteString("\n\n")
-
-	content.WriteString(WorktreeNameStyle.Render("Select file to edit:"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Configuration"))
+	b.WriteString("\n\n")
 
 	if len(m.configState.files) == 0 {
-		content.WriteString(WorktreePathStyle.Render("No configuration files found."))
-		content.WriteString("\n")
-		content.WriteString(WorktreePathStyle.Render("Initialize gren first to create config files."))
-		content.WriteString("\n\n")
-		content.WriteString(HelpStyle.Render("[esc] Back"))
-		return HeaderStyle.Width(m.width - 4).Render(content.String())
+		b.WriteString(WizardDescStyle.Render("No configuration files found."))
+		b.WriteString("\n")
+		b.WriteString(WizardDescStyle.Render("Run 'gren init' to create configuration."))
+		b.WriteString("\n\n")
+		b.WriteString(WizardHelpBar("esc back"))
+		return m.wrapWizardContent(b.String())
 	}
 
-	// File list with simple styling
+	b.WriteString(WizardSubtitleStyle.Render("Select file to edit"))
+	b.WriteString("\n\n")
+
+	// File list
 	for i, file := range m.configState.files {
-		prefix := "  "
-		if i == m.configState.selectedIndex {
-			prefix = "▶ "
-		}
+		label := file.Icon + " " + file.Name
+		b.WriteString(WizardOption(label, i == m.configState.selectedIndex))
+		b.WriteString("\n")
 
-		fileLine := fmt.Sprintf("%s%s %s", prefix, file.Icon, file.Name)
-
-		// Apply color styling for selected item
-		if i == m.configState.selectedIndex {
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fileLine))
-		} else {
-			content.WriteString(fileLine)
-		}
-		content.WriteString("\n")
-
-		// Show description for selected file
-		if i == m.configState.selectedIndex {
-			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", file.Description)))
-			content.WriteString("\n")
+		// Show description for selected item
+		if i == m.configState.selectedIndex && file.Description != "" {
+			b.WriteString(WizardDescStyle.Render("   " + file.Description))
+			b.WriteString("\n")
 		}
 	}
 
-	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("↑↓ Navigate • Enter Open • Esc Back"))
+	b.WriteString("\n")
+	b.WriteString(WizardHelpBar("↑↓ select", "enter open", "esc back"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }

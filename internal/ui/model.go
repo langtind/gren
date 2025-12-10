@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -196,10 +195,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stay in config view after opening file
 		return m, nil
+
+	case aiScriptGeneratedMsg:
+		if m.initState != nil {
+			if msg.err != nil {
+				m.initState.aiError = msg.err.Error()
+			} else {
+				m.initState.aiGeneratedScript = msg.script
+				m.initState.aiError = ""
+			}
+			m.initState.currentStep = InitStepAIResult
+			m.initState.selected = 0
+		}
+		return m, nil
 	}
 
 	// Handle keyboard input based on current view
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		// Handle help toggle globally on dashboard
+		if m.currentView == DashboardView && key.Matches(keyMsg, m.keys.Help) {
+			m.helpVisible = !m.helpVisible
+			return m, nil
+		}
+
+		// Close help with esc
+		if m.helpVisible && key.Matches(keyMsg, m.keys.Back) {
+			m.helpVisible = false
+			return m, nil
+		}
+
+		// If help is visible, ignore other keys
+		if m.helpVisible {
+			return m, nil
+		}
+
 		if m.currentView == InitView {
 			return m.handleInitKeys(keyMsg)
 		}
@@ -321,59 +350,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the current view
 func (m Model) View() string {
+	var baseView string
+
 	switch m.currentView {
 	case DashboardView:
-		return m.dashboardView()
-	case CreateView:
-		return m.createView()
-	case DeleteView:
-		return m.deleteView()
-	case InitView:
-		return m.initView()
-	case SettingsView:
-		return m.settingsView()
-	case OpenInView:
-		return m.openInView()
-	case ConfigView:
-		return m.configView()
-	default:
-		return m.dashboardView()
-	}
-}
-
-// openInView renders the "Open in..." view
-func (m Model) openInView() string {
-	if m.openInState == nil {
-		return "Loading..."
-	}
-
-	if len(m.openInState.actions) == 0 {
-		return HeaderStyle.Width(m.width - 4).Render("No actions available")
-	}
-
-	var content strings.Builder
-
-	content.WriteString(TitleStyle.Render("Open in..."))
-	content.WriteString("\n\n")
-
-	// Render each action as a simple list item
-	for i, action := range m.openInState.actions {
-		prefix := "  "
-		if i == m.openInState.selectedIndex {
-			prefix = "▶ "
-			// Just change text color, no border/box
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name)))
-		} else {
-			content.WriteString(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name))
+		baseView = m.dashboardView()
+		// Show help overlay if visible
+		if m.helpVisible {
+			return m.renderHelpOverlay(baseView)
 		}
-		content.WriteString("\n")
+	case CreateView:
+		baseView = m.createView()
+	case DeleteView:
+		// Delete steps are shown as modal overlays on dashboard
+		baseView = m.dashboardView()
+		if m.deleteState != nil {
+			switch m.deleteState.currentStep {
+			case DeleteStepConfirm:
+				return m.renderDeleteModal(baseView)
+			case DeleteStepComplete:
+				return m.renderWithModal(baseView, m.renderDeleteCompleteModal())
+			}
+		}
+		return baseView
+	case InitView:
+		baseView = m.initView()
+	case SettingsView:
+		baseView = m.settingsView()
+	case OpenInView:
+		// Render dashboard with modal overlay
+		baseView = m.dashboardView()
+		return m.renderWithModal(baseView, m.renderOpenInModal())
+	case ConfigView:
+		baseView = m.configView()
+	default:
+		baseView = m.dashboardView()
 	}
 
-	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("↑↓ Navigate • Enter Select • Esc Back"))
-
-	return content.String()
+	return baseView
 }
+
 
 // generateDefaultWorktreeDir creates a default worktree directory name based on current working directory
 func (m Model) generateDefaultWorktreeDir() string {

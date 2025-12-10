@@ -78,3 +78,8 @@ type pruneCompleteMsg struct {
 	prunedCount int
 	prunedPaths []string
 }
+
+type aiScriptGeneratedMsg struct {
+	script string
+	err    error
+}

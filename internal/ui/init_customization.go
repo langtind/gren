@@ -3,8 +3,6 @@ package ui
 import (
 	"fmt"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // renderCustomizationStep shows the customization interface
@@ -27,150 +25,134 @@ func (m Model) renderCustomizationStep() string {
 
 // renderCustomizationMenu shows the main customization menu
 func (m Model) renderCustomizationMenu() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("⚙️ Customize Configuration"))
-	content.WriteString("\n\n")
-
-	content.WriteString(WorktreeNameStyle.Render("Choose what to customize:"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Customize"))
+	b.WriteString("\n\n")
 
 	options := []struct {
-		name        string
-		icon        string
-		description string
+		name string
+		desc string
 	}{
-		{"Worktree Location", "📂", fmt.Sprintf("Currently: %s", m.initState.worktreeDir)},
-		{"Detected Files", "📋", fmt.Sprintf("%d files to symlink", len(m.initState.detectedFiles))},
-		{"Post-Create Command", "⚡", fmt.Sprintf("Currently: %s", m.initState.postCreateCmd)},
+		{"Worktree location", fmt.Sprintf("Currently: %s", m.initState.worktreeDir)},
+		{"Files to copy", fmt.Sprintf("%d files detected", len(m.initState.detectedFiles))},
+		{"Setup command", fmt.Sprintf("Currently: %s", m.initState.postCreateCmd)},
 	}
 
-	for i, option := range options {
-		var style lipgloss.Style
+	for i, opt := range options {
+		b.WriteString(WizardOption(opt.name, i == m.initState.selected))
+		b.WriteString("\n")
 		if i == m.initState.selected {
-			style = WorktreeSelectedStyle
-		} else {
-			style = WorktreeItemStyle
+			b.WriteString(WizardDescStyle.Render("   " + opt.desc))
+			b.WriteString("\n")
 		}
-
-		optionText := fmt.Sprintf("%s %s", option.icon, option.name)
-		content.WriteString(style.Width(m.width - 8).Render(optionText))
-		content.WriteString("\n")
-		content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", option.description)))
-		content.WriteString("\n\n")
 	}
 
-	content.WriteString(HelpStyle.Render("[enter] Customize  [↑↓] Navigate  [esc] Back to recommendations"))
+	b.WriteString("\n")
+	b.WriteString(WizardHelpBar("↑↓ select", "enter edit", "esc back"))
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
 // renderWorktreeCustomization shows worktree directory customization
 func (m Model) renderWorktreeCustomization() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("📂 Worktree Location"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Worktree Location"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Configure where worktrees will be created:"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardSubtitleStyle.Render("Where to create worktrees"))
+	b.WriteString("\n\n")
 
 	// Input field
-	inputStyle := WorktreeSelectedStyle
 	displayText := m.initState.editingText
 	if displayText == "" {
 		displayText = m.initState.worktreeDir
 	}
+	b.WriteString(WizardInputStyle.Width(50).Render(displayText + "▮"))
+	b.WriteString("\n\n")
 
-	content.WriteString(inputStyle.Width(m.width - 8).Render(fmt.Sprintf("📁 %s▮", displayText)))
-	content.WriteString("\n\n")
+	// Examples
+	b.WriteString(WizardDescStyle.Render("Examples:"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  ../worktrees    (sibling directory)"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  ~/dev/trees     (absolute path)"))
+	b.WriteString("\n\n")
 
-	// Help text
-	content.WriteString(WorktreePathStyle.Render("Examples:"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   ../worktrees       (relative to current repo)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   ~/dev/worktrees    (absolute path)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   ./branches         (inside current repo)"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHelpBar("type path", "enter save", "esc cancel"))
 
-	content.WriteString(HelpStyle.Render("[type] Edit path  [enter] Save  [esc] Back"))
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }
 
-// renderPatternsCustomization shows detected files (now read-only, edit post-create.sh to customize)
+// renderPatternsCustomization shows detected files
 func (m Model) renderPatternsCustomization() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("📋 Detected Files"))
-	content.WriteString("\n\n")
-
-	content.WriteString(WorktreeNameStyle.Render("These files will be symlinked to new worktrees:"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Files to Copy"))
+	b.WriteString("\n\n")
 
 	if len(m.initState.detectedFiles) == 0 {
-		content.WriteString(WorktreePathStyle.Render("No gitignored files detected."))
-		content.WriteString("\n\n")
+		b.WriteString(WizardDescStyle.Render("No gitignored files detected."))
+		b.WriteString("\n\n")
 	} else {
-		for i, file := range m.initState.detectedFiles {
-			var style lipgloss.Style
-			if i == m.initState.selected {
-				style = WorktreeSelectedStyle
-			} else {
-				style = WorktreeItemStyle
-			}
+		b.WriteString(WizardSubtitleStyle.Render("These files will be copied to new worktrees:"))
+		b.WriteString("\n\n")
 
-			fileText := fmt.Sprintf("🔗 %s", file.Path)
-			content.WriteString(style.Width(m.width - 8).Render(fileText))
-			content.WriteString("\n")
-			content.WriteString(WorktreePathStyle.Render(fmt.Sprintf("   %s", file.Description)))
-			content.WriteString("\n\n")
+		for _, file := range m.initState.detectedFiles {
+			icon := "📄"
+			if file.IsGitIgnored {
+				icon = "🔒"
+			}
+			b.WriteString(WizardDescStyle.Render(fmt.Sprintf("  %s %s", icon, file.Path)))
+			b.WriteString("\n")
+			if file.Description != "" {
+				b.WriteString(WizardDescStyle.Render(fmt.Sprintf("     %s", file.Description)))
+				b.WriteString("\n")
+			}
 		}
+		b.WriteString("\n")
 	}
 
-	content.WriteString(HelpStyle.Render("Edit .gren/post-create.sh to customize • [esc] Back"))
+	b.WriteString(WizardDescStyle.Render("Edit .gren/post-create.sh to customize file copying"))
+	b.WriteString("\n\n")
 
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	b.WriteString(WizardHelpBar("esc back"))
+
+	return m.wrapWizardContent(b.String())
 }
 
 // renderPostCreateCustomization shows post-create command customization
 func (m Model) renderPostCreateCustomization() string {
-	var content strings.Builder
+	var b strings.Builder
 
-	content.WriteString(TitleStyle.Render("⚡ Post-Create Command"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHeader("Setup Command"))
+	b.WriteString("\n\n")
 
-	content.WriteString(WorktreeNameStyle.Render("Command to run after creating each worktree:"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardSubtitleStyle.Render("Command to run after creating worktree"))
+	b.WriteString("\n\n")
 
 	// Input field
-	inputStyle := WorktreeSelectedStyle
 	displayText := m.initState.editingText
 	if displayText == "" {
 		displayText = m.initState.postCreateCmd
 	}
+	b.WriteString(WizardInputStyle.Width(50).Render(displayText + "▮"))
+	b.WriteString("\n\n")
 
-	content.WriteString(inputStyle.Width(m.width - 8).Render(fmt.Sprintf("⚡ %s▮", displayText)))
-	content.WriteString("\n\n")
+	// Examples based on detected package manager
+	b.WriteString(WizardDescStyle.Render("Examples:"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  npm install"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  bun install"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  go mod download"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  pip install -r requirements.txt"))
+	b.WriteString("\n\n")
 
-	// Help text
-	content.WriteString(WorktreePathStyle.Render("Examples:"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   npm install           (install Node.js dependencies)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   go mod download       (download Go modules)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   pip install -r requirements.txt  (Python dependencies)"))
-	content.WriteString("\n")
-	content.WriteString(WorktreePathStyle.Render("   make setup            (custom setup script)"))
-	content.WriteString("\n\n")
+	b.WriteString(WizardHelpBar("type command", "enter save", "esc cancel"))
 
-	content.WriteString(WorktreePathStyle.Render("Leave empty to create a custom script instead."))
-	content.WriteString("\n\n")
-
-	content.WriteString(HelpStyle.Render("[type] Edit command  [enter] Save  [esc] Back"))
-
-	return HeaderStyle.Width(m.width - 4).Render(content.String())
+	return m.wrapWizardContent(b.String())
 }

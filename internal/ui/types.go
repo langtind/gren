@@ -24,11 +24,16 @@ const (
 
 // Worktree represents a git worktree
 type Worktree struct {
-	Name      string
-	Path      string
-	Branch    string
-	Status    string // "clean", "modified", "building", etc.
-	IsCurrent bool   // true if this is the current worktree
+	Name           string
+	Path           string
+	Branch         string
+	Status         string // "clean", "modified", "building", etc.
+	IsCurrent      bool   // true if this is the current worktree
+	LastCommit     string // Relative time of last commit (e.g., "2h ago")
+	StagedCount    int    // Number of staged files (ready to commit)
+	ModifiedCount  int    // Number of modified files (not staged)
+	UntrackedCount int    // Number of untracked files
+	UnpushedCount  int    // Number of unpushed commits
 }
 
 // InitStep represents the current step in initialization
@@ -45,6 +50,8 @@ const (
 	InitStepComplete
 	InitStepCommitConfirm
 	InitStepFinal
+	InitStepAIGenerating
+	InitStepAIResult
 )
 
 // InitState holds the state for project initialization
@@ -59,6 +66,8 @@ type InitState struct {
 	analysisComplete  bool   // whether project analysis is complete
 	packageManager    string // detected package manager
 	postCreateCmd     string // detected post-create command
+	aiGeneratedScript string // AI-generated setup script content
+	aiError           string // Error message from AI generation
 }
 
 // DetectedFile represents a detected file that could be useful for worktrees
@@ -183,6 +192,7 @@ type DeleteState struct {
 	selectedWorktrees []int // Indices of selected worktrees for deletion
 	warnings          []string
 	targetWorktree    *Worktree // Specific worktree to delete (for single deletion)
+	forceDelete       bool      // Use --force flag (when user confirms deletion of dirty worktree)
 }
 
 // Model holds the entire application state
@@ -213,6 +223,9 @@ type Model struct {
 
 	// Key bindings
 	keys KeyMap
+
+	// Help overlay
+	helpVisible bool
 }
 
 // KeyMap defines key bindings for the application
@@ -230,6 +243,12 @@ type KeyMap struct {
 	Config   key.Binding
 	Prune    key.Binding
 	Navigate key.Binding
+	Help     key.Binding
+}
+
+// HelpState holds the state for the help overlay
+type HelpState struct {
+	visible bool
 }
 
 // DefaultKeyMap returns default key bindings
@@ -286,6 +305,10 @@ func DefaultKeyMap() KeyMap {
 		Navigate: key.NewBinding(
 			key.WithKeys("g"),
 			key.WithHelp("g", "navigate to worktree"),
+		),
+		Help: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "help"),
 		),
 	}
 }

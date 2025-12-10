@@ -38,11 +38,12 @@ type CreateWorktreeRequest struct {
 
 // WorktreeInfo represents basic worktree information
 type WorktreeInfo struct {
-	Name      string
-	Path      string
-	Branch    string
-	IsCurrent bool
-	Status    string
+	Name       string
+	Path       string
+	Branch     string
+	IsCurrent  bool
+	Status     string
+	LastCommit string // Relative time of last commit (e.g., "2 hours ago")
 }
 
 // CheckPrerequisites verifies that required tools are available

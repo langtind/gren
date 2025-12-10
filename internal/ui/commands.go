@@ -422,8 +422,10 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 
 			// 3. Remove worktree using git
 			// Note: --force is required for worktrees with submodules (even after deinit)
+			// or when user confirmed deletion of worktree with uncommitted changes
+			useForce := hasSubmodules || m.deleteState.forceDelete
 			var cmd *exec.Cmd
-			if hasSubmodules {
+			if useForce {
 				logging.Debug("Running: git worktree remove --force %s", worktree.Path)
 				cmd = exec.Command("git", "worktree", "remove", "--force", worktree.Path)
 			} else {
@@ -484,25 +486,51 @@ func (m Model) initializeOpenInState(worktreePath string) tea.Cmd {
 
 // openPostCreateScript opens the post-create script in an external editor
 func (m Model) openPostCreateScript() tea.Cmd {
-	return func() tea.Msg {
-		scriptPath := ".gren/post-create.sh"
+	scriptPath := ".gren/post-create.sh"
 
-		// Try different editors in order of preference
-		editors := []string{"code", "cursor", "nano", "vi"}
-		var cmd *exec.Cmd
+	// First check EDITOR environment variable
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
 
-		for _, editor := range editors {
-			if isCommandAvailable(editor) {
-				cmd = exec.Command(editor, scriptPath)
+	// If no env var set, try common editors
+	if editor == "" {
+		fallbackEditors := []string{"code", "zed", "vim", "nano"}
+		for _, e := range fallbackEditors {
+			if isCommandAvailable(e) {
+				editor = e
 				break
 			}
 		}
+	}
 
-		if cmd == nil {
-			return scriptEditCompleteMsg{err: fmt.Errorf("no suitable editor found")}
+	if editor == "" {
+		return func() tea.Msg {
+			return scriptEditCompleteMsg{err: fmt.Errorf("no editor found. Set EDITOR environment variable")}
 		}
+	}
 
-		err := cmd.Run()
+	// Check if it's a terminal editor (vim, nvim, nano, etc.)
+	terminalEditors := map[string]bool{
+		"vim": true, "nvim": true, "vi": true, "nano": true, "emacs": true, "helix": true, "hx": true,
+	}
+
+	// Get the base command name (in case EDITOR contains a path)
+	editorBase := filepath.Base(editor)
+
+	if terminalEditors[editorBase] {
+		// Use tea.ExecProcess for terminal editors - this suspends the TUI
+		cmd := exec.Command(editor, scriptPath)
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return scriptEditCompleteMsg{err: err}
+		})
+	}
+
+	// For GUI editors, just start them in background
+	return func() tea.Msg {
+		cmd := exec.Command(editor, scriptPath)
+		err := cmd.Start()
 		return scriptEditCompleteMsg{err: err}
 	}
 }
@@ -708,45 +736,58 @@ func (m *Model) initializeActionsList() {
 
 // openConfigFile opens a configuration file in an available editor
 func (m Model) openConfigFile(filePath string) tea.Cmd {
-	return func() tea.Msg {
-		// Try to detect available editors in order of preference
-		editors := []struct {
-			name    string
-			command string
-		}{
-			{"Visual Studio Code", "code"},
-			{"Zed", "zed"},
-			{"Vim", "vim"},
-			{"Nano", "nano"},
+	// Check if file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return func() tea.Msg {
+			return configFileOpenedMsg{err: fmt.Errorf("config file does not exist: %s", filePath)}
 		}
+	}
 
-		var foundEditor string
-		for _, editor := range editors {
-			if _, err := exec.LookPath(editor.command); err == nil {
-				foundEditor = editor.command
+	// First check EDITOR environment variable
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+
+	// If no env var set, try common editors
+	if editor == "" {
+		fallbackEditors := []string{"code", "zed", "vim", "nano"}
+		for _, e := range fallbackEditors {
+			if _, err := exec.LookPath(e); err == nil {
+				editor = e
 				break
 			}
 		}
+	}
 
-		if foundEditor == "" {
-			return configFileOpenedMsg{err: fmt.Errorf("no suitable editor found (tried: code, zed, vim, nano)")}
+	if editor == "" {
+		return func() tea.Msg {
+			return configFileOpenedMsg{err: fmt.Errorf("no editor found. Set EDITOR environment variable or install code/vim/nano")}
 		}
+	}
 
-		// Check if file exists
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			return configFileOpenedMsg{err: fmt.Errorf("config file does not exist: %s", filePath)}
-		}
+	// Check if it's a terminal editor (vim, nvim, nano, etc.)
+	terminalEditors := map[string]bool{
+		"vim": true, "nvim": true, "vi": true, "nano": true, "emacs": true, "helix": true, "hx": true,
+	}
 
-		// Execute the editor
-		cmd := exec.Command(foundEditor, filePath)
+	editorBase := filepath.Base(editor)
+
+	if terminalEditors[editorBase] {
+		// Use tea.ExecProcess for terminal editors - this suspends the TUI
+		cmd := exec.Command(editor, filePath)
+		return tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return configFileOpenedMsg{err: err}
+		})
+	}
+
+	// For GUI editors, just start them in background
+	return func() tea.Msg {
+		cmd := exec.Command(editor, filePath)
 		if err := cmd.Start(); err != nil {
-			return configFileOpenedMsg{err: fmt.Errorf("failed to open %s: %w", foundEditor, err)}
+			return configFileOpenedMsg{err: fmt.Errorf("failed to open %s: %w", editor, err)}
 		}
-
-		// For GUI editors like code/zed, we don't wait
-		// For terminal editors like vim/nano, we should wait but that would block the UI
-		// For now, we'll treat all editors the same way
-		return configFileOpenedMsg{err: nil} // Success
+		return configFileOpenedMsg{err: nil}
 	}
 }
 
@@ -800,5 +841,115 @@ func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
 
 		// Quit the TUI to allow wrapper script to execute the navigation
 		return tea.Quit()
+	}
+}
+
+// generateAISetupScript generates a setup script using Claude CLI
+func (m Model) generateAISetupScript() tea.Cmd {
+	return func() tea.Msg {
+		logging.Info("Starting AI setup script generation")
+
+		// Check if Claude CLI is available
+		claudePath, err := exec.LookPath("claude")
+		if err != nil {
+			// Try common locations
+			possiblePaths := []string{
+				"/usr/local/bin/claude",
+				os.ExpandEnv("$HOME/.local/bin/claude"),
+				"/opt/homebrew/bin/claude",
+			}
+			for _, p := range possiblePaths {
+				if _, err := os.Stat(p); err == nil {
+					claudePath = p
+					break
+				}
+			}
+			if claudePath == "" {
+				return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-cli")}
+			}
+		}
+
+		logging.Debug("Found Claude CLI at: %s", claudePath)
+
+		// Gather project context
+		var contextBuilder strings.Builder
+		contextBuilder.WriteString("Analyze this project and generate a bash setup script for a new git worktree.\n\n")
+		contextBuilder.WriteString("Project context:\n")
+
+		// Detected files
+		if m.initState != nil && len(m.initState.detectedFiles) > 0 {
+			contextBuilder.WriteString("\nDetected files to consider:\n")
+			for _, f := range m.initState.detectedFiles {
+				gitIgnored := ""
+				if f.IsGitIgnored {
+					gitIgnored = " (gitignored)"
+				}
+				contextBuilder.WriteString(fmt.Sprintf("- %s%s\n", f.Path, gitIgnored))
+			}
+		}
+
+		// Package manager
+		if m.initState != nil && m.initState.packageManager != "" {
+			contextBuilder.WriteString(fmt.Sprintf("\nDetected package manager: %s\n", m.initState.packageManager))
+		}
+
+		// Check for common project files
+		projectFiles := []string{"package.json", "go.mod", "Cargo.toml", "requirements.txt", "pyproject.toml", "Makefile", ".envrc"}
+		var foundFiles []string
+		for _, f := range projectFiles {
+			if _, err := os.Stat(f); err == nil {
+				foundFiles = append(foundFiles, f)
+			}
+		}
+		if len(foundFiles) > 0 {
+			contextBuilder.WriteString(fmt.Sprintf("\nProject files found: %s\n", strings.Join(foundFiles, ", ")))
+		}
+
+		contextBuilder.WriteString(`
+Requirements for the script:
+1. Copy gitignored environment files (like .env*) from the main worktree using symlinks
+2. Install dependencies using the detected package manager
+3. Run any necessary build or setup commands
+4. Handle direnv if .envrc exists
+5. Be idempotent (safe to run multiple times)
+
+Output ONLY the bash script content, no explanations. Start with #!/bin/bash
+`)
+
+		// Run Claude CLI with the prompt
+		cmd := exec.Command(claudePath, "-p", contextBuilder.String())
+		cmd.Dir, _ = os.Getwd()
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			logging.Error("Claude CLI failed: %v, output: %s", err, string(output))
+			return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %s", string(output))}
+		}
+
+		script := strings.TrimSpace(string(output))
+
+		// Basic validation - should start with shebang
+		if !strings.HasPrefix(script, "#!/") {
+			// Try to extract script from response if Claude added explanation
+			lines := strings.Split(script, "\n")
+			inScript := false
+			var scriptLines []string
+			for _, line := range lines {
+				if strings.HasPrefix(line, "#!/") {
+					inScript = true
+				}
+				if inScript {
+					scriptLines = append(scriptLines, line)
+				}
+			}
+			if len(scriptLines) > 0 {
+				script = strings.Join(scriptLines, "\n")
+			} else {
+				script = "#!/bin/bash\n\n# AI-generated script\n" + script
+			}
+		}
+
+		logging.Info("AI script generated successfully")
+		return aiScriptGeneratedMsg{script: script}
 	}
 }

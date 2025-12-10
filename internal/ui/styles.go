@@ -1,109 +1,458 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Modern color palette inspired by lazygit, gitui, and modern terminal aesthetics
 var (
-	// Colors inspired by Git and nature
-	PrimaryColor    = lipgloss.Color("#22c55e") // Green
-	SecondaryColor  = lipgloss.Color("#3b82f6") // Blue
-	AccentColor     = lipgloss.Color("#f59e0b") // Amber
-	ErrorColor      = lipgloss.Color("#ef4444") // Red
-	MutedColor      = lipgloss.Color("#6b7280") // Gray
-	BackgroundColor = lipgloss.Color("#111827") // Dark
-	TextColor       = lipgloss.Color("#f9fafb") // Light
+	// Base colors - softer, more refined
+	ColorPrimary   = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#22c55e"} // Green
+	ColorSecondary = lipgloss.AdaptiveColor{Light: "#6366f1", Dark: "#818cf8"} // Indigo
+	ColorAccent    = lipgloss.AdaptiveColor{Light: "#f59e0b", Dark: "#fbbf24"} // Amber
+	ColorSuccess   = lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#4ade80"} // Green
+	ColorWarning   = lipgloss.AdaptiveColor{Light: "#ea580c", Dark: "#fb923c"} // Orange
+	ColorError     = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"} // Red
 
-	// Base styles
-	BaseStyle = lipgloss.NewStyle().
-			Foreground(TextColor).
-			Background(BackgroundColor)
+	// Neutral colors
+	ColorText       = lipgloss.AdaptiveColor{Light: "#1f2937", Dark: "#f3f4f6"}
+	ColorTextMuted  = lipgloss.AdaptiveColor{Light: "#6b7280", Dark: "#9ca3af"}
+	ColorTextSubtle = lipgloss.AdaptiveColor{Light: "#9ca3af", Dark: "#6b7280"}
+	ColorBorder     = lipgloss.AdaptiveColor{Light: "#d1d5db", Dark: "#374151"}
+	ColorBorderDim  = lipgloss.AdaptiveColor{Light: "#e5e7eb", Dark: "#1f2937"}
+	ColorHighlight  = lipgloss.AdaptiveColor{Light: "#dbeafe", Dark: "#1e3a5f"}
+	ColorSurface    = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#111827"}
 
-	// Header styles
-	HeaderStyle = lipgloss.NewStyle().
-			Foreground(PrimaryColor).
-			Bold(true).
+	// Special purpose
+	ColorCurrentBranch = lipgloss.AdaptiveColor{Light: "#7c3aed", Dark: "#a78bfa"} // Purple for current
+)
+
+// Layout constants
+const (
+	HeaderHeight = 8 // Logo (6 lines) + spacing
+	FooterHeight = 2
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Header Bar Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	HeaderBarStyle = lipgloss.NewStyle().
+			Background(lipgloss.AdaptiveColor{Light: "#f3f4f6", Dark: "#1f2937"}).
+			Padding(0, 2)
+
+	LogoStyle = lipgloss.NewStyle().
+			Foreground(ColorPrimary).
+			Bold(true)
+
+	HeaderInfoStyle = lipgloss.NewStyle().
+			Foreground(ColorTextMuted)
+
+	HeaderBranchStyle = lipgloss.NewStyle().
+				Foreground(ColorSecondary).
+				Bold(true)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Table Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	TableHeaderStyle = lipgloss.NewStyle().
+				Foreground(ColorTextMuted).
+				Bold(true).
+				BorderStyle(lipgloss.NormalBorder()).
+				BorderBottom(true).
+				BorderForeground(ColorBorderDim).
+				Padding(0, 1)
+
+	TableRowStyle = lipgloss.NewStyle().
+			Padding(0, 1)
+
+	TableRowSelectedStyle = lipgloss.NewStyle().
+				Background(ColorHighlight).
+				Foreground(ColorText).
+				Padding(0, 1)
+
+	TableRowCurrentStyle = lipgloss.NewStyle().
+				Background(lipgloss.AdaptiveColor{Light: "#ecfdf5", Dark: "#052e16"}).
+				Padding(0, 1)
+
+	TableRowCurrentSelectedStyle = lipgloss.NewStyle().
+					Background(lipgloss.AdaptiveColor{Light: "#bbf7d0", Dark: "#14532d"}).
+					Foreground(ColorText).
+					Padding(0, 1)
+
+	TableCellStyle = lipgloss.NewStyle().
+			Padding(0, 1)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Worktree Item Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	WorktreeNameStyle = lipgloss.NewStyle().
+				Foreground(ColorText).
+				Bold(true)
+
+	WorktreeNameCurrentStyle = lipgloss.NewStyle().
+					Foreground(ColorCurrentBranch).
+					Bold(true)
+
+	WorktreePathStyle = lipgloss.NewStyle().
+				Foreground(ColorTextSubtle)
+
+	WorktreeBranchStyle = lipgloss.NewStyle().
+				Foreground(ColorSecondary)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Status Badge Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	StatusCleanStyle = lipgloss.NewStyle().
+				Foreground(ColorSuccess)
+
+	StatusModifiedStyle = lipgloss.NewStyle().
+				Foreground(ColorWarning)
+
+	StatusUnpushedStyle = lipgloss.NewStyle().
+				Foreground(ColorSecondary)
+
+	StatusMissingStyle = lipgloss.NewStyle().
+				Foreground(ColorError)
+
+	StatusBuildingStyle = lipgloss.NewStyle().
+				Foreground(ColorAccent)
+
+	StatusWarningStyle = lipgloss.NewStyle().
+				Foreground(ColorWarning)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Footer / Help Bar Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	FooterBarStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderTop(true).
+			BorderForeground(ColorBorderDim).
+			Padding(0, 1)
+
+	HelpKeyStyle = lipgloss.NewStyle().
+			Foreground(ColorPrimary).
+			Bold(true)
+
+	HelpTextStyle = lipgloss.NewStyle().
+			Foreground(ColorTextMuted)
+
+	HelpSeparatorStyle = lipgloss.NewStyle().
+				Foreground(ColorBorderDim)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Panel Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	PanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(PrimaryColor).
-			Padding(0, 1).
-			MarginBottom(1)
+			BorderForeground(ColorBorder).
+			Padding(1, 2)
+
+	PanelActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorPrimary).
+				Padding(1, 2)
+
+	PanelTitleStyle = lipgloss.NewStyle().
+			Foreground(ColorPrimary).
+			Bold(true).
+			Padding(0, 1)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dialog / Modal Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	DialogStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorPrimary).
+			Padding(1, 2)
+
+	DialogTitleStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary).
+				Bold(true).
+				MarginBottom(1)
+
+	DialogTextStyle = lipgloss.NewStyle().
+			Foreground(ColorText)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Form / Input Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	InputLabelStyle = lipgloss.NewStyle().
+			Foreground(ColorTextMuted).
+			MarginBottom(0)
+
+	InputStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorBorder).
+			Padding(0, 1)
+
+	InputFocusedStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorPrimary).
+				Padding(0, 1)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Menu / Selection Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	MenuItemStyle = lipgloss.NewStyle().
+			Padding(0, 2)
+
+	MenuItemSelectedStyle = lipgloss.NewStyle().
+				Background(ColorHighlight).
+				Foreground(ColorText).
+				Padding(0, 2)
+
+	MenuItemDisabledStyle = lipgloss.NewStyle().
+				Foreground(ColorTextSubtle).
+				Padding(0, 2)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Message / Alert Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	ErrorStyle = lipgloss.NewStyle().
+			Foreground(ColorError).
+			Bold(true)
+
+	WarningStyle = lipgloss.NewStyle().
+			Foreground(ColorWarning)
+
+	SuccessStyle = lipgloss.NewStyle().
+			Foreground(ColorSuccess)
+
+	InfoStyle = lipgloss.NewStyle().
+			Foreground(ColorSecondary)
+)
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Legacy styles for backward compatibility
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	// These maintain compatibility with existing code
+	PrimaryColor    = lipgloss.Color("#22c55e") // Green (was teal)
+	SecondaryColor  = lipgloss.Color("#818cf8")
+	AccentColor     = lipgloss.Color("#fbbf24")
+	ErrorColor      = lipgloss.Color("#f87171")
+	MutedColor      = lipgloss.Color("#9ca3af")
+	BackgroundColor = lipgloss.Color("#111827")
+	TextColor       = lipgloss.Color("#f3f4f6")
+
+	BaseStyle = lipgloss.NewStyle().
+			Foreground(ColorText)
+
+	HeaderStyle = PanelStyle.Copy()
 
 	TitleStyle = lipgloss.NewStyle().
-			Foreground(PrimaryColor).
-			Bold(true).
-			Align(lipgloss.Center)
+			Foreground(ColorPrimary).
+			Bold(true)
 
 	SubtitleStyle = lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Align(lipgloss.Center).
-			MarginBottom(1)
+			Foreground(ColorTextMuted)
 
-	// Menu and selection styles
-	MenuItemStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			MarginBottom(1)
+	SelectedMenuItemStyle = MenuItemSelectedStyle.Copy()
 
-	SelectedMenuItemStyle = lipgloss.NewStyle().
-				Foreground(BackgroundColor).
-				Background(PrimaryColor).
-				Bold(true).
-				Padding(0, 2).
-				MarginBottom(1)
-
-	// Worktree list styles
 	WorktreeItemStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(MutedColor).
-				Padding(1, 2).
-				MarginBottom(1)
+				BorderForeground(ColorBorder).
+				Padding(0, 1).
+				MarginBottom(0)
 
 	WorktreeSelectedStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(PrimaryColor).
-				Padding(1, 2).
-				MarginBottom(1)
+				BorderForeground(ColorPrimary).
+				Padding(0, 1).
+				MarginBottom(0)
 
-	WorktreeNameStyle = lipgloss.NewStyle().
-				Foreground(PrimaryColor).
-				Bold(true)
+	HelpStyle = HelpTextStyle.Copy()
 
-	WorktreePathStyle = lipgloss.NewStyle().
-				Foreground(MutedColor)
-
-	WorktreeBranchStyle = lipgloss.NewStyle().
-				Foreground(SecondaryColor)
-
-	// Status styles
-	StatusCleanStyle = lipgloss.NewStyle().
-				Foreground(PrimaryColor).
-				Bold(true)
-
-	StatusModifiedStyle = lipgloss.NewStyle().
-				Foreground(AccentColor).
-				Bold(true)
-
-	StatusBuildingStyle = lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				Bold(true)
-
-	// Help text styles
-	HelpStyle = lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Align(lipgloss.Center).
-			MarginTop(1)
-
-	// Progress and loading styles
 	ProgressStyle = lipgloss.NewStyle().
-			Foreground(PrimaryColor)
+			Foreground(ColorPrimary)
 
 	SpinnerStyle = lipgloss.NewStyle().
-			Foreground(AccentColor)
-
-	// Error styles
-	ErrorStyle = lipgloss.NewStyle().
-			Foreground(ErrorColor).
-			Bold(true).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ErrorColor).
-			Padding(0, 1)
+			Foreground(ColorAccent)
 )
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helper Functions
+// ═══════════════════════════════════════════════════════════════════════════
+
+// HelpItem creates a formatted help item with key and description
+func HelpItem(key, desc string) string {
+	return HelpKeyStyle.Render(key) + HelpTextStyle.Render(" "+desc)
+}
+
+// HelpBar creates a formatted help bar from multiple items
+func HelpBar(items ...string) string {
+	separator := HelpSeparatorStyle.Render("  │  ")
+	return strings.Join(items, separator)
+}
+
+// StatusBadge returns styled status text (simple version)
+func StatusBadge(status string) string {
+	switch status {
+	case "clean":
+		return StatusCleanStyle.Render("✓")
+	case "modified":
+		return StatusModifiedStyle.Render("M")
+	case "untracked":
+		return StatusModifiedStyle.Render("?")
+	case "mixed":
+		return StatusModifiedStyle.Render("M?")
+	case "unpushed":
+		return StatusUnpushedStyle.Render("↑")
+	case "missing":
+		return StatusMissingStyle.Render("✗")
+	default:
+		return StatusCleanStyle.Render("✓")
+	}
+}
+
+// StatusBadgeDetailed returns styled status with counts in git-style format
+// Uses: +N staged, ~N modified, ?N untracked, ↑N unpushed (like warp/lazygit)
+func StatusBadgeDetailed(status string, staged, modified, untracked, unpushed int) string {
+	var parts []string
+
+	// Staged files (ready to commit) - green with +
+	if staged > 0 {
+		parts = append(parts, StatusCleanStyle.Render(fmt.Sprintf("+%d", staged)))
+	}
+	// Modified files (not staged) - yellow/orange with ~
+	if modified > 0 {
+		parts = append(parts, StatusModifiedStyle.Render(fmt.Sprintf("~%d", modified)))
+	}
+	// Untracked files - yellow/orange with ?
+	if untracked > 0 {
+		parts = append(parts, StatusModifiedStyle.Render(fmt.Sprintf("?%d", untracked)))
+	}
+	// Unpushed commits - blue with ↑
+	if unpushed > 0 {
+		parts = append(parts, StatusUnpushedStyle.Render(fmt.Sprintf("↑%d", unpushed)))
+	}
+
+	if len(parts) == 0 {
+		return StatusCleanStyle.Render("✓")
+	}
+
+	return strings.Join(parts, " ")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Wizard / View Styles
+// ═══════════════════════════════════════════════════════════════════════════
+
+var (
+	// WizardContainerStyle wraps wizard content with consistent padding
+	WizardContainerStyle = lipgloss.NewStyle().
+				Padding(1, 2)
+
+	// WizardTitleStyle for main wizard titles
+	WizardTitleStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary).
+				Bold(true).
+				MarginBottom(1)
+
+	// WizardSubtitleStyle for secondary titles
+	WizardSubtitleStyle = lipgloss.NewStyle().
+				Foreground(ColorText).
+				Bold(true)
+
+	// WizardDescStyle for descriptions
+	WizardDescStyle = lipgloss.NewStyle().
+			Foreground(ColorTextMuted)
+
+	// WizardInputStyle for text input fields
+	WizardInputStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorPrimary).
+				Padding(0, 1)
+
+	// WizardListItemStyle for list items
+	WizardListItemStyle = lipgloss.NewStyle().
+				Foreground(ColorText)
+
+	// WizardListItemSelectedStyle for selected list items
+	WizardListItemSelectedStyle = lipgloss.NewStyle().
+					Foreground(ColorPrimary).
+					Bold(true)
+
+	// WizardWarningStyle for warning boxes
+	WizardWarningStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorWarning).
+				Foreground(ColorWarning).
+				Padding(0, 1)
+
+	// WizardSuccessStyle for success messages
+	WizardSuccessStyle = lipgloss.NewStyle().
+				Foreground(ColorSuccess).
+				Bold(true)
+
+	// WizardDangerStyle for dangerous action confirmations
+	WizardDangerStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorError).
+				Foreground(ColorError).
+				Padding(0, 1)
+
+	// ConfirmModalStyle for confirmation modals
+	ConfirmModalStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorError).
+				Padding(1, 2)
+)
+
+// WizardHeader creates a styled wizard header with title
+func WizardHeader(title string) string {
+	return WizardTitleStyle.Render(title)
+}
+
+// WizardOption renders a selectable option in a list
+func WizardOption(label string, selected bool) string {
+	prefix := "  "
+	if selected {
+		prefix = "▶ "
+		return WizardListItemSelectedStyle.Render(prefix + label)
+	}
+	return WizardListItemStyle.Render(prefix + label)
+}
+
+// WizardHelpBar creates a help bar for wizard views
+func WizardHelpBar(items ...string) string {
+	separator := HelpSeparatorStyle.Render(" • ")
+	var styledItems []string
+	for _, item := range items {
+		styledItems = append(styledItems, HelpTextStyle.Render(item))
+	}
+	return strings.Join(styledItems, separator)
+}
