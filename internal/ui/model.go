@@ -274,8 +274,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(keyMsg, m.keys.Enter):
 			// Show "Open in..." menu for selected worktree
-			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
-				selectedWorktree := m.worktrees[m.selected]
+			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
 				logging.Info("Dashboard: opening 'Open in...' menu for worktree: %s", selectedWorktree.Name)
 				m.currentView = OpenInView
 				return m, m.initializeOpenInState(selectedWorktree.Path)
@@ -289,8 +288,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = CreateView
 				// Use selected worktree's branch as suggested base
 				var suggestedBase string
-				if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
-					suggestedBase = m.worktrees[m.selected].Branch
+				if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
+					suggestedBase = selectedWorktree.Branch
 				}
 				return m, m.initializeCreateStateWithBase(suggestedBase)
 			}
@@ -298,8 +297,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(keyMsg, m.keys.Delete):
 			// Delete the currently selected worktree with confirmation
-			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) && m.repoInfo != nil && m.repoInfo.IsInitialized {
-				selectedWorktree := m.worktrees[m.selected]
+			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil && m.repoInfo != nil && m.repoInfo.IsInitialized {
 				// Don't allow deleting the current worktree
 				if selectedWorktree.IsCurrent {
 					logging.Debug("Dashboard: cannot delete current worktree: %s", selectedWorktree.Name)
@@ -307,7 +305,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				logging.Info("Dashboard: entering DeleteView for worktree: %s (shortcut 'd')", selectedWorktree.Name)
 				m.currentView = DeleteView
-				return m, m.initializeDeleteStateForWorktree(selectedWorktree)
+				return m, m.initializeDeleteStateForWorktree(*selectedWorktree)
 			}
 			return m, nil
 
@@ -346,8 +344,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(keyMsg, m.keys.Navigate):
 			// Navigate to selected worktree directory
-			if len(m.worktrees) > 0 && m.selected < len(m.worktrees) {
-				selectedWorktree := m.worktrees[m.selected]
+			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
 				logging.Info("Dashboard: navigating to worktree: %s (shortcut 'g')", selectedWorktree.Name)
 				return m, m.navigateToWorktree(selectedWorktree.Path)
 			}

@@ -368,6 +368,17 @@ func (m Model) getSortedWorktrees() []Worktree {
 	return sorted
 }
 
+// getSelectedWorktree returns the worktree at the current selection index from the sorted list.
+// This must be used instead of m.worktrees[m.selected] to ensure the selection matches
+// the displayed (sorted) order.
+func (m Model) getSelectedWorktree() *Worktree {
+	sorted := m.getSortedWorktrees()
+	if m.selected < 0 || m.selected >= len(sorted) {
+		return nil
+	}
+	return &sorted[m.selected]
+}
+
 // commitTimeScore returns a rough score for sorting (higher = more recent)
 func commitTimeScore(timeStr string) int {
 	if timeStr == "" {
@@ -945,8 +956,7 @@ func (m Model) renderOpenInModal() string {
 	content.WriteString("\n\n")
 
 	// Get selected worktree name
-	if m.selected >= 0 && m.selected < len(m.worktrees) {
-		wt := m.worktrees[m.selected]
+	if wt := m.getSelectedWorktree(); wt != nil {
 		content.WriteString(WorktreePathStyle.Render(wt.Name))
 		content.WriteString("\n\n")
 	}
