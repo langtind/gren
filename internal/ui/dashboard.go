@@ -176,29 +176,133 @@ func (m Model) renderWorktreeTable() string {
 
 // renderNarrowLayout renders vertical layout for narrow screens (list on top, preview below)
 func (m Model) renderNarrowLayout(sortedWorktrees []Worktree, selectedWorktree *Worktree, width, height int) string {
-	// Calculate heights: list takes up to half, preview gets the rest
-	listHeight := len(sortedWorktrees)
-	if listHeight > height/2 {
-		listHeight = height / 2
-	}
-	if listHeight < 3 {
-		listHeight = 3
-	}
-	previewHeight := height - listHeight - 1 // -1 for separator
+	// Section header style
+	sectionHeaderStyle := lipgloss.NewStyle().
+		Foreground(ColorTextMuted).
+		Bold(true)
 
-	// Render list
-	list := m.renderNarrowWorktreeList(sortedWorktrees, width, listHeight)
+	// Calculate heights: list section takes up to 40%, details get the rest
+	listContentHeight := len(sortedWorktrees)
+	maxListHeight := height * 40 / 100
+	if listContentHeight > maxListHeight {
+		listContentHeight = maxListHeight
+	}
+	if listContentHeight < 2 {
+		listContentHeight = 2
+	}
 
-	// Horizontal separator
+	// Heights: list header (1) + list content + separator (1) + details header (1) + details content
+	listHeaderHeight := 1
+	separatorHeight := 1
+	detailsHeaderHeight := 1
+	detailsContentHeight := height - listHeaderHeight - listContentHeight - separatorHeight - detailsHeaderHeight
+
+	if detailsContentHeight < 5 {
+		detailsContentHeight = 5
+	}
+
+	// Render list section
+	listHeader := sectionHeaderStyle.Render("Worktrees")
+	list := m.renderNarrowWorktreeList(sortedWorktrees, width, listContentHeight)
+
+	// Separator with "Details" label
+	separatorLine := strings.Repeat("─", width)
 	separator := lipgloss.NewStyle().
 		Foreground(ColorBorderDim).
-		Render(strings.Repeat("─", width))
+		Render(separatorLine)
 
-	// Render preview panel (full width in narrow mode)
-	preview := m.renderPreviewPanel(selectedWorktree, width, previewHeight)
+	// Details header
+	detailsHeader := sectionHeaderStyle.Render("Details")
+
+	// Render preview/details panel (full width in narrow mode)
+	preview := m.renderNarrowPreviewPanel(selectedWorktree, width, detailsContentHeight)
 
 	// Stack vertically
-	return lipgloss.JoinVertical(lipgloss.Left, list, separator, preview)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		listHeader,
+		list,
+		separator,
+		detailsHeader,
+		preview,
+	)
+}
+
+// renderNarrowPreviewPanel renders a compact preview for narrow screens
+func (m Model) renderNarrowPreviewPanel(wt *Worktree, width, height int) string {
+	if wt == nil {
+		return lipgloss.NewStyle().
+			Width(width).
+			Height(height).
+			Foreground(ColorTextMuted).
+			Render("No worktree selected")
+	}
+
+	var b strings.Builder
+
+	// Compact format: key-value pairs
+	labelStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorText)
+	branchStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
+	statusStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
+
+	// Branch
+	b.WriteString(labelStyle.Render("Branch: "))
+	b.WriteString(branchStyle.Render(wt.Branch))
+	b.WriteString("\n")
+
+	// Path (shortened)
+	path := shortenPath(wt.Path, width-8)
+	b.WriteString(labelStyle.Render("Path:   "))
+	b.WriteString(valueStyle.Render(path))
+	b.WriteString("\n")
+
+	// Status
+	b.WriteString(labelStyle.Render("Status: "))
+	statusText, statusStyleInfo := getWorktreeStatusInfo(wt)
+	b.WriteString(statusStyleInfo.Render(statusText))
+	b.WriteString("\n")
+
+	// Last commit
+	if wt.LastCommit != "" {
+		b.WriteString(labelStyle.Render("Commit: "))
+		b.WriteString(valueStyle.Render(wt.LastCommit))
+	}
+
+	// If there's status detail (modified/staged/untracked)
+	if wt.StagedCount > 0 || wt.ModifiedCount > 0 || wt.UntrackedCount > 0 {
+		b.WriteString("\n")
+		var details []string
+		if wt.StagedCount > 0 {
+			details = append(details, fmt.Sprintf("%d staged", wt.StagedCount))
+		}
+		if wt.ModifiedCount > 0 {
+			details = append(details, fmt.Sprintf("%d modified", wt.ModifiedCount))
+		}
+		if wt.UntrackedCount > 0 {
+			details = append(details, fmt.Sprintf("%d untracked", wt.UntrackedCount))
+		}
+		b.WriteString(labelStyle.Render("        "))
+		b.WriteString(statusStyle.Render(strings.Join(details, ", ")))
+	}
+
+	return lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Render(b.String())
+}
+
+// getWorktreeStatusInfo returns status text and style for a worktree
+func getWorktreeStatusInfo(wt *Worktree) (string, lipgloss.Style) {
+	if wt.Status == "missing" {
+		return "Missing", lipgloss.NewStyle().Foreground(ColorError)
+	}
+	if wt.StagedCount > 0 || wt.ModifiedCount > 0 {
+		return "Modified", lipgloss.NewStyle().Foreground(ColorWarning)
+	}
+	if wt.UntrackedCount > 0 {
+		return "Untracked", lipgloss.NewStyle().Foreground(ColorWarning)
+	}
+	return "Clean", lipgloss.NewStyle().Foreground(ColorSuccess)
 }
 
 // renderWideLayout renders horizontal layout for wide screens (table + preview side by side)
