@@ -39,12 +39,12 @@ func (m Model) dashboardView() string {
 // getLogoLines returns the ASCII art logo as styled lines
 func getLogoLines() []string {
 	return []string{
-		" ██████╗ ██████╗ ███████╗███╗   ██╗",
-		"██╔════╝ ██╔══██╗██╔════╝████╗  ██║",
-		"██║  ███╗██████╔╝█████╗  ██╔██╗ ██║",
-		"██║   ██║██╔══██╗██╔══╝  ██║╚██╗██║",
-		"╚██████╔╝██║  ██║███████╗██║ ╚████║",
-		" ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
+		"   ██████╗ ██████╗ ███████╗███╗   ██╗",
+		"  ██╔════╝ ██╔══██╗██╔════╝████╗  ██║",
+		"  ██║  ███╗██████╔╝█████╗  ██╔██╗ ██║",
+		"  ██║   ██║██╔══██╗██╔══╝  ██║╚██╗██║",
+		"  ╚██████╔╝██║  ██║███████╗██║ ╚████║",
+		"   ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
 	}
 }
 
@@ -90,7 +90,7 @@ func (m Model) renderHeader() string {
 	infoLines = append(infoLines, "")
 
 	// Combine logo and info side by side
-	logoWidth := 36 // Width of the big ASCII logo
+	logoWidth := 38 // Width of the big ASCII logo (with left padding)
 	var headerLines []string
 
 	maxLines := len(logoLines)
