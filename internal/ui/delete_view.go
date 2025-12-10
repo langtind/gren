@@ -7,23 +7,14 @@ import (
 )
 
 // deleteView renders the delete worktree flow
-// Note: Delete confirmation is now shown as a modal overlay on the dashboard
+// Note: Delete confirmation and completion are now shown as modal overlays on the dashboard
 func (m Model) deleteView() string {
 	if m.deleteState == nil {
 		return "Loading..."
 	}
 
-	switch m.deleteState.currentStep {
-	case DeleteStepConfirm:
-		// This is now rendered as a modal overlay
-		return m.dashboardView()
-	case DeleteStepDeleting:
-		return m.renderDeletingStep()
-	case DeleteStepComplete:
-		return m.renderDeleteCompleteStep()
-	default:
-		return m.dashboardView()
-	}
+	// All delete steps now use modal overlays on dashboard
+	return m.dashboardView()
 }
 
 // renderDeleteConfirmModal renders the delete confirmation as a modal
@@ -102,31 +93,20 @@ func (m Model) renderDeleteConfirmModal() string {
 	return b.String()
 }
 
-// renderDeletingStep shows deletion in progress
-func (m Model) renderDeletingStep() string {
-	var b strings.Builder
-
-	b.WriteString(WizardHeader("Deleting Worktree"))
-	b.WriteString("\n\n")
-
-	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
-	b.WriteString(spinnerStyle.Render("◐ Removing worktree..."))
-	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("○ Cleaning up..."))
-	b.WriteString("\n\n")
-
-	if m.deleteState.targetWorktree != nil {
-		b.WriteString(WizardDescStyle.Render(m.deleteState.targetWorktree.Name))
+// renderDeleteCompleteModal renders the deletion complete message as a modal
+func (m Model) renderDeleteCompleteModal() string {
+	if m.deleteState == nil {
+		return ""
 	}
 
-	return m.wrapWizardContent(b.String())
-}
-
-// renderDeleteCompleteStep shows deletion complete
-func (m Model) renderDeleteCompleteStep() string {
 	var b strings.Builder
 
-	b.WriteString(WizardHeader("Worktree Deleted"))
+	// Title with success color
+	titleStyle := lipgloss.NewStyle().
+		Foreground(ColorSuccess).
+		Bold(true)
+
+	b.WriteString(titleStyle.Render("Worktree Deleted"))
 	b.WriteString("\n\n")
 
 	b.WriteString(WizardSuccessStyle.Render("✓ Successfully deleted"))
@@ -137,7 +117,12 @@ func (m Model) renderDeleteCompleteStep() string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(WizardHelpBar("enter continue", "q quit"))
+	// Help
+	b.WriteString(HelpKeyStyle.Render("enter"))
+	b.WriteString(HelpTextStyle.Render(" continue"))
+	b.WriteString(HelpSeparatorStyle.Render(" • "))
+	b.WriteString(HelpKeyStyle.Render("q"))
+	b.WriteString(HelpTextStyle.Render(" quit"))
 
-	return m.wrapWizardContent(b.String())
+	return b.String()
 }

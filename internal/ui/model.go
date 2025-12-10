@@ -362,12 +362,17 @@ func (m Model) View() string {
 	case CreateView:
 		baseView = m.createView()
 	case DeleteView:
-		// Delete confirmation is shown as modal overlay on dashboard
-		if m.deleteState != nil && m.deleteState.currentStep == DeleteStepConfirm {
-			baseView = m.dashboardView()
-			return m.renderDeleteModal(baseView)
+		// Delete steps are shown as modal overlays on dashboard
+		baseView = m.dashboardView()
+		if m.deleteState != nil {
+			switch m.deleteState.currentStep {
+			case DeleteStepConfirm:
+				return m.renderDeleteModal(baseView)
+			case DeleteStepComplete:
+				return m.renderWithModal(baseView, m.renderDeleteCompleteModal())
+			}
 		}
-		baseView = m.deleteView()
+		return baseView
 	case InitView:
 		baseView = m.initView()
 	case SettingsView:
