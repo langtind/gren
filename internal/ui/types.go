@@ -24,11 +24,16 @@ const (
 
 // Worktree represents a git worktree
 type Worktree struct {
-	Name      string
-	Path      string
-	Branch    string
-	Status    string // "clean", "modified", "building", etc.
-	IsCurrent bool   // true if this is the current worktree
+	Name           string
+	Path           string
+	Branch         string
+	Status         string // "clean", "modified", "building", etc.
+	IsCurrent      bool   // true if this is the current worktree
+	LastCommit     string // Relative time of last commit (e.g., "2h ago")
+	StagedCount    int    // Number of staged files (ready to commit)
+	ModifiedCount  int    // Number of modified files (not staged)
+	UntrackedCount int    // Number of untracked files
+	UnpushedCount  int    // Number of unpushed commits
 }
 
 // InitStep represents the current step in initialization

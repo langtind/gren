@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -321,59 +320,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the current view
 func (m Model) View() string {
+	var baseView string
+
 	switch m.currentView {
 	case DashboardView:
-		return m.dashboardView()
+		baseView = m.dashboardView()
 	case CreateView:
-		return m.createView()
+		baseView = m.createView()
 	case DeleteView:
-		return m.deleteView()
+		baseView = m.deleteView()
 	case InitView:
-		return m.initView()
+		baseView = m.initView()
 	case SettingsView:
-		return m.settingsView()
+		baseView = m.settingsView()
 	case OpenInView:
-		return m.openInView()
+		// Render dashboard with modal overlay
+		baseView = m.dashboardView()
+		return m.renderWithModal(baseView, m.renderOpenInModal())
 	case ConfigView:
-		return m.configView()
+		baseView = m.configView()
 	default:
-		return m.dashboardView()
+		baseView = m.dashboardView()
 	}
+
+	return baseView
 }
 
-// openInView renders the "Open in..." view
-func (m Model) openInView() string {
-	if m.openInState == nil {
-		return "Loading..."
-	}
-
-	if len(m.openInState.actions) == 0 {
-		return HeaderStyle.Width(m.width - 4).Render("No actions available")
-	}
-
-	var content strings.Builder
-
-	content.WriteString(TitleStyle.Render("Open in..."))
-	content.WriteString("\n\n")
-
-	// Render each action as a simple list item
-	for i, action := range m.openInState.actions {
-		prefix := "  "
-		if i == m.openInState.selectedIndex {
-			prefix = "▶ "
-			// Just change text color, no border/box
-			content.WriteString(WorktreeNameStyle.Foreground(PrimaryColor).Render(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name)))
-		} else {
-			content.WriteString(fmt.Sprintf("%s%s %s", prefix, action.Icon, action.Name))
-		}
-		content.WriteString("\n")
-	}
-
-	content.WriteString("\n")
-	content.WriteString(HelpStyle.Render("↑↓ Navigate • Enter Select • Esc Back"))
-
-	return content.String()
-}
 
 // generateDefaultWorktreeDir creates a default worktree directory name based on current working directory
 func (m Model) generateDefaultWorktreeDir() string {
