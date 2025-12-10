@@ -124,15 +124,21 @@ The generated post-create script includes:
 - Lists all worktrees with status indicators (Clean, Modified, Missing)
 - Shows current worktree with highlighting
 - Displays branch information and worktree paths
-- Keyboard navigation with arrow keys
+- Keyboard navigation with arrow keys or vim-style `jk`
+- Responsive layout: vertical stacking on narrow terminals (< 160 columns)
+- Help overlay accessible with `?` key
 
 ### Key Bindings
+- `↑/k` - Move up
+- `↓/j` - Move down
 - `n` - Create new worktree
 - `d` - Delete selected worktree
 - `p` - Prune missing worktrees
 - `c` - Open configuration
 - `i` - Initialize project (if not initialized)
+- `g` - Navigate to worktree folder (requires shell integration)
 - `enter` - Open selected worktree in external applications
+- `?` - Show help overlay
 - `q` - Quit application
 
 ### Status Indicators
@@ -141,6 +147,16 @@ The generated post-create script includes:
 - 🔴 Untracked - Has untracked files
 - 📝 Changes - Mixed modified and untracked files
 - ❌ Missing - Worktree directory no longer exists (prunable)
+
+### Modal Overlays
+Delete confirmation and completion are shown as modal overlays on the dashboard, not as separate views. This keeps context visible while performing operations.
+
+### Responsive Layout
+The dashboard uses different layouts based on terminal width:
+- **Wide (≥ 160 columns)**: Horizontal layout with table and preview panel side by side
+- **Narrow (< 160 columns)**: Vertical layout with simple worktree list above and details panel below
+
+The threshold is defined as `NarrowWidthThreshold = 160` in `internal/ui/dashboard.go`.
 
 ## Release Process
 

@@ -13,9 +13,9 @@ Gren makes it easy to create, manage, and switch between Git worktrees with an i
 - 🔧 Configurable post-create hooks and automation
 - 📁 Smart file copying (env files, configs, etc.)
 - 🎯 Project-specific setup workflows
-- 🎨 Clean, modern terminal design
-- ⌨️ Keyboard-driven navigation
-- 🔍 Search and filter worktrees
+- 🎨 Clean, modern terminal design with responsive layout
+- ⌨️ Keyboard-driven navigation with built-in help overlay
+- 🔍 Search and filter branches
 
 ## Installation
 
@@ -80,7 +80,7 @@ This enables:
 1. Navigate to any Git repository
 2. Run `gren` to start the interactive interface
 3. Use keyboard shortcuts to manage worktrees:
-   - `↑↓` Navigate between worktrees
+   - `↑↓` or `jk` Navigate between worktrees
    - `Enter` Open in... menu (IDE, terminal, Finder)
    - `g` Navigate to worktree folder (requires shell integration)
    - `n` Create new worktree
@@ -88,6 +88,7 @@ This enables:
    - `p` Prune stale worktrees
    - `c` Configure gren
    - `i` Initialize gren configuration
+   - `?` Show help overlay
    - `q` Quit
 
 ## Usage
