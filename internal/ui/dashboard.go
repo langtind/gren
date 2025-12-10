@@ -12,7 +12,7 @@ import (
 
 // Layout breakpoints
 const (
-	NarrowWidthThreshold = 140 // Below this: vertical layout
+	NarrowWidthThreshold = 160 // Below this: vertical layout (in terminal columns)
 )
 
 // isNarrowLayout returns true if the screen is too narrow for horizontal layout
