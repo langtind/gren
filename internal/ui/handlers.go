@@ -730,6 +730,14 @@ func (m Model) handleDeleteConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Proceed with deletion
 		logging.Info("DeleteView: user confirmed deletion")
 		m.deleteState.currentStep = DeleteStepDeleting
+		// Check if worktree has uncommitted changes - if so, we need --force
+		if m.deleteState.targetWorktree != nil {
+			wt := m.deleteState.targetWorktree
+			if wt.StagedCount > 0 || wt.ModifiedCount > 0 || wt.UntrackedCount > 0 {
+				m.deleteState.forceDelete = true
+				logging.Info("DeleteView: worktree has uncommitted changes, will use --force")
+			}
+		}
 		return m, m.deleteSelectedWorktrees()
 	case msg.String() == "n" || msg.String() == "N":
 		// Cancel deletion

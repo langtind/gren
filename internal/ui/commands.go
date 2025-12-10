@@ -422,8 +422,10 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 
 			// 3. Remove worktree using git
 			// Note: --force is required for worktrees with submodules (even after deinit)
+			// or when user confirmed deletion of worktree with uncommitted changes
+			useForce := hasSubmodules || m.deleteState.forceDelete
 			var cmd *exec.Cmd
-			if hasSubmodules {
+			if useForce {
 				logging.Debug("Running: git worktree remove --force %s", worktree.Path)
 				cmd = exec.Command("git", "worktree", "remove", "--force", worktree.Path)
 			} else {

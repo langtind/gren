@@ -192,6 +192,7 @@ type DeleteState struct {
 	selectedWorktrees []int // Indices of selected worktrees for deletion
 	warnings          []string
 	targetWorktree    *Worktree // Specific worktree to delete (for single deletion)
+	forceDelete       bool      // Use --force flag (when user confirms deletion of dirty worktree)
 }
 
 // Model holds the entire application state
