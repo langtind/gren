@@ -828,6 +828,76 @@ func (m Model) pruneWorktrees() tea.Cmd {
 	}
 }
 
+// cleanupStaleWorktrees deletes all stale worktrees (merged branches, gone remotes)
+func (m Model) cleanupStaleWorktrees() tea.Cmd {
+	return func() tea.Msg {
+		logging.Info("cleanupStaleWorktrees: starting cleanup")
+
+		// Find all stale worktrees
+		var staleWorktrees []Worktree
+		for _, wt := range m.worktrees {
+			if wt.BranchStatus == "stale" && !wt.IsCurrent && !wt.IsMain {
+				staleWorktrees = append(staleWorktrees, wt)
+			}
+		}
+
+		if len(staleWorktrees) == 0 {
+			logging.Info("cleanupStaleWorktrees: no stale worktrees found")
+			return staleCleanupCompleteMsg{
+				err:          nil,
+				cleanedCount: 0,
+				cleanedNames: nil,
+			}
+		}
+
+		logging.Info("cleanupStaleWorktrees: found %d stale worktrees", len(staleWorktrees))
+
+		// Delete each stale worktree
+		var cleanedNames []string
+		var failedNames []string
+		var failedReasons []string
+		var lastErr error
+
+		for _, wt := range staleWorktrees {
+			logging.Debug("cleanupStaleWorktrees: deleting worktree %s (reason: %s)", wt.Name, wt.StaleReason)
+
+			// Use git worktree remove
+			cmd := exec.Command("git", "worktree", "remove", wt.Path)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				logging.Error("cleanupStaleWorktrees: failed to delete %s: %v (output: %s)", wt.Name, err, string(output))
+				lastErr = fmt.Errorf("failed to delete worktree %s: %w", wt.Name, err)
+
+				// Parse the error reason
+				outputStr := string(output)
+				var reason string
+				if strings.Contains(outputStr, "modified or untracked files") {
+					reason = "has uncommitted changes"
+				} else if strings.Contains(outputStr, "is not a working tree") {
+					reason = "not a valid worktree"
+				} else {
+					reason = "deletion failed"
+				}
+				failedNames = append(failedNames, wt.Branch)
+				failedReasons = append(failedReasons, reason)
+				continue
+			}
+
+			logging.Info("cleanupStaleWorktrees: successfully deleted %s", wt.Name)
+			cleanedNames = append(cleanedNames, wt.Branch)
+		}
+
+		return staleCleanupCompleteMsg{
+			err:           lastErr,
+			cleanedCount:  len(cleanedNames),
+			cleanedNames:  cleanedNames,
+			failedCount:   len(failedNames),
+			failedNames:   failedNames,
+			failedReasons: failedReasons,
+		}
+	}
+}
+
 // navigateToWorktree writes navigation command to temp file and quits TUI
 func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
 	return func() tea.Msg {
@@ -968,5 +1038,123 @@ Output ONLY the bash script content, no explanations. Start with #!/usr/bin/env 
 
 		logging.Info("AI script generated successfully")
 		return aiScriptGeneratedMsg{script: script}
+	}
+}
+
+// refreshAllStatus refreshes both git stale status and GitHub PR status
+func (m Model) refreshAllStatus() tea.Cmd {
+	// Capture dependencies for the closure
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+
+	return func() tea.Msg {
+		logging.Info("refreshAllStatus: starting dual refresh")
+
+		// Create worktree manager
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+
+		// First, refresh worktrees (includes git stale checks)
+		ctx := context.Background()
+		worktrees, err := worktreeManager.ListWorktrees(ctx)
+		if err != nil {
+			logging.Error("refreshAllStatus: failed to list worktrees: %v", err)
+			return githubRefreshCompleteMsg{worktrees: nil, ghStatus: core.GitHubUnchecked}
+		}
+
+		// Check GitHub availability
+		ghStatus := worktreeManager.CheckGitHubAvailability()
+		if ghStatus == core.GitHubAvailable {
+			logging.Info("refreshAllStatus: GitHub CLI available, fetching PR status")
+			worktreeManager.EnrichWithGitHubStatus(worktrees)
+		} else {
+			logging.Debug("refreshAllStatus: GitHub CLI not available, skipping PR status")
+		}
+
+		// Convert to UI worktrees
+		uiWorktrees := make([]Worktree, len(worktrees))
+		for i, wt := range worktrees {
+			uiWorktrees[i] = convertCoreWorktreeToUI(wt)
+		}
+
+		return githubRefreshCompleteMsg{
+			worktrees: uiWorktrees,
+			ghStatus:  ghStatus,
+		}
+	}
+}
+
+// startGitHubCheck starts an async GitHub check for PR status
+func (m Model) startGitHubCheck() tea.Cmd {
+	// Capture dependencies and current worktrees for the closure
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	currentWorktrees := make([]Worktree, len(m.worktrees))
+	copy(currentWorktrees, m.worktrees)
+
+	return func() tea.Msg {
+		logging.Info("startGitHubCheck: checking GitHub status for %d worktrees", len(currentWorktrees))
+
+		// Create worktree manager
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+
+		// Check GitHub availability
+		ghStatus := worktreeManager.CheckGitHubAvailability()
+		if ghStatus != core.GitHubAvailable {
+			logging.Debug("startGitHubCheck: GitHub CLI not available, skipping")
+			return githubRefreshCompleteMsg{worktrees: currentWorktrees, ghStatus: ghStatus}
+		}
+
+		logging.Info("startGitHubCheck: GitHub CLI available, fetching PR status")
+
+		// Convert UI worktrees to core worktrees for enrichment
+		coreWorktrees := make([]core.WorktreeInfo, len(currentWorktrees))
+		for i, wt := range currentWorktrees {
+			coreWorktrees[i] = core.WorktreeInfo{
+				Name:           wt.Name,
+				Path:           wt.Path,
+				Branch:         wt.Branch,
+				Status:         wt.Status,
+				IsCurrent:      wt.IsCurrent,
+				IsMain:         wt.IsMain,
+				LastCommit:     wt.LastCommit,
+				StagedCount:    wt.StagedCount,
+				ModifiedCount:  wt.ModifiedCount,
+				UntrackedCount: wt.UntrackedCount,
+				UnpushedCount:  wt.UnpushedCount,
+				BranchStatus:   wt.BranchStatus,
+				StaleReason:    wt.StaleReason,
+			}
+		}
+
+		// Enrich with GitHub status
+		worktreeManager.EnrichWithGitHubStatus(coreWorktrees)
+
+		// Convert back to UI worktrees
+		uiWorktrees := make([]Worktree, len(coreWorktrees))
+		for i, wt := range coreWorktrees {
+			uiWorktrees[i] = convertCoreWorktreeToUI(wt)
+		}
+
+		return githubRefreshCompleteMsg{worktrees: uiWorktrees, ghStatus: ghStatus}
+	}
+}
+
+// openPRInBrowser opens the PR for a branch in the default browser
+func (m Model) openPRInBrowser(branch string) tea.Cmd {
+	// Capture dependencies for the closure
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+
+	return func() tea.Msg {
+		logging.Info("openPRInBrowser: opening PR for branch %s", branch)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		err := worktreeManager.OpenPRInBrowser(branch)
+		if err != nil {
+			logging.Error("openPRInBrowser: failed: %v", err)
+			return openPRCompleteMsg{err: err}
+		}
+
+		return openPRCompleteMsg{err: nil}
 	}
 }

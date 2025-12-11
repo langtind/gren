@@ -6,7 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/git"
@@ -14,6 +16,16 @@ import (
 
 // NewModel creates a new Model with the given dependencies
 func NewModel(gitRepo git.Repository, configManager *config.Manager, version string) Model {
+	// Initialize GitHub spinner
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(ColorSecondary)
+
+	// Separate spinner for delete operations (same style)
+	ds := spinner.New()
+	ds.Spinner = spinner.Dot
+	ds.Style = lipgloss.NewStyle().Foreground(ColorSecondary)
+
 	return Model{
 		currentView:   DashboardView,
 		gitRepo:       gitRepo,
@@ -21,6 +33,8 @@ func NewModel(gitRepo git.Repository, configManager *config.Manager, version str
 		keys:          DefaultKeyMap(),
 		selected:      0,
 		version:       version,
+		githubSpinner: s,
+		deleteSpinner: ds,
 	}
 }
 
@@ -70,21 +84,31 @@ func (m *Model) refreshWorktrees() error {
 	// Convert core.WorktreeInfo to ui.Worktree
 	m.worktrees = make([]Worktree, len(coreWorktrees))
 	for i, wt := range coreWorktrees {
-		m.worktrees[i] = Worktree{
-			Name:           wt.Name,
-			Path:           wt.Path,
-			Branch:         wt.Branch,
-			Status:         wt.Status,
-			IsCurrent:      wt.IsCurrent,
-			IsMain:         wt.IsMain,
-			LastCommit:     wt.LastCommit,
-			StagedCount:    wt.StagedCount,
-			ModifiedCount:  wt.ModifiedCount,
-			UntrackedCount: wt.UntrackedCount,
-			UnpushedCount:  wt.UnpushedCount,
-		}
+		m.worktrees[i] = convertCoreWorktreeToUI(wt)
 	}
 	return nil
+}
+
+// convertCoreWorktreeToUI converts a core.WorktreeInfo to ui.Worktree
+func convertCoreWorktreeToUI(wt core.WorktreeInfo) Worktree {
+	return Worktree{
+		Name:           wt.Name,
+		Path:           wt.Path,
+		Branch:         wt.Branch,
+		Status:         wt.Status,
+		IsCurrent:      wt.IsCurrent,
+		IsMain:         wt.IsMain,
+		LastCommit:     wt.LastCommit,
+		StagedCount:    wt.StagedCount,
+		ModifiedCount:  wt.ModifiedCount,
+		UntrackedCount: wt.UntrackedCount,
+		UnpushedCount:  wt.UnpushedCount,
+		BranchStatus:   wt.BranchStatus,
+		StaleReason:    wt.StaleReason,
+		PRNumber:       wt.PRNumber,
+		PRState:        wt.PRState,
+		PRURL:          wt.PRURL,
+	}
 }
 
 // setupCreateState initializes create state from message

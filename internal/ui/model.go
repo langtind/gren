@@ -21,6 +21,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case projectInfoMsg:
 		m = m.updateProjectInfo(msg.info, msg.err)
+		// Start async GitHub check if we have worktrees
+		if len(m.worktrees) > 0 {
+			m.githubLoading = true
+			return m, tea.Batch(m.githubSpinner.Tick, m.startGitHubCheck())
+		}
 		return m, nil
 
 	case initializeMsg:
@@ -126,6 +131,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case staleCleanupCompleteMsg:
+		// Stale cleanup operation complete
+		logging.Info("Stale cleanup complete: cleaned %d, failed %d worktrees", msg.cleanedCount, msg.failedCount)
+
+		// Build informative message
+		if msg.failedCount > 0 && msg.cleanedCount > 0 {
+			// Partial success - show both results
+			var failedInfo string
+			for i, name := range msg.failedNames {
+				if i < len(msg.failedReasons) {
+					failedInfo += fmt.Sprintf("\n  • %s (%s)", name, msg.failedReasons[i])
+				}
+			}
+			m.err = fmt.Errorf("deleted %d worktree(s), %d failed:%s", msg.cleanedCount, msg.failedCount, failedInfo)
+		} else if msg.failedCount > 0 {
+			// All failed
+			var failedInfo string
+			for i, name := range msg.failedNames {
+				if i < len(msg.failedReasons) {
+					failedInfo += fmt.Sprintf("\n  • %s (%s)", name, msg.failedReasons[i])
+				}
+			}
+			m.err = fmt.Errorf("cleanup failed - %d worktree(s) have uncommitted changes:%s", msg.failedCount, failedInfo)
+		} else {
+			m.err = nil
+		}
+
+		// Always refresh worktree list to reflect any successful deletions
+		if err := m.refreshWorktrees(); err != nil && m.err == nil {
+			m.err = err
+		}
+
+		// Clear cleanup state and return to dashboard
+		m.cleanupState = nil
+		m.currentView = DashboardView
+		return m, nil
+
+	case githubRefreshCompleteMsg:
+		// GitHub refresh complete - update worktrees with PR info
+		logging.Info("GitHub refresh complete: %d worktrees updated", len(msg.worktrees))
+		m.worktrees = msg.worktrees
+		m.githubLoading = false
+		m.err = nil
+		return m, nil
+
+	case openPRCompleteMsg:
+		// PR opened in browser
+		if msg.err != nil {
+			logging.Error("Failed to open PR: %v", msg.err)
+			m.err = fmt.Errorf("failed to open PR: %w", msg.err)
+		}
+		return m, nil
+
 	case worktreeCreatedMsg:
 		if m.createState != nil {
 			if msg.err != nil {
@@ -211,11 +269,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
+		var cmds []tea.Cmd
+
+		// Handle GitHub loading spinner
+		if m.githubLoading {
+			var cmd tea.Cmd
+			m.githubSpinner, cmd = m.githubSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
 		// Handle spinner animation for CreateStepCreating
 		if m.createState != nil && m.createState.currentStep == CreateStepCreating {
 			var cmd tea.Cmd
 			m.createState.spinner, cmd = m.createState.spinner.Update(msg)
-			return m, cmd
+			cmds = append(cmds, cmd)
+		}
+
+		// Handle spinner animation for DeleteStepDeleting
+		if m.deleteState != nil && m.deleteState.currentStep == DeleteStepDeleting {
+			var cmd tea.Cmd
+			m.deleteSpinner, cmd = m.deleteSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
+		if len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
 		}
 		return m, nil
 	}
@@ -253,6 +331,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.currentView == ConfigView {
 			return m.handleConfigKeys(keyMsg)
+		}
+		if m.currentView == ToolsView {
+			return m.handleToolsKeys(keyMsg)
+		}
+		if m.currentView == CleanupView {
+			return m.handleCleanupKeys(keyMsg)
 		}
 
 		// Dashboard keys
@@ -349,6 +433,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.navigateToWorktree(selectedWorktree.Path)
 			}
 			return m, nil
+		case key.Matches(keyMsg, m.keys.Tools):
+			// Open Tools menu
+			if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+				logging.Info("Dashboard: opening Tools menu (shortcut 't')")
+				m.currentView = ToolsView
+			}
+			return m, nil
 		}
 	}
 
@@ -375,8 +466,10 @@ func (m Model) View() string {
 			switch m.deleteState.currentStep {
 			case DeleteStepConfirm:
 				return m.renderDeleteModal(baseView)
+			case DeleteStepDeleting:
+				return m.renderWithModalWidth(baseView, m.renderDeleteDeletingModal(), 70, ColorWarning)
 			case DeleteStepComplete:
-				return m.renderWithModal(baseView, m.renderDeleteCompleteModal())
+				return m.renderWithModalWidth(baseView, m.renderDeleteCompleteModal(), 70, ColorSuccess)
 			}
 		}
 		return baseView
@@ -387,9 +480,17 @@ func (m Model) View() string {
 	case OpenInView:
 		// Render dashboard with modal overlay
 		baseView = m.dashboardView()
-		return m.renderWithModal(baseView, m.renderOpenInModal())
+		return m.renderWithModalWidth(baseView, m.renderOpenInModal(), 70, ColorPrimary)
 	case ConfigView:
 		baseView = m.configView()
+	case ToolsView:
+		// Render dashboard with Tools menu modal overlay
+		baseView = m.dashboardView()
+		return m.renderToolsModal(baseView)
+	case CleanupView:
+		// Render dashboard with cleanup confirmation modal overlay (wider modal, warning color)
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderCleanupConfirmation(), 70, ColorWarning)
 	default:
 		baseView = m.dashboardView()
 	}

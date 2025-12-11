@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/langtind/gren/internal/git"
+import (
+	"github.com/langtind/gren/internal/core"
+	"github.com/langtind/gren/internal/git"
+)
 
 // Message types for Tea commands
 type projectInfoMsg struct {
@@ -79,7 +82,25 @@ type pruneCompleteMsg struct {
 	prunedPaths []string
 }
 
+type staleCleanupCompleteMsg struct {
+	err           error
+	cleanedCount  int
+	cleanedNames  []string
+	failedCount   int
+	failedNames   []string
+	failedReasons []string // "has uncommitted changes", etc.
+}
+
 type aiScriptGeneratedMsg struct {
 	script string
 	err    error
+}
+
+type githubRefreshCompleteMsg struct {
+	worktrees []Worktree
+	ghStatus  core.GitHubStatus
+}
+
+type openPRCompleteMsg struct {
+	err error
 }

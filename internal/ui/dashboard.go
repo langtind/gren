@@ -38,7 +38,21 @@ func (m Model) dashboardView() string {
 	content := m.renderContent()
 	footer := m.renderFooter()
 
+	// GitHub status line (between content and footer)
+	var githubStatus string
+	if m.githubLoading {
+		spinnerText := m.githubSpinner.View() + " " + HeaderInfoStyle.Render("Fetching GitHub info...")
+		githubStatus = lipgloss.NewStyle().
+			Width(m.width).
+			Align(lipgloss.Center).
+			Padding(1, 0).
+			Render(spinnerText)
+	}
+
 	// Combine all parts
+	if githubStatus != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, header, content, githubStatus, footer)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 }
 
@@ -285,6 +299,33 @@ func (m Model) renderNarrowPreviewPanel(wt *Worktree, width, height int) string 
 		b.WriteString(statusStyle.Render(strings.Join(details, ", ")))
 	}
 
+	// Show PR info in narrow mode
+	if wt.PRNumber > 0 {
+		b.WriteString("\n")
+		prStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
+		b.WriteString(prStyle.Render(fmt.Sprintf("PR #%d %s", wt.PRNumber, wt.PRState)))
+	}
+
+	// Show brief stale reason in narrow mode
+	if wt.BranchStatus == "stale" {
+		b.WriteString("\n")
+		staleStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true)
+		reason := "Branch is stale"
+		switch wt.StaleReason {
+		case "merged_locally":
+			reason = "Merged into main"
+		case "no_unique_commits":
+			reason = "No unique commits"
+		case "remote_gone":
+			reason = "Remote branch deleted"
+		case "pr_merged":
+			reason = "PR merged"
+		case "pr_closed":
+			reason = "PR closed"
+		}
+		b.WriteString(staleStyle.Render(reason))
+	}
+
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(height).
@@ -295,6 +336,9 @@ func (m Model) renderNarrowPreviewPanel(wt *Worktree, width, height int) string 
 func getWorktreeStatusInfo(wt *Worktree) (string, lipgloss.Style) {
 	if wt.Status == "missing" {
 		return "Missing", lipgloss.NewStyle().Foreground(ColorError)
+	}
+	if wt.BranchStatus == "stale" {
+		return "Stale", lipgloss.NewStyle().Foreground(ColorTextMuted)
 	}
 	if wt.StagedCount > 0 || wt.ModifiedCount > 0 {
 		return "Modified", lipgloss.NewStyle().Foreground(ColorWarning)
@@ -521,7 +565,7 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	}
 
 	// Status badge with details - pass background color for consistent styling
-	status := StatusBadgeDetailed(wt.Status, wt.StagedCount, wt.ModifiedCount, wt.UntrackedCount, wt.UnpushedCount, bgColor)
+	status := StatusBadgeDetailed(wt.Status, wt.BranchStatus, wt.StagedCount, wt.ModifiedCount, wt.UntrackedCount, wt.UnpushedCount, wt.PRNumber, wt.PRState, bgColor)
 
 	// Use Dashboard-specific styles for consistent coloring
 	var branchStyle lipgloss.Style
@@ -577,7 +621,7 @@ func (m Model) renderFooter() string {
 
 	// Group shortcuts logically with separators
 	nav := HelpItem("↑↓", "nav")
-	actions := HelpItem("n", "new") + " " + HelpItem("d", "del") + " " + HelpItem("p", "prune")
+	actions := HelpItem("n", "new") + " " + HelpItem("d", "del") + " " + HelpItem("t", "tools")
 	open := HelpItem("enter", "open") + " " + HelpItem("g", "goto")
 	other := HelpItem("c", "cfg") + " " + HelpItem("?", "help") + " " + HelpItem("q", "quit")
 
@@ -791,7 +835,9 @@ func (m Model) renderPreviewPanel(wt *Worktree, width, height int) string {
 
 	// Status details
 	lines = append(lines, labelStyle.Render("Status"))
-	if wt.StagedCount == 0 && wt.ModifiedCount == 0 && wt.UntrackedCount == 0 && wt.UnpushedCount == 0 {
+	if wt.BranchStatus == "stale" {
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorTextMuted).Render("💤 Stale"))
+	} else if wt.StagedCount == 0 && wt.ModifiedCount == 0 && wt.UntrackedCount == 0 && wt.UnpushedCount == 0 {
 		lines = append(lines, "  "+StatusCleanStyle.Render("✓ Clean"))
 	} else {
 		if wt.StagedCount > 0 {
@@ -806,6 +852,66 @@ func (m Model) renderPreviewPanel(wt *Worktree, width, height int) string {
 		if wt.UnpushedCount > 0 {
 			lines = append(lines, "  "+StatusUnpushedStyle.Render(fmt.Sprintf("↑%d unpushed", wt.UnpushedCount)))
 		}
+	}
+
+	// Show PR info if available
+	if wt.PRNumber > 0 {
+		lines = append(lines, "")
+		prHeaderStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
+		lines = append(lines, prHeaderStyle.Render("Pull Request"))
+
+		prStyle := lipgloss.NewStyle().Foreground(ColorText)
+		stateStyle := lipgloss.NewStyle()
+		switch wt.PRState {
+		case "OPEN":
+			stateStyle = stateStyle.Foreground(ColorSuccess)
+		case "DRAFT":
+			stateStyle = stateStyle.Foreground(ColorTextMuted)
+		case "MERGED":
+			stateStyle = stateStyle.Foreground(ColorPrimary)
+		case "CLOSED":
+			stateStyle = stateStyle.Foreground(ColorError)
+		}
+
+		lines = append(lines, "  "+prStyle.Render(fmt.Sprintf("#%d", wt.PRNumber))+" "+stateStyle.Render(wt.PRState))
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ColorTextMuted).Render("Press 't' → 'p' to open in browser"))
+	}
+
+	// Show "Why stale?" explanation if worktree is stale
+	if wt.BranchStatus == "stale" {
+		lines = append(lines, "")
+		staleHeaderStyle := lipgloss.NewStyle().Foreground(ColorWarning).Bold(true)
+		lines = append(lines, staleHeaderStyle.Render("Why stale?"))
+
+		// Explanation based on reason
+		explanation := ""
+		suggestion := ""
+		switch wt.StaleReason {
+		case "merged_locally":
+			explanation = "This branch has been merged into main."
+			suggestion = "Safe to delete - work is preserved in main."
+		case "no_unique_commits":
+			explanation = "This branch has no unique commits."
+			suggestion = "Empty or already merged - safe to delete."
+		case "remote_gone":
+			explanation = "Remote branch was deleted (likely after merge)."
+			suggestion = "Press 't' → 'c' to cleanup, or 'd' to delete."
+		case "pr_merged":
+			explanation = "Pull request was merged."
+			suggestion = "Safe to delete - work is in main."
+		case "pr_closed":
+			explanation = "Pull request was closed without merging."
+			suggestion = "Review if work should be preserved."
+		default:
+			explanation = "Branch appears to be stale."
+			suggestion = "Consider cleaning up this worktree."
+		}
+
+		explanationStyle := lipgloss.NewStyle().Foreground(ColorText)
+		suggestionStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Italic(true)
+
+		lines = append(lines, "  "+explanationStyle.Render(explanation))
+		lines = append(lines, "  "+suggestionStyle.Render(suggestion))
 	}
 
 	// Get recent commits for this worktree
@@ -885,17 +991,19 @@ func getRecentCommits(worktreePath string, count int, maxWidth int) []string {
 // Modal Rendering
 // ═══════════════════════════════════════════════════════════════════════════
 
-// renderWithModal overlays a modal on top of a base view
+// renderWithModal overlays a modal on top of a base view (default width 50)
 func (m Model) renderWithModal(baseView, modalContent string) string {
-	// Modal width - fixed size that fits help content
-	modalWidth := 50
+	return m.renderWithModalWidth(baseView, modalContent, 50, ColorPrimary)
+}
 
+// renderWithModalWidth overlays a modal with custom width and border color
+func (m Model) renderWithModalWidth(baseView, modalContent string, width int, borderColor lipgloss.TerminalColor) string {
 	// Style for the modal box
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorPrimary).
+		BorderForeground(borderColor).
 		Padding(1, 2).
-		Width(modalWidth)
+		Width(width)
 
 	styledModal := modalStyle.Render(modalContent)
 	modalLines := strings.Split(styledModal, "\n")
@@ -939,7 +1047,7 @@ func (m Model) renderWithModal(baseView, modalContent string) string {
 
 // renderDeleteModal renders delete confirmation as a modal overlay
 func (m Model) renderDeleteModal(baseView string) string {
-	return m.renderWithModal(baseView, m.renderDeleteConfirmModal())
+	return m.renderWithModalWidth(baseView, m.renderDeleteConfirmModal(), 70, ColorWarning)
 }
 
 // renderOpenInModal renders the "Open in..." modal content

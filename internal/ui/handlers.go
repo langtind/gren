@@ -744,7 +744,8 @@ func (m Model) handleDeleteConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				logging.Info("DeleteView: worktree has uncommitted changes, will use --force")
 			}
 		}
-		return m, m.deleteSelectedWorktrees()
+		// Start spinner and deletion command
+		return m, tea.Batch(m.deleteSpinner.Tick, m.deleteSelectedWorktrees())
 	case msg.String() == "n" || msg.String() == "N":
 		// Cancel deletion
 		logging.Info("DeleteView: user cancelled deletion")

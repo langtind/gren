@@ -17,10 +17,12 @@ const (
 	DashboardView ViewState = iota
 	CreateView
 	DeleteView
+	CleanupView
 	InitView
 	SettingsView
 	OpenInView
 	ConfigView
+	ToolsView
 )
 
 // Worktree represents a git worktree
@@ -36,6 +38,15 @@ type Worktree struct {
 	ModifiedCount  int    // Number of modified files (not staged)
 	UntrackedCount int    // Number of untracked files
 	UnpushedCount  int    // Number of unpushed commits
+
+	// Stale detection fields
+	BranchStatus string // "active", "stale", or "" if not yet checked
+	StaleReason  string // "merged_locally", "no_unique_commits", "remote_gone", "pr_merged", "pr_closed"
+
+	// GitHub PR fields (populated async, empty if gh unavailable or no PR)
+	PRNumber int    // PR number, 0 if no PR
+	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
+	PRURL    string // Full URL to PR for "Open in browser"
 }
 
 // InitStep represents the current step in initialization
@@ -198,6 +209,12 @@ type DeleteState struct {
 	forceDelete       bool      // Use --force flag (when user confirms deletion of dirty worktree)
 }
 
+// CleanupState holds the state for bulk stale worktree cleanup
+type CleanupState struct {
+	staleWorktrees []Worktree // Worktrees to be cleaned up
+	confirmed      bool       // Whether user confirmed the action
+}
+
 // Model holds the entire application state
 type Model struct {
 	// Current view state
@@ -206,16 +223,17 @@ type Model struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
 	// State
-	repoInfo    *git.RepoInfo
-	config      *config.Config
-	worktrees   []Worktree
-	selected    int
-	err         error
-	initState   *InitState
-	createState *CreateState
-	deleteState *DeleteState
-	openInState *OpenInState
-	configState *ConfigState
+	repoInfo     *git.RepoInfo
+	config       *config.Config
+	worktrees    []Worktree
+	selected     int
+	err          error
+	initState    *InitState
+	createState  *CreateState
+	deleteState  *DeleteState
+	cleanupState *CleanupState
+	openInState  *OpenInState
+	configState  *ConfigState
 
 	// Screen dimensions
 	width  int
@@ -229,6 +247,13 @@ type Model struct {
 
 	// Help overlay
 	helpVisible bool
+
+	// GitHub loading state
+	githubLoading bool
+	githubSpinner spinner.Model
+
+	// Delete operation spinner
+	deleteSpinner spinner.Model
 }
 
 // KeyMap defines key bindings for the application
@@ -247,6 +272,7 @@ type KeyMap struct {
 	Prune    key.Binding
 	Navigate key.Binding
 	Help     key.Binding
+	Tools    key.Binding
 }
 
 // HelpState holds the state for the help overlay
@@ -312,6 +338,10 @@ func DefaultKeyMap() KeyMap {
 		Help: key.NewBinding(
 			key.WithKeys("?"),
 			key.WithHelp("?", "help"),
+		),
+		Tools: key.NewBinding(
+			key.WithKeys("t"),
+			key.WithHelp("t", "tools"),
 		),
 	}
 }
