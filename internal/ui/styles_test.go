@@ -153,42 +153,42 @@ func TestStatusBadgeDetailed(t *testing.T) {
 	noBg := lipgloss.AdaptiveColor{}
 
 	t.Run("all zeros returns clean", func(t *testing.T) {
-		result := StatusBadgeDetailed("clean", 0, 0, 0, 0, noBg)
+		result := StatusBadgeDetailed("clean", "active", 0, 0, 0, 0, 0, "", noBg)
 		if !strings.Contains(result, "✓") {
 			t.Errorf("StatusBadgeDetailed with all zeros should show ✓, got %q", result)
 		}
 	})
 
 	t.Run("staged only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 3, 0, 0, 0, noBg)
+		result := StatusBadgeDetailed("modified", "active", 3, 0, 0, 0, 0, "", noBg)
 		if !strings.Contains(result, "+3") {
 			t.Errorf("StatusBadgeDetailed should show +3 for staged, got %q", result)
 		}
 	})
 
 	t.Run("modified only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 0, 2, 0, 0, noBg)
+		result := StatusBadgeDetailed("modified", "active", 0, 2, 0, 0, 0, "", noBg)
 		if !strings.Contains(result, "~2") {
 			t.Errorf("StatusBadgeDetailed should show ~2 for modified, got %q", result)
 		}
 	})
 
 	t.Run("untracked only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 0, 0, 5, 0, noBg)
+		result := StatusBadgeDetailed("modified", "active", 0, 0, 5, 0, 0, "", noBg)
 		if !strings.Contains(result, "?5") {
 			t.Errorf("StatusBadgeDetailed should show ?5 for untracked, got %q", result)
 		}
 	})
 
 	t.Run("unpushed only", func(t *testing.T) {
-		result := StatusBadgeDetailed("modified", 0, 0, 0, 4, noBg)
+		result := StatusBadgeDetailed("modified", "active", 0, 0, 0, 4, 0, "", noBg)
 		if !strings.Contains(result, "↑4") {
 			t.Errorf("StatusBadgeDetailed should show ↑4 for unpushed, got %q", result)
 		}
 	})
 
 	t.Run("mixed status", func(t *testing.T) {
-		result := StatusBadgeDetailed("mixed", 1, 2, 3, 4, noBg)
+		result := StatusBadgeDetailed("mixed", "active", 1, 2, 3, 4, 0, "", noBg)
 		if !strings.Contains(result, "+1") {
 			t.Error("StatusBadgeDetailed should show +1 for staged")
 		}
@@ -200,6 +200,54 @@ func TestStatusBadgeDetailed(t *testing.T) {
 		}
 		if !strings.Contains(result, "↑4") {
 			t.Error("StatusBadgeDetailed should show ↑4 for unpushed")
+		}
+	})
+
+	t.Run("stale branch shows sleep emoji", func(t *testing.T) {
+		result := StatusBadgeDetailed("clean", "stale", 0, 0, 0, 0, 0, "", noBg)
+		if !strings.Contains(result, "💤") {
+			t.Errorf("StatusBadgeDetailed with stale branch should show 💤, got %q", result)
+		}
+	})
+
+	t.Run("PR open shows green badge", func(t *testing.T) {
+		result := StatusBadgeDetailed("clean", "active", 0, 0, 0, 0, 110, "OPEN", noBg)
+		if !strings.Contains(result, "#110") {
+			t.Errorf("StatusBadgeDetailed should show #110 for PR, got %q", result)
+		}
+	})
+
+	t.Run("PR merged shows badge", func(t *testing.T) {
+		result := StatusBadgeDetailed("clean", "active", 0, 0, 0, 0, 95, "MERGED", noBg)
+		if !strings.Contains(result, "#95") {
+			t.Errorf("StatusBadgeDetailed should show #95 for merged PR, got %q", result)
+		}
+	})
+
+	t.Run("stale with PR shows both", func(t *testing.T) {
+		result := StatusBadgeDetailed("clean", "stale", 0, 0, 0, 0, 95, "MERGED", noBg)
+		if !strings.Contains(result, "💤") {
+			t.Errorf("StatusBadgeDetailed should show 💤 for stale, got %q", result)
+		}
+		if !strings.Contains(result, "#95") {
+			t.Errorf("StatusBadgeDetailed should show #95 for PR, got %q", result)
+		}
+	})
+
+	t.Run("stale with uncommitted changes shows both", func(t *testing.T) {
+		// This is the key test - stale worktrees can still have uncommitted changes
+		result := StatusBadgeDetailed("modified", "stale", 0, 2, 1, 0, 93, "MERGED", noBg)
+		if !strings.Contains(result, "💤") {
+			t.Errorf("StatusBadgeDetailed should show 💤 for stale, got %q", result)
+		}
+		if !strings.Contains(result, "~2") {
+			t.Errorf("StatusBadgeDetailed should show ~2 for modified files, got %q", result)
+		}
+		if !strings.Contains(result, "?1") {
+			t.Errorf("StatusBadgeDetailed should show ?1 for untracked files, got %q", result)
+		}
+		if !strings.Contains(result, "#93") {
+			t.Errorf("StatusBadgeDetailed should show #93 for PR, got %q", result)
 		}
 	})
 }

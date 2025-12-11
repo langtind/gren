@@ -392,23 +392,43 @@ func StatusBadge(status string) string {
 // StatusBadgeDetailed returns styled status with counts in git-style format
 // Uses: +N staged, ~N modified, ?N untracked, ↑N unpushed (like warp/lazygit)
 // bgColor is optional - pass empty AdaptiveColor{} for no background
-func StatusBadgeDetailed(status string, staged, modified, untracked, unpushed int, bgColor lipgloss.AdaptiveColor) string {
+func StatusBadgeDetailed(status, branchStatus string, staged, modified, untracked, unpushed, prNumber int, prState string, bgColor lipgloss.AdaptiveColor) string {
 	var parts []string
 
 	// Create styles with background color to maintain row background
 	cleanStyle := StatusCleanStyle
 	modifiedStyle := StatusModifiedStyle
 	unpushedStyle := StatusUnpushedStyle
+	staleStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+
+	// PR state colors
+	prOpenStyle := lipgloss.NewStyle().Foreground(ColorSuccess)
+	prMergedStyle := lipgloss.NewStyle().Foreground(ColorSecondary) // Indigo/purple for merged
+	prClosedStyle := lipgloss.NewStyle().Foreground(ColorError)
 
 	if bgColor.Dark != "" || bgColor.Light != "" {
 		cleanStyle = cleanStyle.Background(bgColor)
 		modifiedStyle = modifiedStyle.Background(bgColor)
 		unpushedStyle = unpushedStyle.Background(bgColor)
+		staleStyle = staleStyle.Background(bgColor)
+		prOpenStyle = prOpenStyle.Background(bgColor)
+		prMergedStyle = prMergedStyle.Background(bgColor)
+		prClosedStyle = prClosedStyle.Background(bgColor)
 	}
 
+	// Stale branch indicator (merged or remote gone)
+	if branchStatus == "stale" {
+		parts = append(parts, staleStyle.Render("💤"))
+	}
+
+	// Git status indicators (always show, even for stale branches)
 	// Staged files (ready to commit) - green with +
 	if staged > 0 {
-		parts = append(parts, cleanStyle.Render(fmt.Sprintf("+%d", staged)))
+		prefix := ""
+		if len(parts) > 0 {
+			prefix = " "
+		}
+		parts = append(parts, cleanStyle.Render(fmt.Sprintf("%s+%d", prefix, staged)))
 	}
 	// Modified files (not staged) - yellow/orange with ~
 	if modified > 0 {
@@ -435,8 +455,25 @@ func StatusBadgeDetailed(status string, staged, modified, untracked, unpushed in
 		parts = append(parts, unpushedStyle.Render(fmt.Sprintf("%s↑%d", prefix, unpushed)))
 	}
 
+	// Clean status if no other indicators and not stale
 	if len(parts) == 0 {
-		return cleanStyle.Render("✓")
+		parts = append(parts, cleanStyle.Render("✓"))
+	}
+
+	// Add PR badge if PR exists
+	if prNumber > 0 {
+		prefix := " "
+		prBadge := fmt.Sprintf("#%d", prNumber)
+		switch prState {
+		case "OPEN":
+			parts = append(parts, prOpenStyle.Render(prefix+prBadge))
+		case "MERGED":
+			parts = append(parts, prMergedStyle.Render(prefix+prBadge))
+		case "CLOSED":
+			parts = append(parts, prClosedStyle.Render(prefix+prBadge))
+		default:
+			parts = append(parts, prOpenStyle.Render(prefix+prBadge))
+		}
 	}
 
 	// Join without separator - spacing is included in each part
