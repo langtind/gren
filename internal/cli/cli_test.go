@@ -198,7 +198,7 @@ func TestHandleListVerbose(t *testing.T) {
 	}
 
 	// Verbose output should have table headers
-	if !strings.Contains(output, "NAME") || !strings.Contains(output, "PATH") {
+	if !strings.Contains(output, "BRANCH") || !strings.Contains(output, "PATH") {
 		t.Errorf("verbose output should have headers, got: %s", output)
 	}
 }

@@ -6,13 +6,56 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"text/tabwriter"
+	"time"
 
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
 )
+
+// spinner provides a simple CLI spinner
+type spinner struct {
+	frames  []string
+	index   int
+	message string
+	done    chan struct{}
+	wg      sync.WaitGroup
+}
+
+func newSpinner(message string) *spinner {
+	return &spinner{
+		frames:  []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		message: message,
+		done:    make(chan struct{}),
+	}
+}
+
+func (s *spinner) Start() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.done:
+				fmt.Printf("\r\033[K") // Clear line
+				return
+			case <-ticker.C:
+				fmt.Printf("\r%s %s", s.frames[s.index], s.message)
+				s.index = (s.index + 1) % len(s.frames)
+			}
+		}
+	}()
+}
+
+func (s *spinner) Stop() {
+	close(s.done)
+	s.wg.Wait()
+}
 
 // CLI handles command-line interface operations
 type CLI struct {
@@ -48,6 +91,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleList(args[2:])
 	case "delete":
 		return c.handleDelete(args[2:])
+	case "cleanup":
+		return c.handleCleanup(args[2:])
 	case "init":
 		return c.handleInit(args[2:])
 	case "navigate", "nav", "cd":
@@ -141,11 +186,31 @@ func (c *CLI) handleList(args []string) error {
 
 	logging.Debug("CLI list: verbose=%v", *verbose)
 
+	// Show spinner while fetching data (when GitHub is available)
+	var sp *spinner
+	if c.worktreeManager.CheckGitHubAvailability() == core.GitHubAvailable {
+		sp = newSpinner("Fetching worktree status...")
+		sp.Start()
+	}
+
 	ctx := context.Background()
 	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
 	if err != nil {
+		if sp != nil {
+			sp.Stop()
+		}
 		logging.Error("CLI list failed: %v", err)
 		return err
+	}
+
+	// Enrich with GitHub status if available
+	if c.worktreeManager.CheckGitHubAvailability() == core.GitHubAvailable {
+		logging.Debug("CLI list: enriching with GitHub status")
+		c.worktreeManager.EnrichWithGitHubStatus(worktrees)
+	}
+
+	if sp != nil {
+		sp.Stop()
 	}
 
 	logging.Info("CLI list: found %d worktrees", len(worktrees))
@@ -158,13 +223,21 @@ func (c *CLI) handleList(args []string) error {
 	if *verbose {
 		// Verbose table output
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tPATH\tBRANCH\tCURRENT")
+		fmt.Fprintln(w, "BRANCH\tSTATUS\tSTALE\tPR\tPATH")
 		for _, wt := range worktrees {
 			current := ""
 			if wt.IsCurrent {
 				current = "*"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", wt.Name, wt.Path, wt.Branch, current)
+			staleInfo := ""
+			if wt.BranchStatus == "stale" {
+				staleInfo = wt.StaleReason
+			}
+			prInfo := ""
+			if wt.PRNumber > 0 {
+				prInfo = fmt.Sprintf("#%d %s", wt.PRNumber, wt.PRState)
+			}
+			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", current, wt.Branch, wt.Status, staleInfo, prInfo, wt.Path)
 		}
 		w.Flush()
 	} else {
@@ -174,7 +247,11 @@ func (c *CLI) handleList(args []string) error {
 			if wt.IsCurrent {
 				prefix = "* "
 			}
-			fmt.Printf("%s%s (%s)\n", prefix, wt.Name, wt.Branch)
+			stale := ""
+			if wt.BranchStatus == "stale" {
+				stale = " [stale: " + wt.StaleReason + "]"
+			}
+			fmt.Printf("%s%s (%s)%s\n", prefix, wt.Name, wt.Branch, stale)
 		}
 	}
 
@@ -185,6 +262,7 @@ func (c *CLI) handleList(args []string) error {
 func (c *CLI) handleDelete(args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	force := fs.Bool("f", false, "Force deletion without confirmation")
+	dryRun := fs.Bool("dry-run", false, "Show what would be deleted without actually deleting")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren delete [options] <worktree-name>\n")
@@ -194,6 +272,7 @@ func (c *CLI) handleDelete(args []string) error {
 		fmt.Fprintf(fs.Output(), "\nExamples:\n")
 		fmt.Fprintf(fs.Output(), "  gren delete feature-branch\n")
 		fmt.Fprintf(fs.Output(), "  gren delete -f old-feature\n")
+		fmt.Fprintf(fs.Output(), "  gren delete --dry-run feature-branch\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -207,7 +286,13 @@ func (c *CLI) handleDelete(args []string) error {
 	}
 
 	worktreeName := fs.Arg(0)
-	logging.Info("CLI delete: worktree=%s, force=%v", worktreeName, *force)
+	logging.Info("CLI delete: worktree=%s, force=%v, dry-run=%v", worktreeName, *force, *dryRun)
+
+	// Dry run mode - just show what would happen
+	if *dryRun {
+		fmt.Printf("[dry-run] Would delete worktree: %s\n", worktreeName)
+		return nil
+	}
 
 	// Confirmation unless force is specified
 	if !*force {
@@ -231,6 +316,115 @@ func (c *CLI) handleDelete(args []string) error {
 		logging.Info("CLI delete succeeded: %s", worktreeName)
 	}
 	return err
+}
+
+// handleCleanup handles the cleanup command (delete all stale worktrees)
+func (c *CLI) handleCleanup(args []string) error {
+	fs := flag.NewFlagSet("cleanup", flag.ExitOnError)
+	force := fs.Bool("f", false, "Force deletion without confirmation")
+	dryRun := fs.Bool("dry-run", false, "Show what would be deleted without actually deleting")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren cleanup [options]\n")
+		fmt.Fprintf(fs.Output(), "\nDelete all stale worktrees (merged PRs, gone remotes)\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup --dry-run    # See what would be deleted\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup              # Delete with confirmation\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup -f           # Delete without confirmation\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	logging.Info("CLI cleanup: force=%v, dry-run=%v", *force, *dryRun)
+
+	// Show spinner while fetching data
+	sp := newSpinner("Fetching worktree status...")
+	sp.Start()
+
+	ctx := context.Background()
+	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
+	if err != nil {
+		sp.Stop()
+		logging.Error("CLI cleanup: failed to list worktrees: %v", err)
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	// Check GitHub availability and enrich with PR status
+	if c.worktreeManager.CheckGitHubAvailability() == core.GitHubAvailable {
+		logging.Debug("CLI cleanup: enriching with GitHub status")
+		c.worktreeManager.EnrichWithGitHubStatus(worktrees)
+	}
+
+	sp.Stop()
+
+	// Find stale worktrees
+	var staleWorktrees []core.WorktreeInfo
+	for _, wt := range worktrees {
+		if wt.BranchStatus == "stale" {
+			staleWorktrees = append(staleWorktrees, wt)
+		}
+	}
+
+	if len(staleWorktrees) == 0 {
+		fmt.Println("No stale worktrees found")
+		return nil
+	}
+
+	// Show what will be deleted
+	fmt.Printf("Found %d stale worktree(s):\n", len(staleWorktrees))
+	for _, wt := range staleWorktrees {
+		reason := wt.StaleReason
+		if wt.PRNumber > 0 {
+			reason = fmt.Sprintf("%s (PR #%d %s)", reason, wt.PRNumber, wt.PRState)
+		}
+		fmt.Printf("  - %s [%s]\n", wt.Branch, reason)
+	}
+
+	// Dry run mode - just show what would happen
+	if *dryRun {
+		fmt.Println("\n[dry-run] No worktrees were deleted")
+		return nil
+	}
+
+	// Confirmation unless force is specified
+	if !*force {
+		fmt.Printf("\nDelete these %d worktrees? (y/N): ", len(staleWorktrees))
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "y" && response != "yes" {
+			logging.Info("CLI cleanup: user cancelled")
+			fmt.Println("Cancelled")
+			return nil
+		}
+	}
+
+	// Delete stale worktrees
+	var deleted, failed int
+	for _, wt := range staleWorktrees {
+		err := c.worktreeManager.DeleteWorktree(ctx, wt.Name)
+		if err != nil {
+			logging.Error("CLI cleanup: failed to delete %s: %v", wt.Name, err)
+			fmt.Printf("  ✗ Failed to delete %s: %v\n", wt.Branch, err)
+			failed++
+		} else {
+			logging.Info("CLI cleanup: deleted %s", wt.Name)
+			fmt.Printf("  ✓ Deleted %s\n", wt.Branch)
+			deleted++
+		}
+	}
+
+	fmt.Printf("\nDeleted %d worktree(s)", deleted)
+	if failed > 0 {
+		fmt.Printf(", %d failed", failed)
+	}
+	fmt.Println()
+
+	return nil
 }
 
 // handleInit handles the init command (non-interactive)
