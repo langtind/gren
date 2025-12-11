@@ -21,7 +21,9 @@ const (
 
 // Config represents the gren configuration.
 type Config struct {
-	MainWorktree   string `json:"main_worktree"`
+	// MainWorktree is deprecated - main worktree is now detected dynamically
+	// Kept for backwards compatibility with old configs, but not used or saved
+	MainWorktree   string `json:"main_worktree,omitempty"`
 	WorktreeDir    string `json:"worktree_dir"`
 	PackageManager string `json:"package_manager"`
 	PostCreateHook string `json:"post_create_hook"`
@@ -54,7 +56,7 @@ func NewDefaultConfig(projectName, repoRoot string) (*Config, error) {
 	worktreeDir := filepath.Join(filepath.Dir(repoRoot), projectName+"-worktrees")
 
 	return &Config{
-		MainWorktree:   repoRoot,
+		// MainWorktree intentionally not set - detected dynamically now
 		WorktreeDir:    worktreeDir,
 		PackageManager: "auto",
 		PostCreateHook: filepath.Join(ConfigDir, DefaultHookFile),
@@ -79,19 +81,7 @@ func (m *Manager) Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Migrate old configs that don't have main_worktree
-	if strings.TrimSpace(config.MainWorktree) == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get current directory for config migration: %w", err)
-		}
-		config.MainWorktree = cwd
-
-		// Save the migrated config
-		if err := m.Save(&config); err != nil {
-			return nil, fmt.Errorf("failed to save migrated config: %w", err)
-		}
-	}
+	// Note: MainWorktree from old configs is ignored - now detected dynamically
 
 	if err := m.validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
@@ -138,9 +128,7 @@ func (m *Manager) Exists() bool {
 
 // validateConfig validates the configuration fields.
 func (m *Manager) validateConfig(config *Config) error {
-	if strings.TrimSpace(config.MainWorktree) == "" {
-		return fmt.Errorf("main_worktree cannot be empty")
-	}
+	// Note: MainWorktree validation removed - now detected dynamically
 
 	if strings.TrimSpace(config.WorktreeDir) == "" {
 		return fmt.Errorf("worktree_dir cannot be empty")

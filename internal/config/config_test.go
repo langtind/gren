@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,6 @@ func TestNewDefaultConfig(t *testing.T) {
 		repoRoot    string
 		wantErr     bool
 		wantDir     string
-		wantMain    string
 	}{
 		{
 			name:        "valid project name",
@@ -22,7 +20,6 @@ func TestNewDefaultConfig(t *testing.T) {
 			repoRoot:    "/home/user/repos/my-project",
 			wantErr:     false,
 			wantDir:     "/home/user/repos/my-project-worktrees",
-			wantMain:    "/home/user/repos/my-project",
 		},
 		{
 			name:        "project with spaces preserved",
@@ -30,7 +27,6 @@ func TestNewDefaultConfig(t *testing.T) {
 			repoRoot:    "/home/user/repos/spaced",
 			wantErr:     false,
 			wantDir:     "/home/user/repos/  spaced-project  -worktrees",
-			wantMain:    "/home/user/repos/spaced",
 		},
 		{
 			name:        "empty project name",
@@ -72,8 +68,9 @@ func TestNewDefaultConfig(t *testing.T) {
 				t.Errorf("WorktreeDir = %q, want %q", config.WorktreeDir, tt.wantDir)
 			}
 
-			if config.MainWorktree != tt.wantMain {
-				t.Errorf("MainWorktree = %q, want %q", config.MainWorktree, tt.wantMain)
+			// MainWorktree should be empty (now detected dynamically)
+			if config.MainWorktree != "" {
+				t.Errorf("MainWorktree = %q, want empty (detected dynamically)", config.MainWorktree)
 			}
 
 			if config.Version != DefaultVersion {
@@ -233,8 +230,9 @@ func TestLoadInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestLoadMigratesEmptyMainWorktree(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "gren-migrate-config-*")
+func TestLoadIgnoresMainWorktree(t *testing.T) {
+	// MainWorktree is now detected dynamically, so old configs with it should still load
+	tempDir, err := os.MkdirTemp("", "gren-load-config-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -244,16 +242,10 @@ func TestLoadMigratesEmptyMainWorktree(t *testing.T) {
 	defer os.Chdir(originalDir)
 	os.Chdir(tempDir)
 
-	// Get the actual working directory (resolves symlinks on macOS)
-	actualDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-
-	// Create .gren directory with old config format (missing main_worktree)
+	// Create .gren directory with old config format (has main_worktree)
 	os.MkdirAll(ConfigDir, 0755)
 	configPath := filepath.Join(ConfigDir, ConfigFile)
-	os.WriteFile(configPath, []byte(`{"worktree_dir": "../test", "version": "1.0.0"}`), 0644)
+	os.WriteFile(configPath, []byte(`{"main_worktree": "/old/path", "worktree_dir": "../test", "version": "1.0.0"}`), 0644)
 
 	manager := NewManager()
 	config, err := manager.Load()
@@ -261,22 +253,10 @@ func TestLoadMigratesEmptyMainWorktree(t *testing.T) {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
 
-	// Verify main_worktree was migrated to current directory
-	if config.MainWorktree != actualDir {
-		t.Errorf("MainWorktree = %q, want %q", config.MainWorktree, actualDir)
-	}
-
-	// Verify the config was saved with the migrated value
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("failed to read migrated config: %v", err)
-	}
-	var savedConfig Config
-	if err := json.Unmarshal(data, &savedConfig); err != nil {
-		t.Fatalf("failed to parse migrated config: %v", err)
-	}
-	if savedConfig.MainWorktree != actualDir {
-		t.Errorf("saved MainWorktree = %q, want %q", savedConfig.MainWorktree, actualDir)
+	// MainWorktree from file is loaded but ignored in practice (detected dynamically)
+	// The field is still populated from JSON for backwards compatibility
+	if config.MainWorktree != "/old/path" {
+		t.Errorf("MainWorktree = %q, want %q (should preserve for backwards compat)", config.MainWorktree, "/old/path")
 	}
 }
 
@@ -293,15 +273,14 @@ func TestSaveInvalidConfig(t *testing.T) {
 
 	manager := NewManager()
 
-	// Try to save config with empty main_worktree
+	// Try to save config with empty worktree_dir (this should fail)
 	config := &Config{
-		MainWorktree: "",
-		WorktreeDir:  "../test",
-		Version:      "1.0.0",
+		WorktreeDir: "",
+		Version:     "1.0.0",
 	}
 	err = manager.Save(config)
 	if err == nil {
-		t.Error("Save() expected error for invalid config, got nil")
+		t.Error("Save() expected error for empty worktree_dir, got nil")
 	}
 }
 
@@ -316,7 +295,6 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: &Config{
-				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "npm",
 				Version:        "1.0.0",
@@ -326,7 +304,6 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config with auto package manager",
 			config: &Config{
-				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "auto",
 				Version:        "1.0.0",
@@ -336,7 +313,6 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config with bun",
 			config: &Config{
-				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "bun",
 				Version:        "1.0.0",
@@ -344,36 +320,33 @@ func TestValidateConfig(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "empty main worktree",
+			name: "empty main worktree is now valid",
 			config: &Config{
 				MainWorktree: "",
 				WorktreeDir:  "../worktrees",
 				Version:      "1.0.0",
 			},
-			wantErr: true,
+			wantErr: false, // MainWorktree is now optional (detected dynamically)
 		},
 		{
 			name: "empty worktree dir",
 			config: &Config{
-				MainWorktree: "/home/user/repo",
-				WorktreeDir:  "",
-				Version:      "1.0.0",
+				WorktreeDir: "",
+				Version:     "1.0.0",
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty version",
 			config: &Config{
-				MainWorktree: "/home/user/repo",
-				WorktreeDir:  "../worktrees",
-				Version:      "",
+				WorktreeDir: "../worktrees",
+				Version:     "",
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid package manager",
 			config: &Config{
-				MainWorktree:   "/home/user/repo",
 				WorktreeDir:    "../worktrees",
 				PackageManager: "invalid",
 				Version:        "1.0.0",

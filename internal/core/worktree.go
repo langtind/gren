@@ -302,23 +302,13 @@ func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, e
 
 	worktrees := wm.parseWorktreeList(string(output))
 
-	// Mark main worktree using config if available, otherwise detect by .git directory
-	cfg, _ := wm.configManager.Load()
-	mainWorktreePath := ""
-	if cfg != nil && cfg.MainWorktree != "" {
-		mainWorktreePath = cfg.MainWorktree
-	}
-
+	// Detect main worktree dynamically by checking if .git is a directory (not a file)
+	// In main worktree: .git is a directory
+	// In linked worktrees: .git is a file containing "gitdir: /path/to/.git/worktrees/name"
 	for i := range worktrees {
-		// Check if this is the main worktree
-		if mainWorktreePath != "" && worktrees[i].Path == mainWorktreePath {
+		gitPath := filepath.Join(worktrees[i].Path, ".git")
+		if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
 			worktrees[i].IsMain = true
-		} else if mainWorktreePath == "" {
-			// Fallback: detect main worktree by checking if .git is a directory (not a file)
-			gitPath := filepath.Join(worktrees[i].Path, ".git")
-			if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
-				worktrees[i].IsMain = true
-			}
 		}
 	}
 
