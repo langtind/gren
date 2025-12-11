@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,6 +50,15 @@ type WorktreeInfo struct {
 	ModifiedCount  int    // Number of modified files (not staged)
 	UntrackedCount int    // Number of untracked files
 	UnpushedCount  int    // Number of unpushed commits
+
+	// Stale detection fields
+	BranchStatus string // "active", "stale", or "" if not yet checked
+	StaleReason  string // "merged_locally", "no_unique_commits", "remote_gone", "pr_merged", "pr_closed"
+
+	// GitHub PR fields (populated async, empty if gh unavailable or no PR)
+	PRNumber int    // PR number, 0 if no PR
+	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
+	PRURL    string // Full URL to PR for "Open in browser"
 }
 
 // CheckPrerequisites verifies that required tools are available
@@ -293,6 +303,14 @@ func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, e
 		wm.enrichWorktreeStatus(&worktrees[i])
 	}
 
+	// Build stale cache once (runs git commands only once for all worktrees)
+	cache := wm.buildStaleCache()
+
+	// Enrich with stale status using cached data
+	for i := range worktrees {
+		wm.enrichStaleStatusCached(&worktrees[i], cache)
+	}
+
 	return worktrees, nil
 }
 
@@ -455,6 +473,256 @@ func getLastCommitTime(worktreePath string) string {
 	return result
 }
 
+// staleCache holds pre-fetched data for stale detection to avoid repeated git calls
+type staleCache struct {
+	mergedBranches map[string]bool // branches merged into main/master
+	goneBranches   map[string]bool // branches with deleted remote tracking
+	baseBranch     string          // which base branch was found (main or master)
+}
+
+// buildStaleCache fetches stale-related git data once for all worktrees
+func (wm *WorktreeManager) buildStaleCache() *staleCache {
+	cache := &staleCache{
+		mergedBranches: make(map[string]bool),
+		goneBranches:   make(map[string]bool),
+	}
+
+	// Get merged branches (try main first, then master)
+	for _, baseBranch := range []string{"main", "master"} {
+		cmd := exec.Command("git", "branch", "--merged", baseBranch)
+		output, err := cmd.Output()
+		if err != nil {
+			logging.Debug("buildStaleCache: git branch --merged %s failed: %v", baseBranch, err)
+			continue
+		}
+
+		cache.baseBranch = baseBranch
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			line = strings.TrimPrefix(line, "* ")
+			line = strings.TrimPrefix(line, "+ ")
+			if line != "" && line != baseBranch {
+				cache.mergedBranches[line] = true
+			}
+		}
+		logging.Debug("buildStaleCache: found %d merged branches into %s", len(cache.mergedBranches), baseBranch)
+		break // Found a valid base branch
+	}
+
+	// Get branches with gone remotes
+	cmd := exec.Command("git", "branch", "-vv")
+	output, err := cmd.Output()
+	if err != nil {
+		logging.Debug("buildStaleCache: git branch -vv failed: %v", err)
+		return cache
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, ": gone]") {
+			// Extract branch name from line
+			trimmed := strings.TrimSpace(line)
+			trimmed = strings.TrimPrefix(trimmed, "* ")
+			trimmed = strings.TrimPrefix(trimmed, "+ ")
+			// Branch name is the first word
+			parts := strings.Fields(trimmed)
+			if len(parts) > 0 {
+				cache.goneBranches[parts[0]] = true
+			}
+		}
+	}
+	logging.Debug("buildStaleCache: found %d branches with gone remotes", len(cache.goneBranches))
+
+	return cache
+}
+
+// enrichStaleStatusCached checks if a worktree's branch is stale using cached data
+func (wm *WorktreeManager) enrichStaleStatusCached(wt *WorktreeInfo, cache *staleCache) {
+	logging.Debug("enrichStaleStatusCached: checking branch %q", wt.Branch)
+
+	// Skip main worktree and missing worktrees
+	if wt.IsMain || wt.Status == "missing" {
+		logging.Debug("enrichStaleStatusCached: skipping %q (isMain=%v, status=%s)", wt.Branch, wt.IsMain, wt.Status)
+		wt.BranchStatus = "active"
+		return
+	}
+
+	// Skip detached HEAD or bare repos
+	if wt.Branch == "(detached)" || wt.Branch == "(bare)" {
+		logging.Debug("enrichStaleStatusCached: skipping %q (detached/bare)", wt.Branch)
+		wt.BranchStatus = "active"
+		return
+	}
+
+	// Check 1: Is branch merged into main/master?
+	if cache.mergedBranches[wt.Branch] {
+		wt.BranchStatus = "stale"
+		// Check if branch has unique commits (still need per-branch check for this)
+		if wm.branchHasUniqueCommits(wt.Branch) {
+			logging.Info("enrichStaleStatusCached: branch %q is merged into %s", wt.Branch, cache.baseBranch)
+			wt.StaleReason = "merged_locally"
+		} else {
+			logging.Info("enrichStaleStatusCached: branch %q has no unique commits", wt.Branch)
+			wt.StaleReason = "no_unique_commits"
+		}
+		return
+	}
+
+	// Check 2: Is remote branch gone?
+	if cache.goneBranches[wt.Branch] {
+		logging.Info("enrichStaleStatusCached: branch %q has gone remote", wt.Branch)
+		wt.BranchStatus = "stale"
+		wt.StaleReason = "remote_gone"
+		return
+	}
+
+	logging.Debug("enrichStaleStatusCached: branch %q is active", wt.Branch)
+	wt.BranchStatus = "active"
+}
+
+// enrichStaleStatus checks if a worktree's branch is stale (merged or remote gone)
+// Deprecated: Use enrichStaleStatusCached with buildStaleCache for better performance
+func (wm *WorktreeManager) enrichStaleStatus(wt *WorktreeInfo) {
+	logging.Debug("enrichStaleStatus: checking branch %q", wt.Branch)
+
+	// Skip main worktree and missing worktrees
+	if wt.IsMain || wt.Status == "missing" {
+		logging.Debug("enrichStaleStatus: skipping %q (isMain=%v, status=%s)", wt.Branch, wt.IsMain, wt.Status)
+		wt.BranchStatus = "active"
+		return
+	}
+
+	// Skip detached HEAD or bare repos
+	if wt.Branch == "(detached)" || wt.Branch == "(bare)" {
+		logging.Debug("enrichStaleStatus: skipping %q (detached/bare)", wt.Branch)
+		wt.BranchStatus = "active"
+		return
+	}
+
+	// Check 1: Is branch merged into main/master?
+	merged, hasUniqueCommits := wm.isBranchMerged(wt.Branch)
+	if merged {
+		wt.BranchStatus = "stale"
+		if hasUniqueCommits {
+			logging.Info("enrichStaleStatus: branch %q is merged into main/master", wt.Branch)
+			wt.StaleReason = "merged_locally"
+		} else {
+			logging.Info("enrichStaleStatus: branch %q has no unique commits", wt.Branch)
+			wt.StaleReason = "no_unique_commits"
+		}
+		return
+	}
+
+	// Check 2: Is remote branch gone (deleted after merge)?
+	if wm.isRemoteBranchGone(wt.Branch) {
+		logging.Info("enrichStaleStatus: branch %q has gone remote", wt.Branch)
+		wt.BranchStatus = "stale"
+		wt.StaleReason = "remote_gone"
+		return
+	}
+
+	logging.Debug("enrichStaleStatus: branch %q is active", wt.Branch)
+	wt.BranchStatus = "active"
+}
+
+// isBranchMerged checks if a branch has been merged into main/master
+// Returns: merged (bool), hasUniqueCommits (bool)
+// - merged=true, hasUniqueCommits=true → branch was actually merged
+// - merged=true, hasUniqueCommits=false → branch has no unique commits (empty branch)
+func (wm *WorktreeManager) isBranchMerged(branch string) (merged bool, hasUniqueCommits bool) {
+	logging.Debug("isBranchMerged: checking if %q is merged", branch)
+
+	// First, check if branch has any unique commits compared to main/master
+	hasUniqueCommits = wm.branchHasUniqueCommits(branch)
+	logging.Debug("isBranchMerged: %q hasUniqueCommits=%v", branch, hasUniqueCommits)
+
+	// Try main first, then master
+	for _, baseBranch := range []string{"main", "master"} {
+		cmd := exec.Command("git", "branch", "--merged", baseBranch)
+		output, err := cmd.Output()
+		if err != nil {
+			logging.Debug("isBranchMerged: git branch --merged %s failed: %v", baseBranch, err)
+			continue // This base branch might not exist
+		}
+
+		// Parse output to find if our branch is in the merged list
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			// Clean up the line (remove leading spaces, asterisk for current branch,
+			// and + for branches checked out in other worktrees)
+			line = strings.TrimSpace(line)
+			line = strings.TrimPrefix(line, "* ")
+			line = strings.TrimPrefix(line, "+ ")
+			if line == branch {
+				logging.Debug("isBranchMerged: %q is merged into %s", branch, baseBranch)
+				return true, hasUniqueCommits
+			}
+		}
+	}
+	logging.Debug("isBranchMerged: %q is not merged", branch)
+	return false, hasUniqueCommits
+}
+
+// branchHasUniqueCommits checks if a branch currently has commits not in main/master
+// Note: After a merge, this will return false even if the branch had commits before merging
+func (wm *WorktreeManager) branchHasUniqueCommits(branch string) bool {
+	// Try main first, then master
+	for _, baseBranch := range []string{"main", "master"} {
+		// Count commits in branch that are not in baseBranch
+		cmd := exec.Command("git", "rev-list", "--count", baseBranch+".."+branch)
+		output, err := cmd.Output()
+		if err != nil {
+			logging.Debug("branchHasUniqueCommits: git rev-list --count %s..%s failed: %v", baseBranch, branch, err)
+			continue
+		}
+
+		countStr := strings.TrimSpace(string(output))
+		if countStr != "0" {
+			logging.Debug("branchHasUniqueCommits: %q has %s unique commits vs %s", branch, countStr, baseBranch)
+			return true
+		}
+		logging.Debug("branchHasUniqueCommits: %q has no unique commits vs %s", branch, baseBranch)
+		return false
+	}
+	return false
+}
+
+// isRemoteBranchGone checks if the remote tracking branch was deleted
+func (wm *WorktreeManager) isRemoteBranchGone(branch string) bool {
+	logging.Debug("isRemoteBranchGone: checking if %q remote is gone", branch)
+
+	// Use git branch -vv to check tracking status
+	cmd := exec.Command("git", "branch", "-vv")
+	output, err := cmd.Output()
+	if err != nil {
+		logging.Debug("isRemoteBranchGone: git branch -vv failed: %v", err)
+		return false
+	}
+
+	// Look for the branch line with [origin/branch: gone]
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		// Check if this line is for our branch
+		trimmed := strings.TrimSpace(line)
+		trimmed = strings.TrimPrefix(trimmed, "* ")
+
+		// Line format: "branch-name hash [origin/branch: gone] commit message"
+		// or: "branch-name hash [origin/branch] commit message"
+		if strings.HasPrefix(trimmed, branch+" ") || strings.HasPrefix(trimmed, branch+"\t") {
+			// Check if it contains ": gone]"
+			if strings.Contains(line, ": gone]") {
+				logging.Debug("isRemoteBranchGone: %q remote branch is gone", branch)
+				return true
+			}
+			logging.Debug("isRemoteBranchGone: %q remote branch exists", branch)
+			break
+		}
+	}
+	logging.Debug("isRemoteBranchGone: %q has no remote tracking", branch)
+	return false
+}
+
 // DeleteWorktree deletes a worktree by name or path
 func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string) error {
 	worktrees, err := wm.ListWorktrees(ctx)
@@ -597,4 +865,120 @@ func copyDir(src, dst string) error {
 
 		return os.WriteFile(dstPath, data, info.Mode())
 	})
+}
+
+// GitHubStatus represents the availability of GitHub CLI
+type GitHubStatus int
+
+const (
+	GitHubUnchecked GitHubStatus = iota
+	GitHubAvailable
+	GitHubUnavailable
+)
+
+// CheckGitHubAvailability checks if gh CLI is installed and authenticated
+func (wm *WorktreeManager) CheckGitHubAvailability() GitHubStatus {
+	// Check if gh is installed
+	if _, err := exec.LookPath("gh"); err != nil {
+		logging.Debug("CheckGitHubAvailability: gh CLI not installed")
+		return GitHubUnavailable
+	}
+
+	// Check if gh is authenticated
+	cmd := exec.Command("gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		logging.Debug("CheckGitHubAvailability: gh not authenticated: %v", err)
+		return GitHubUnavailable
+	}
+
+	logging.Debug("CheckGitHubAvailability: gh CLI available and authenticated")
+	return GitHubAvailable
+}
+
+// PRInfo holds GitHub PR information for a branch
+type PRInfo struct {
+	Number  int    `json:"number"`
+	State   string `json:"state"` // OPEN, CLOSED, MERGED
+	URL     string `json:"url"`
+	IsDraft bool   `json:"isDraft"`
+}
+
+// FetchPRStatus fetches PR status for a branch using gh CLI
+// Returns nil if no PR exists or gh is unavailable
+func (wm *WorktreeManager) FetchPRStatus(branch string) *PRInfo {
+	logging.Debug("FetchPRStatus: checking PR for branch %q", branch)
+
+	// Use gh pr view to get PR info for this branch
+	cmd := exec.Command("gh", "pr", "view", branch, "--json", "number,state,url,isDraft")
+	output, err := cmd.Output()
+	if err != nil {
+		// No PR exists or other error - this is normal
+		logging.Debug("FetchPRStatus: no PR for branch %q: %v", branch, err)
+		return nil
+	}
+
+	var pr PRInfo
+	if err := json.Unmarshal(output, &pr); err != nil {
+		logging.Debug("FetchPRStatus: failed to parse PR info: %v", err)
+		return nil
+	}
+
+	logging.Debug("FetchPRStatus: found PR #%d (%s) for branch %q", pr.Number, pr.State, branch)
+	return &pr
+}
+
+// EnrichWithGitHubStatus fetches GitHub PR status for all worktrees
+// This should be called async after initial worktree load
+func (wm *WorktreeManager) EnrichWithGitHubStatus(worktrees []WorktreeInfo) {
+	logging.Debug("EnrichWithGitHubStatus: enriching %d worktrees", len(worktrees))
+
+	for i := range worktrees {
+		wt := &worktrees[i]
+
+		// Skip main worktree
+		if wt.IsMain {
+			continue
+		}
+
+		// Skip detached HEAD or bare repos
+		if wt.Branch == "(detached)" || wt.Branch == "(bare)" {
+			continue
+		}
+
+		pr := wm.FetchPRStatus(wt.Branch)
+		if pr != nil {
+			wt.PRNumber = pr.Number
+			wt.PRURL = pr.URL
+
+			// Handle draft state
+			if pr.IsDraft {
+				wt.PRState = "DRAFT"
+			} else {
+				wt.PRState = pr.State
+			}
+
+			// Update stale status based on PR state
+			if pr.State == "MERGED" {
+				wt.BranchStatus = "stale"
+				wt.StaleReason = "pr_merged"
+				logging.Info("EnrichWithGitHubStatus: branch %q has merged PR #%d", wt.Branch, pr.Number)
+			} else if pr.State == "CLOSED" {
+				wt.BranchStatus = "stale"
+				wt.StaleReason = "pr_closed"
+				logging.Info("EnrichWithGitHubStatus: branch %q has closed PR #%d", wt.Branch, pr.Number)
+			}
+		}
+	}
+}
+
+// OpenPRInBrowser opens the PR for a branch in the default browser
+func (wm *WorktreeManager) OpenPRInBrowser(branch string) error {
+	logging.Debug("OpenPRInBrowser: opening PR for branch %q", branch)
+
+	cmd := exec.Command("gh", "pr", "view", branch, "--web")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to open PR: %w", err)
+	}
+
+	return nil
 }
