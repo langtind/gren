@@ -438,6 +438,13 @@ func (m Model) renderCreateCompleteStep() string {
 	content.WriteString(WizardSuccessStyle.Render("✓ " + m.createState.branchName))
 	content.WriteString("\n\n")
 
+	// Warning if local branch had unpushed commits
+	if m.createState.createWarning != "" {
+		warningStyle := lipgloss.NewStyle().Foreground(ColorWarning)
+		content.WriteString(warningStyle.Render("⚠ " + m.createState.createWarning))
+		content.WriteString("\n\n")
+	}
+
 	// Path
 	worktreePath := m.getWorktreePath(m.createState.branchName)
 	content.WriteString(WizardDescStyle.Render("Path: " + worktreePath))

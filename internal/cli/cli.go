@@ -159,13 +159,17 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 
 	ctx := context.Background()
-	err := c.worktreeManager.CreateWorktree(ctx, req)
+	warning, err := c.worktreeManager.CreateWorktree(ctx, req)
 	if err != nil {
 		logging.Error("CLI create failed: %v", err)
-	} else {
-		logging.Info("CLI create succeeded: %s", *name)
+		return err
 	}
-	return err
+
+	if warning != "" {
+		fmt.Printf("⚠ %s\n", warning)
+	}
+	logging.Info("CLI create succeeded: %s", *name)
+	return nil
 }
 
 // handleList handles the list command

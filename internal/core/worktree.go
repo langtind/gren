@@ -78,20 +78,24 @@ func (wm *WorktreeManager) CheckPrerequisites() error {
 }
 
 // CreateWorktree creates a new worktree with the given parameters
-func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktreeRequest) error {
+// Returns a warning message (if any) and an error
+func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktreeRequest) (warning string, err error) {
 	logging.Info("CreateWorktree called: name=%s, branch=%s, base=%s, isNew=%v", req.Name, req.Branch, req.BaseBranch, req.IsNewBranch)
 
 	// Check prerequisites
 	if err := wm.CheckPrerequisites(); err != nil {
 		logging.Error("Prerequisites check failed: %v", err)
-		return err
+		return "", err
 	}
+
+	// Fetch latest from origin to ensure we have up-to-date remote refs
+	wm.FetchOrigin()
 
 	// Load configuration
 	cfg, err := wm.configManager.Load()
 	if err != nil {
 		logging.Error("Failed to load configuration: %v", err)
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return "", fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Determine worktree path
@@ -105,7 +109,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			repoInfo, err := wm.gitRepo.GetRepoInfo(ctx)
 			if err != nil {
 				logging.Error("Failed to get repo info: %v", err)
-				return fmt.Errorf("failed to get repo info: %w", err)
+				return "", fmt.Errorf("failed to get repo info: %w", err)
 			}
 			worktreeDir = fmt.Sprintf("../%s-worktrees", repoInfo.Name)
 			logging.Debug("Using default worktree_dir: %s", worktreeDir)
@@ -122,7 +126,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		logging.Debug("Creating worktree directory: %s", worktreeDir)
 		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
 			logging.Error("Failed to create worktree directory: %v", err)
-			return fmt.Errorf("failed to create worktree directory: %w", err)
+			return "", fmt.Errorf("failed to create worktree directory: %w", err)
 		}
 	}
 
@@ -133,37 +137,46 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		branchName = req.Name
 	}
 
-	// Check if branch exists locally
-	localCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
-	branchExistsLocally := localCheckCmd.Run() == nil
-
-	// Check if branch exists on remote
-	remoteCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branchName)
-	branchExistsRemote := remoteCheckCmd.Run() == nil
-
-	logging.Debug("Branch detection: local=%v, remote=%v", branchExistsLocally, branchExistsRemote)
+	// Get sync status for the branch (uses fresh data from fetch)
+	syncStatus := wm.GetBranchSyncStatus(branchName)
+	warning = syncStatus.Warning
 
 	// Check if branch is already checked out in another worktree
-	if branchExistsLocally {
+	if syncStatus.LocalExists {
 		worktreeListCmd := exec.Command("git", "worktree", "list")
 		listOutput, _ := worktreeListCmd.Output()
 		if strings.Contains(string(listOutput), "["+branchName+"]") {
 			logging.Error("Branch already checked out in another worktree: %s", branchName)
-			return fmt.Errorf("branch '%s' is already checked out in another worktree", branchName)
+			return "", fmt.Errorf("branch '%s' is already checked out in another worktree", branchName)
 		}
 	}
 
 	var gitCmd string
-	if branchExistsLocally {
-		// Branch exists locally - use it directly
-		gitCmd = fmt.Sprintf("git worktree add %s %s", worktreePath, branchName)
-		logging.Info("Using existing local branch: %s", branchName)
-		cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
-	} else if branchExistsRemote {
-		// Branch exists on remote - create tracking branch
-		gitCmd = fmt.Sprintf("git worktree add --track -b %s %s origin/%s", branchName, worktreePath, branchName)
-		logging.Info("Creating local branch from remote: origin/%s", branchName)
-		cmd = exec.Command("git", "worktree", "add", "--track", "-b", branchName, worktreePath, "origin/"+branchName)
+	if syncStatus.LocalExists || syncStatus.RemoteExists {
+		// Branch exists - use the best source ref (local if ahead, remote otherwise)
+		sourceRef := syncStatus.SourceRef
+
+		if syncStatus.LocalExists && !syncStatus.RemoteExists {
+			// Local-only branch - use directly
+			gitCmd = fmt.Sprintf("git worktree add %s %s", worktreePath, branchName)
+			logging.Info("Using local-only branch: %s", branchName)
+			cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
+		} else if !syncStatus.LocalExists && syncStatus.RemoteExists {
+			// Remote-only branch - create tracking branch
+			gitCmd = fmt.Sprintf("git worktree add --track -b %s %s %s", branchName, worktreePath, sourceRef)
+			logging.Info("Creating local branch from remote: %s", sourceRef)
+			cmd = exec.Command("git", "worktree", "add", "--track", "-b", branchName, worktreePath, sourceRef)
+		} else if syncStatus.Ahead > 0 {
+			// Local has unpushed commits - use local branch
+			gitCmd = fmt.Sprintf("git worktree add %s %s", worktreePath, branchName)
+			logging.Info("Using local branch (has %d unpushed commits): %s", syncStatus.Ahead, branchName)
+			cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
+		} else {
+			// Local is in sync or behind - use remote for latest code
+			gitCmd = fmt.Sprintf("git worktree add --track -b %s %s %s", branchName, worktreePath, sourceRef)
+			logging.Info("Using remote branch for latest code: %s", sourceRef)
+			cmd = exec.Command("git", "worktree", "add", "--track", "-b", branchName, worktreePath, sourceRef)
+		}
 	} else if req.IsNewBranch {
 		// Branch doesn't exist - create new from base
 		baseBranch := req.BaseBranch
@@ -172,16 +185,27 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			baseBranch, err = wm.gitRepo.GetRecommendedBaseBranch(ctx)
 			if err != nil {
 				logging.Error("Failed to get recommended base branch: %v", err)
-				return fmt.Errorf("failed to get recommended base branch: %w", err)
+				return "", fmt.Errorf("failed to get recommended base branch: %w", err)
 			}
 		}
-		gitCmd = fmt.Sprintf("git worktree add -b %s %s %s", branchName, worktreePath, baseBranch)
-		logging.Info("Creating new branch '%s' from base '%s'", branchName, baseBranch)
-		cmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseBranch)
+
+		// Check sync status of base branch to use latest
+		baseStatus := wm.GetBranchSyncStatus(baseBranch)
+		baseRef := baseStatus.SourceRef
+		if baseRef == "" {
+			baseRef = baseBranch // Fallback to branch name
+		}
+		if baseStatus.Warning != "" && warning == "" {
+			warning = baseStatus.Warning
+		}
+
+		gitCmd = fmt.Sprintf("git worktree add -b %s %s %s", branchName, worktreePath, baseRef)
+		logging.Info("Creating new branch '%s' from base '%s'", branchName, baseRef)
+		cmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath, baseRef)
 	} else {
 		// User explicitly wanted existing branch but it doesn't exist
 		logging.Error("Branch not found locally or on remote: %s", branchName)
-		return fmt.Errorf("branch '%s' not found locally or on remote", branchName)
+		return "", fmt.Errorf("branch '%s' not found locally or on remote", branchName)
 	}
 
 	logging.Debug("Running: %s", gitCmd)
@@ -189,9 +213,9 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	if err != nil {
 		logging.Error("git worktree add failed: %v, output: %s", err, string(output))
 		if len(output) == 0 {
-			return fmt.Errorf("git worktree add failed: %w", err)
+			return "", fmt.Errorf("git worktree add failed: %w", err)
 		}
-		return fmt.Errorf("git worktree add failed: %s", string(output))
+		return "", fmt.Errorf("git worktree add failed: %s", string(output))
 	}
 
 	// Initialize submodules in the new worktree
@@ -230,7 +254,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		// Get repo root
 		repoRoot, err := wm.getRepoRoot()
 		if err != nil {
-			return fmt.Errorf("failed to get repo root: %w", err)
+			return "", fmt.Errorf("failed to get repo root: %w", err)
 		}
 
 		// Resolve hook path relative to repo root (not worktree - the hook creates the .gren symlink)
@@ -264,7 +288,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	}
 
 	logging.Info("Created worktree '%s' at %s", req.Name, worktreePath)
-	return nil
+	return warning, nil
 }
 
 // ListWorktrees returns a list of all worktrees with full status information
@@ -471,6 +495,93 @@ func getLastCommitTime(worktreePath string) string {
 	}
 
 	return result
+}
+
+// BranchSyncStatus represents the sync status between local and remote branch
+type BranchSyncStatus struct {
+	LocalExists  bool
+	RemoteExists bool
+	Ahead        int    // Commits in local not in remote
+	Behind       int    // Commits in remote not in local
+	SourceRef    string // Best ref to use (origin/branch or branch)
+	Warning      string // Warning message if local has unpushed commits
+}
+
+// GetBranchSyncStatus checks sync status between local and remote branch
+// Should be called AFTER git fetch
+func (wm *WorktreeManager) GetBranchSyncStatus(branch string) BranchSyncStatus {
+	status := BranchSyncStatus{}
+
+	// Check if branch exists locally
+	localCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	status.LocalExists = localCheckCmd.Run() == nil
+
+	// Check if branch exists on remote
+	remoteCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch)
+	status.RemoteExists = remoteCheckCmd.Run() == nil
+
+	logging.Debug("GetBranchSyncStatus: branch=%s, local=%v, remote=%v", branch, status.LocalExists, status.RemoteExists)
+
+	// If only local exists, use local
+	if status.LocalExists && !status.RemoteExists {
+		status.SourceRef = branch
+		logging.Debug("GetBranchSyncStatus: local-only branch, using %s", status.SourceRef)
+		return status
+	}
+
+	// If only remote exists, use remote
+	if !status.LocalExists && status.RemoteExists {
+		status.SourceRef = "origin/" + branch
+		logging.Debug("GetBranchSyncStatus: remote-only branch, using %s", status.SourceRef)
+		return status
+	}
+
+	// If neither exists, return empty (caller will handle)
+	if !status.LocalExists && !status.RemoteExists {
+		logging.Debug("GetBranchSyncStatus: branch not found locally or remote")
+		return status
+	}
+
+	// Both exist - check ahead/behind
+	aheadCmd := exec.Command("git", "rev-list", "--count", "origin/"+branch+".."+branch)
+	if output, err := aheadCmd.Output(); err == nil {
+		fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &status.Ahead)
+	}
+
+	behindCmd := exec.Command("git", "rev-list", "--count", branch+"..origin/"+branch)
+	if output, err := behindCmd.Output(); err == nil {
+		fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &status.Behind)
+	}
+
+	logging.Debug("GetBranchSyncStatus: ahead=%d, behind=%d", status.Ahead, status.Behind)
+
+	// Determine source ref based on sync status
+	if status.Ahead > 0 {
+		// Local has unpushed commits - use local to preserve them
+		status.SourceRef = branch
+		status.Warning = fmt.Sprintf("%s has %d unpushed commit(s) - using local version", branch, status.Ahead)
+		logging.Info("GetBranchSyncStatus: %s", status.Warning)
+	} else {
+		// In sync or behind - safe to use remote (get latest)
+		status.SourceRef = "origin/" + branch
+		logging.Debug("GetBranchSyncStatus: using remote %s", status.SourceRef)
+	}
+
+	return status
+}
+
+// FetchOrigin runs git fetch origin to update remote tracking branches
+func (wm *WorktreeManager) FetchOrigin() error {
+	logging.Debug("FetchOrigin: running git fetch origin")
+	cmd := exec.Command("git", "fetch", "origin")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logging.Warn("FetchOrigin: git fetch origin failed: %v, output: %s", err, string(output))
+		// Don't fail - might be offline or no remote configured
+		return nil
+	}
+	logging.Debug("FetchOrigin: success")
+	return nil
 }
 
 // staleCache holds pre-fetched data for stale detection to avoid repeated git calls

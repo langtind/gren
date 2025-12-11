@@ -167,6 +167,7 @@ type CreateState struct {
 	selectedAction            int           // For the post-create actions
 	actionsList               list.Model    // Dropdown menu for post-create actions
 	spinner                   spinner.Model // Spinner for creating step
+	createWarning             string        // Warning from worktree creation (e.g., unpushed commits)
 }
 
 // DeleteStep represents the current step in worktree deletion

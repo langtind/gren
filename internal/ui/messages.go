@@ -38,6 +38,7 @@ type initExecutionCompleteMsg struct {
 
 type worktreeCreatedMsg struct {
 	branchName string
+	warning    string // Warning message (e.g., "main has 2 unpushed commits")
 	err        error
 }
 

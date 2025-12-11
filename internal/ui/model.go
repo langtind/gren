@@ -195,6 +195,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Refresh worktrees list after successful creation
 				m.refreshWorktrees()
 				m.createState.currentStep = CreateStepComplete
+				m.createState.createWarning = msg.warning // Store warning for display
 				m.initializeActionsList()
 			}
 		}
