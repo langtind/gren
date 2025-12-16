@@ -56,6 +56,7 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.Up):
 		if m.initState.currentStep == InitStepRecommendations ||
+			m.initState.currentStep == InitStepGrenConfig ||
 			m.initState.currentStep == InitStepPreview ||
 			m.initState.currentStep == InitStepCreated {
 			if m.initState.selected > 0 {
@@ -68,6 +69,8 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.initState.currentStep {
 		case InitStepRecommendations:
 			maxItems = 3 // "Accept recommendations", "Customize configuration", "Generate with AI"
+		case InitStepGrenConfig:
+			maxItems = 2 // "Track in git", "Keep local"
 		case InitStepPreview:
 			maxItems = 3 // "Create configuration", "Back to customize", "Cancel"
 		case InitStepCreated:
@@ -84,19 +87,31 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.initState.currentStep = InitStepAnalysis
 			return m, m.runProjectAnalysis()
 		case InitStepRecommendations:
-			switch m.initState.selected {
+			// Save the choice and go to .gren config step
+			m.initState.recommendationMode = m.initState.selected
+			m.initState.currentStep = InitStepGrenConfig
+			m.initState.selected = 0 // Default to "Track in git"
+			logging.Info("InitView: going to .gren configuration")
+			return m, nil
+		case InitStepGrenConfig:
+			// Set trackGrenInGit based on selection (0=track, 1=gitignore)
+			m.initState.trackGrenInGit = (m.initState.selected == 0)
+			logging.Info("InitView: .gren config choice: track=%v", m.initState.trackGrenInGit)
+
+			// Continue based on original recommendation choice
+			switch m.initState.recommendationMode {
 			case 0:
-				// Selected "Accept recommendations and continue"
-				logging.Info("InitView: accepted recommendations, going to preview")
+				// Accept recommendations -> go to preview
+				logging.Info("InitView: going to preview")
 				m.initState.currentStep = InitStepPreview
 				m.initState.selected = 0
 			case 1:
-				// Selected "Customize configuration" option
+				// Customize -> go to customization
 				logging.Info("InitView: entering customization")
 				m.initState.currentStep = InitStepCustomization
 				m.initState.selected = 0
 			case 2:
-				// Selected "Generate setup script with AI"
+				// AI generation -> generate script
 				logging.Info("InitView: generating AI setup script")
 				m.initState.currentStep = InitStepAIGenerating
 				return m, m.generateAISetupScript()

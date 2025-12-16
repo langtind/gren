@@ -56,6 +56,7 @@ const (
 	InitStepWelcome InitStep = iota
 	InitStepAnalysis
 	InitStepRecommendations
+	InitStepGrenConfig // Ask whether to track .gren in git
 	InitStepCustomization
 	InitStepPreview
 	InitStepCreated
@@ -69,18 +70,20 @@ const (
 
 // InitState holds the state for project initialization
 type InitState struct {
-	currentStep       InitStep
-	detectedFiles     []DetectedFile
-	selected          int
-	worktreeDir       string
-	customizationMode string // "", "worktree", "postcreate"
-	editingText       string
-	postCreateScript  string
-	analysisComplete  bool   // whether project analysis is complete
-	packageManager    string // detected package manager
-	postCreateCmd     string // detected post-create command
-	aiGeneratedScript string // AI-generated setup script content
-	aiError           string // Error message from AI generation
+	currentStep        InitStep
+	detectedFiles      []DetectedFile
+	selected           int
+	worktreeDir        string
+	customizationMode  string // "", "worktree", "postcreate"
+	editingText        string
+	postCreateScript   string
+	analysisComplete   bool   // whether project analysis is complete
+	packageManager     string // detected package manager
+	postCreateCmd      string // detected post-create command
+	aiGeneratedScript  string // AI-generated setup script content
+	aiError            string // Error message from AI generation
+	trackGrenInGit     bool   // whether to track .gren/ in git or add to .gitignore
+	recommendationMode int    // 0=Accept, 1=Customize, 2=AI (saved from recommendations step)
 }
 
 // DetectedFile represents a detected file that could be useful for worktrees
@@ -210,10 +213,20 @@ type DeleteState struct {
 	forceDelete       bool      // Use --force flag (when user confirms deletion of dirty worktree)
 }
 
-// CleanupState holds the state for bulk stale worktree cleanup
+// CleanupState holds the state for bulk stale worktree cleanup with live progress
 type CleanupState struct {
-	staleWorktrees []Worktree // Worktrees to be cleaned up
-	confirmed      bool       // Whether user confirmed the action
+	staleWorktrees      []Worktree     // Worktrees to be cleaned up
+	confirmed           bool           // Whether user confirmed the action
+	selectedIndices     map[int]bool   // Which worktrees are selected for deletion
+	selectedIndicesList []int          // Sorted list of selected indices (built when cleanup starts)
+	cursorIndex         int            // Current cursor position in selection list
+	inProgress          bool           // Cleanup currently running
+	currentIndex        int            // Index being deleted (-1 = none)
+	deletedIndices      map[int]bool   // Successfully deleted indices
+	failedWorktrees     map[int]string // Failed index → error message
+	totalCleaned        int            // Success count
+	totalFailed         int            // Failure count
+	cleanupSpinner      spinner.Model  // Spinner for current deletion
 }
 
 // Model holds the entire application state

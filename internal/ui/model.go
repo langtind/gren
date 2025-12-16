@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -131,41 +132,156 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case staleCleanupCompleteMsg:
-		// Stale cleanup operation complete
-		logging.Info("Stale cleanup complete: cleaned %d, failed %d worktrees", msg.cleanedCount, msg.failedCount)
+	case cleanupStartedMsg:
+		// Initialize cleanup state and start first deletion
+		if m.cleanupState != nil {
+			m.cleanupState.inProgress = true
+			m.cleanupState.currentIndex = -1
+			m.cleanupState.deletedIndices = make(map[int]bool)
+			m.cleanupState.failedWorktrees = make(map[int]string)
+			m.cleanupState.totalCleaned = 0
+			m.cleanupState.totalFailed = 0
 
-		// Build informative message
-		if msg.failedCount > 0 && msg.cleanedCount > 0 {
-			// Partial success - show both results
-			var failedInfo string
-			for i, name := range msg.failedNames {
-				if i < len(msg.failedReasons) {
-					failedInfo += fmt.Sprintf("\n  • %s (%s)", name, msg.failedReasons[i])
+			// Build sorted list of selected indices
+			var selectedList []int
+			for idx := range m.cleanupState.selectedIndices {
+				selectedList = append(selectedList, idx)
+			}
+			// Sort the list
+			for i := 0; i < len(selectedList); i++ {
+				for j := i + 1; j < len(selectedList); j++ {
+					if selectedList[i] > selectedList[j] {
+						selectedList[i], selectedList[j] = selectedList[j], selectedList[i]
+					}
 				}
 			}
-			m.err = fmt.Errorf("deleted %d worktree(s), %d failed:%s", msg.cleanedCount, msg.failedCount, failedInfo)
-		} else if msg.failedCount > 0 {
+			m.cleanupState.selectedIndicesList = selectedList
+
+			logging.Info("Cleanup started: %d worktrees to process", len(selectedList))
+
+			// Start spinner and first deletion (using first selected index)
+			if len(selectedList) > 0 {
+				firstIdx := selectedList[0]
+				return m, tea.Batch(
+					m.cleanupState.cleanupSpinner.Tick,
+					func() tea.Msg {
+						return cleanupItemStartMsg{worktreeIndex: firstIdx, worktreeName: m.cleanupState.staleWorktrees[firstIdx].Branch}
+					},
+					m.deleteNextWorktree(firstIdx),
+				)
+			}
+		}
+		return m, nil
+
+	case cleanupItemStartMsg:
+		// Mark worktree as currently being deleted (triggers spinner display)
+		if m.cleanupState != nil {
+			m.cleanupState.currentIndex = msg.worktreeIndex
+			logging.Debug("Cleanup: starting deletion of index %d: %s", msg.worktreeIndex, msg.worktreeName)
+		}
+		return m, nil
+
+	case cleanupItemCompleteMsg:
+		// Handle individual deletion completion
+		if m.cleanupState != nil {
+			if msg.success {
+				// Mark as successfully deleted (will be removed from UI)
+				m.cleanupState.deletedIndices[msg.worktreeIndex] = true
+				m.cleanupState.totalCleaned++
+				logging.Info("Cleanup: deleted %s (%d/%d)",
+					msg.worktreeName,
+					m.cleanupState.totalCleaned+m.cleanupState.totalFailed,
+					len(m.cleanupState.staleWorktrees))
+			} else {
+				// Mark as failed with error (will show red ✗)
+				m.cleanupState.failedWorktrees[msg.worktreeIndex] = msg.errorMsg
+				m.cleanupState.totalFailed++
+				logging.Error("Cleanup: failed %s: %s", msg.worktreeName, msg.errorMsg)
+			}
+
+			// Clear current index (no longer showing spinner)
+			m.cleanupState.currentIndex = -1
+
+			// Find next selected index to process
+			var nextIdx int = -1
+			foundCurrent := false
+			for _, idx := range m.cleanupState.selectedIndicesList {
+				if foundCurrent {
+					nextIdx = idx
+					break
+				}
+				if idx == msg.worktreeIndex {
+					foundCurrent = true
+				}
+			}
+
+			// Determine next action
+			if nextIdx != -1 {
+				// More worktrees to process
+				return m, tea.Batch(
+					func() tea.Msg {
+						return cleanupItemStartMsg{
+							worktreeIndex: nextIdx,
+							worktreeName:  m.cleanupState.staleWorktrees[nextIdx].Branch,
+						}
+					},
+					m.deleteNextWorktree(nextIdx),
+				)
+			}
+			// All done - send finished message
+			return m, func() tea.Msg {
+				return cleanupFinishedMsg{
+					totalCleaned: m.cleanupState.totalCleaned,
+					totalFailed:  m.cleanupState.totalFailed,
+				}
+			}
+		}
+		return m, nil
+
+	case cleanupFinishedMsg:
+		// Cleanup complete - update state and refresh worktree list
+		logging.Info("Cleanup finished: %d cleaned, %d failed", msg.totalCleaned, msg.totalFailed)
+
+		if m.cleanupState != nil {
+			m.cleanupState.inProgress = false
+			m.cleanupState.currentIndex = -1
+		}
+
+		// Build error message if there were failures
+		if msg.totalFailed > 0 && msg.totalCleaned > 0 {
+			// Partial success
+			var failedInfo strings.Builder
+			for idx, errMsg := range m.cleanupState.failedWorktrees {
+				wt := m.cleanupState.staleWorktrees[idx]
+				failedInfo.WriteString(fmt.Sprintf("\n  • %s (%s)", wt.Branch, errMsg))
+			}
+			m.err = fmt.Errorf("deleted %d worktree(s), %d failed:%s",
+				msg.totalCleaned, msg.totalFailed, failedInfo.String())
+		} else if msg.totalFailed > 0 {
 			// All failed
-			var failedInfo string
-			for i, name := range msg.failedNames {
-				if i < len(msg.failedReasons) {
-					failedInfo += fmt.Sprintf("\n  • %s (%s)", name, msg.failedReasons[i])
-				}
+			var failedInfo strings.Builder
+			for idx, errMsg := range m.cleanupState.failedWorktrees {
+				wt := m.cleanupState.staleWorktrees[idx]
+				failedInfo.WriteString(fmt.Sprintf("\n  • %s (%s)", wt.Branch, errMsg))
 			}
-			m.err = fmt.Errorf("cleanup failed - %d worktree(s) have uncommitted changes:%s", msg.failedCount, failedInfo)
+			m.err = fmt.Errorf("cleanup failed - %d worktree(s):%s",
+				msg.totalFailed, failedInfo.String())
 		} else {
 			m.err = nil
 		}
 
-		// Always refresh worktree list to reflect any successful deletions
+		// Refresh worktree list to reflect deletions
 		if err := m.refreshWorktrees(); err != nil && m.err == nil {
 			m.err = err
 		}
 
-		// Clear cleanup state and return to dashboard
-		m.cleanupState = nil
-		m.currentView = DashboardView
+		// Return to dashboard if all succeeded, stay in CleanupView if failures
+		if msg.totalFailed == 0 {
+			m.cleanupState = nil
+			m.currentView = DashboardView
+		}
+		// else: stay in CleanupView to show failure summary
+
 		return m, nil
 
 	case githubRefreshCompleteMsg:
@@ -290,6 +406,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.deleteState != nil && m.deleteState.currentStep == DeleteStepDeleting {
 			var cmd tea.Cmd
 			m.deleteSpinner, cmd = m.deleteSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
+		// Handle spinner animation for cleanup in progress
+		if m.cleanupState != nil && m.cleanupState.inProgress {
+			var cmd tea.Cmd
+			m.cleanupState.cleanupSpinner, cmd = m.cleanupState.cleanupSpinner.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 

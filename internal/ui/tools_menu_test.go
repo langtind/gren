@@ -123,7 +123,14 @@ func TestHandleToolsKeysCleanupNoStale(t *testing.T) {
 
 func TestRenderCleanupConfirmation(t *testing.T) {
 	m := Model{
-		cleanupState: &CleanupState{},
+		cleanupState: &CleanupState{
+			staleWorktrees: []Worktree{
+				{Branch: "feature/stale1", BranchStatus: "stale", StaleReason: "pr_merged", PRNumber: 95, PRState: "MERGED"},
+				{Branch: "feature/stale2", BranchStatus: "stale", StaleReason: "no_unique_commits"},
+			},
+			selectedIndices: map[int]bool{0: true, 1: true}, // Both selected by default
+			cursorIndex:     0,
+		},
 		worktrees: []Worktree{
 			{Branch: "main", IsMain: true, BranchStatus: "active"},
 			{Branch: "feature/stale1", BranchStatus: "stale", StaleReason: "pr_merged", PRNumber: 95, PRState: "MERGED"},
@@ -173,8 +180,8 @@ func TestRenderCleanupConfirmation(t *testing.T) {
 	})
 
 	t.Run("contains confirmation prompt", func(t *testing.T) {
-		if !strings.Contains(result, "confirm") {
-			t.Error("Should contain confirmation prompt")
+		if !strings.Contains(result, "enter") {
+			t.Error("Should contain enter key prompt for confirmation")
 		}
 	})
 }
@@ -201,14 +208,19 @@ func TestHandleCleanupKeysCancel(t *testing.T) {
 		key  tea.KeyMsg
 	}{
 		{"escape", tea.KeyMsg{Type: tea.KeyEscape}},
-		{"n key", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := Model{
-				currentView:  CleanupView,
-				cleanupState: &CleanupState{},
+				currentView: CleanupView,
+				cleanupState: &CleanupState{
+					staleWorktrees: []Worktree{
+						{Branch: "feature/stale", BranchStatus: "stale"},
+					},
+					selectedIndices: map[int]bool{0: true},
+					cursorIndex:     0,
+				},
 			}
 
 			newModel, _ := m.handleCleanupKeys(tt.key)
@@ -225,19 +237,226 @@ func TestHandleCleanupKeysCancel(t *testing.T) {
 
 func TestHandleCleanupKeysConfirm(t *testing.T) {
 	m := Model{
-		currentView:  CleanupView,
-		cleanupState: &CleanupState{},
+		currentView: CleanupView,
+		cleanupState: &CleanupState{
+			staleWorktrees: []Worktree{
+				{Branch: "feature/stale", BranchStatus: "stale"},
+			},
+			selectedIndices: map[int]bool{0: true},
+			cursorIndex:     0,
+		},
 		worktrees: []Worktree{
 			{Branch: "feature/stale", BranchStatus: "stale"},
 		},
 	}
 
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}}
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
 	_, cmd := m.handleCleanupKeys(msg)
 
 	if cmd == nil {
-		t.Error("'y' should return a cleanup command")
+		t.Error("'enter' should return a cleanup command when items are selected")
 	}
+}
+
+func TestHandleCleanupKeysConfirmNoSelection(t *testing.T) {
+	m := Model{
+		currentView: CleanupView,
+		cleanupState: &CleanupState{
+			staleWorktrees: []Worktree{
+				{Branch: "feature/stale", BranchStatus: "stale"},
+			},
+			selectedIndices: map[int]bool{}, // Nothing selected
+			cursorIndex:     0,
+		},
+	}
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	newModel, cmd := m.handleCleanupKeys(msg)
+
+	// Should not start cleanup when nothing is selected
+	if cmd != nil {
+		t.Error("'enter' should not return a command when nothing is selected")
+	}
+	if newModel.cleanupState.confirmed {
+		t.Error("Should not set confirmed=true when nothing is selected")
+	}
+}
+
+func TestHandleCleanupKeysNavigation(t *testing.T) {
+	tests := []struct {
+		name           string
+		key            tea.KeyMsg
+		startIndex     int
+		expectedIndex  int
+		totalWorktrees int
+	}{
+		{"down arrow", tea.KeyMsg{Type: tea.KeyDown}, 0, 1, 3},
+		{"j key", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}, 0, 1, 3},
+		{"up arrow", tea.KeyMsg{Type: tea.KeyUp}, 1, 0, 3},
+		{"k key", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}, 1, 0, 3},
+		{"down at end", tea.KeyMsg{Type: tea.KeyDown}, 2, 2, 3}, // Should stay at last
+		{"up at start", tea.KeyMsg{Type: tea.KeyUp}, 0, 0, 3},   // Should stay at first
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			staleWorktrees := make([]Worktree, tt.totalWorktrees)
+			for i := 0; i < tt.totalWorktrees; i++ {
+				staleWorktrees[i] = Worktree{Branch: "feature/stale" + string(rune('1'+i)), BranchStatus: "stale"}
+			}
+
+			m := Model{
+				currentView: CleanupView,
+				cleanupState: &CleanupState{
+					staleWorktrees:  staleWorktrees,
+					selectedIndices: map[int]bool{0: true, 1: true, 2: true},
+					cursorIndex:     tt.startIndex,
+				},
+			}
+
+			newModel, _ := m.handleCleanupKeys(tt.key)
+
+			if newModel.cleanupState.cursorIndex != tt.expectedIndex {
+				t.Errorf("%s: expected cursor at %d, got %d", tt.name, tt.expectedIndex, newModel.cleanupState.cursorIndex)
+			}
+		})
+	}
+}
+
+func TestHandleCleanupKeysToggleSelection(t *testing.T) {
+	t.Run("deselect item", func(t *testing.T) {
+		m := Model{
+			currentView: CleanupView,
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/stale1", BranchStatus: "stale"},
+					{Branch: "feature/stale2", BranchStatus: "stale"},
+				},
+				selectedIndices: map[int]bool{0: true, 1: true}, // Both selected
+				cursorIndex:     0,
+			},
+		}
+
+		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+		newModel, _ := m.handleCleanupKeys(msg)
+
+		// Index 0 should be deselected
+		if newModel.cleanupState.selectedIndices[0] {
+			t.Error("Space should deselect item at cursor")
+		}
+		// Index 1 should still be selected
+		if !newModel.cleanupState.selectedIndices[1] {
+			t.Error("Other items should remain selected")
+		}
+	})
+
+	t.Run("select item", func(t *testing.T) {
+		m := Model{
+			currentView: CleanupView,
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/stale1", BranchStatus: "stale"},
+					{Branch: "feature/stale2", BranchStatus: "stale"},
+				},
+				selectedIndices: map[int]bool{1: true}, // Only 1 selected
+				cursorIndex:     0,
+			},
+		}
+
+		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+		newModel, _ := m.handleCleanupKeys(msg)
+
+		// Index 0 should now be selected
+		if !newModel.cleanupState.selectedIndices[0] {
+			t.Error("Space should select item at cursor")
+		}
+		// Index 1 should still be selected
+		if !newModel.cleanupState.selectedIndices[1] {
+			t.Error("Other items should remain selected")
+		}
+	})
+}
+
+func TestCleanupStateInitialization(t *testing.T) {
+	// This tests the initialization in tools_menu.go when 'c' is pressed
+	m := Model{
+		currentView: ToolsView,
+		worktrees: []Worktree{
+			{Branch: "main", IsMain: true, BranchStatus: "active"},
+			{Branch: "feature/stale1", BranchStatus: "stale", StaleReason: "pr_merged"},
+			{Branch: "feature/stale2", BranchStatus: "stale", StaleReason: "no_unique_commits"},
+			{Branch: "feature/current", IsCurrent: true, BranchStatus: "stale"}, // Should be excluded
+		},
+	}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}
+	newModel, _ := m.handleToolsKeys(msg)
+
+	if newModel.cleanupState == nil {
+		t.Fatal("cleanupState should be initialized")
+	}
+
+	// Should have 2 stale worktrees (excluding main and current)
+	if len(newModel.cleanupState.staleWorktrees) != 2 {
+		t.Errorf("Expected 2 stale worktrees, got %d", len(newModel.cleanupState.staleWorktrees))
+	}
+
+	// All should be selected by default
+	if len(newModel.cleanupState.selectedIndices) != 2 {
+		t.Errorf("Expected all 2 worktrees to be selected by default, got %d", len(newModel.cleanupState.selectedIndices))
+	}
+
+	// Cursor should start at 0
+	if newModel.cleanupState.cursorIndex != 0 {
+		t.Errorf("Expected cursor at 0, got %d", newModel.cleanupState.cursorIndex)
+	}
+
+	// Should transition to CleanupView
+	if newModel.currentView != CleanupView {
+		t.Errorf("Expected CleanupView, got %v", newModel.currentView)
+	}
+}
+
+func TestRenderCleanupConfirmationWithSelection(t *testing.T) {
+	m := Model{
+		cleanupState: &CleanupState{
+			staleWorktrees: []Worktree{
+				{Branch: "feature/stale1", BranchStatus: "stale", StaleReason: "pr_merged", PRNumber: 95, PRState: "MERGED"},
+				{Branch: "feature/stale2", BranchStatus: "stale", StaleReason: "no_unique_commits"},
+			},
+			selectedIndices: map[int]bool{0: true, 1: true}, // Both selected
+			cursorIndex:     0,
+		},
+	}
+
+	result := m.renderCleanupConfirmation()
+
+	t.Run("shows selection count", func(t *testing.T) {
+		if !strings.Contains(result, "(2/2 selected)") {
+			t.Error("Should show selection count")
+		}
+	})
+
+	t.Run("shows checkboxes", func(t *testing.T) {
+		if !strings.Contains(result, "[✓]") {
+			t.Error("Should show checked checkbox for selected items")
+		}
+	})
+
+	t.Run("shows cursor indicator", func(t *testing.T) {
+		if !strings.Contains(result, "> ") {
+			t.Error("Should show cursor indicator")
+		}
+	})
+
+	t.Run("shows navigation help", func(t *testing.T) {
+		if !strings.Contains(result, "space") {
+			t.Error("Should show space toggle help")
+		}
+		if !strings.Contains(result, "navigate") {
+			t.Error("Should show navigation help")
+		}
+	})
 }
 
 func TestGetToolActions(t *testing.T) {

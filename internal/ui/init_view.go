@@ -13,6 +13,8 @@ func (m Model) initView() string {
 		return m.renderAnalysisStep()
 	case InitStepRecommendations:
 		return m.renderRecommendationsStep()
+	case InitStepGrenConfig:
+		return m.renderGrenConfigStep()
 	case InitStepCustomization:
 		return m.renderCustomizationStep()
 	case InitStepPreview:

@@ -226,22 +226,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		}
 	}
 
-	// Symlink .gren/ configuration to worktree if it exists
-	repoRoot, err := wm.getRepoRoot()
-	if err == nil {
-		srcGrenDir := filepath.Join(repoRoot, ".gren")
-		if _, err := os.Stat(srcGrenDir); err == nil {
-			destGrenDir := filepath.Join(worktreePath, ".gren")
-			// Create symlink (relative path for portability)
-			relPath, err := filepath.Rel(worktreePath, srcGrenDir)
-			if err == nil {
-				if err := os.Symlink(relPath, destGrenDir); err != nil {
-					// Log but don't fail for this
-					logging.Warn("Failed to symlink .gren configuration: %v", err)
-				}
-			}
-		}
-	}
+	// Note: .gren/ configuration is tracked in git and automatically available in worktrees
 
 	// Run post-create hook if it exists and is configured
 	if cfg.PostCreateHook != "" {
@@ -859,14 +844,7 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		}
 	}
 
-	// 2. Remove .gren symlink if it exists (created by gren during worktree creation)
-	// This prevents "untracked files" errors during removal
-	grenSymlink := filepath.Join(targetWorktree.Path, ".gren")
-	if info, err := os.Lstat(grenSymlink); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		os.Remove(grenSymlink)
-	}
-
-	// 3. Remove worktree using git
+	// 2. Remove worktree using git
 	// Note: --force is required for worktrees with submodules (even after deinit)
 	var cmd *exec.Cmd
 	if hasSubmodules {

@@ -461,7 +461,9 @@ func (c *CLI) handleInit(args []string) error {
 
 	logging.Info("CLI init: project=%s", projectName)
 
-	result := config.Initialize(projectName)
+	// CLI defaults to tracking .gren in git (TUI has interactive prompt)
+	trackGrenInGit := true
+	result := config.Initialize(projectName, trackGrenInGit)
 	if result.Error != nil {
 		logging.Error("CLI init failed: %v", result.Error)
 		return fmt.Errorf("initialization failed: %w", result.Error)

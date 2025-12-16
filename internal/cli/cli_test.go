@@ -511,7 +511,7 @@ func TestHandleCreateSuccess(t *testing.T) {
 
 	// Initialize gren with unique project name
 	projectName := filepath.Base(dir)
-	config.Initialize(projectName)
+	config.Initialize(projectName, true)
 
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
@@ -541,7 +541,7 @@ func TestHandleCreateWithExistingBranch(t *testing.T) {
 
 	// Initialize gren with unique project name
 	projectName := filepath.Base(dir)
-	config.Initialize(projectName)
+	config.Initialize(projectName, true)
 
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
@@ -564,7 +564,7 @@ func TestHandleCreateWithBaseBranch(t *testing.T) {
 
 	// Initialize gren with unique project name
 	projectName := filepath.Base(dir)
-	config.Initialize(projectName)
+	config.Initialize(projectName, true)
 
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
@@ -591,7 +591,7 @@ func TestHandleDeleteWithForce(t *testing.T) {
 
 	// Initialize gren with unique project name
 	projectName := filepath.Base(dir)
-	config.Initialize(projectName)
+	config.Initialize(projectName, true)
 
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
@@ -639,7 +639,7 @@ func TestHandleNavigateSuccess(t *testing.T) {
 
 	// Initialize gren with unique project name
 	projectName := filepath.Base(dir)
-	config.Initialize(projectName)
+	config.Initialize(projectName, true)
 
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()

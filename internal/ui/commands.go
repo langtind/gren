@@ -564,8 +564,14 @@ func (m Model) runInitialization() tea.Cmd {
 			projectName = m.repoInfo.Name
 		}
 
+		// Get trackGrenInGit from init state (default to true if not set)
+		trackGrenInGit := true
+		if m.initState != nil {
+			trackGrenInGit = m.initState.trackGrenInGit
+		}
+
 		// Use the same initialization logic as CLI
-		result := config.Initialize(projectName)
+		result := config.Initialize(projectName, trackGrenInGit)
 		if result.Error != nil {
 			return initExecutionCompleteMsg{err: result.Error}
 		}
@@ -832,72 +838,75 @@ func (m Model) pruneWorktrees() tea.Cmd {
 	}
 }
 
-// cleanupStaleWorktrees deletes all stale worktrees (merged branches, gone remotes)
+// cleanupStaleWorktrees initiates the cleanup and sends start message
 func (m Model) cleanupStaleWorktrees() tea.Cmd {
 	return func() tea.Msg {
-		logging.Info("cleanupStaleWorktrees: starting cleanup")
+		if m.cleanupState == nil {
+			logging.Error("cleanupStaleWorktrees: cleanup state is nil")
+			return cleanupFinishedMsg{totalCleaned: 0, totalFailed: 0}
+		}
 
-		// Find all stale worktrees
-		var staleWorktrees []Worktree
-		for _, wt := range m.worktrees {
-			if wt.BranchStatus == "stale" && !wt.IsCurrent && !wt.IsMain {
-				staleWorktrees = append(staleWorktrees, wt)
+		totalCount := len(m.cleanupState.staleWorktrees)
+		logging.Info("cleanupStaleWorktrees: starting cleanup of %d worktrees", totalCount)
+
+		return cleanupStartedMsg{totalCount: totalCount}
+	}
+}
+
+// deleteNextWorktree deletes a single worktree and returns completion message
+func (m Model) deleteNextWorktree(index int) tea.Cmd {
+	return func() tea.Msg {
+		if m.cleanupState == nil || index >= len(m.cleanupState.staleWorktrees) {
+			// Safety check - shouldn't happen
+			logging.Error("deleteNextWorktree: invalid state or index")
+			totalCleaned := 0
+			totalFailed := 0
+			if m.cleanupState != nil {
+				totalCleaned = m.cleanupState.totalCleaned
+				totalFailed = m.cleanupState.totalFailed
+			}
+			return cleanupFinishedMsg{
+				totalCleaned: totalCleaned,
+				totalFailed:  totalFailed,
 			}
 		}
 
-		if len(staleWorktrees) == 0 {
-			logging.Info("cleanupStaleWorktrees: no stale worktrees found")
-			return staleCleanupCompleteMsg{
-				err:          nil,
-				cleanedCount: 0,
-				cleanedNames: nil,
+		wt := m.cleanupState.staleWorktrees[index]
+		logging.Debug("deleteNextWorktree: deleting index %d: %s (%s)", index, wt.Name, wt.Path)
+
+		// Perform deletion using git worktree remove
+		cmd := exec.Command("git", "worktree", "remove", wt.Path)
+		output, err := cmd.CombinedOutput()
+
+		// Build completion message
+		if err != nil {
+			logging.Error("deleteNextWorktree: failed to delete %s: %v (output: %s)", wt.Name, err, string(output))
+
+			// Parse error reason for user-friendly message
+			outputStr := string(output)
+			var reason string
+			if strings.Contains(outputStr, "modified or untracked files") {
+				reason = "has uncommitted changes"
+			} else if strings.Contains(outputStr, "is not a working tree") {
+				reason = "not a valid worktree"
+			} else {
+				reason = "deletion failed"
+			}
+
+			return cleanupItemCompleteMsg{
+				worktreeIndex: index,
+				worktreeName:  wt.Branch,
+				success:       false,
+				errorMsg:      reason,
 			}
 		}
 
-		logging.Info("cleanupStaleWorktrees: found %d stale worktrees", len(staleWorktrees))
-
-		// Delete each stale worktree
-		var cleanedNames []string
-		var failedNames []string
-		var failedReasons []string
-		var lastErr error
-
-		for _, wt := range staleWorktrees {
-			logging.Debug("cleanupStaleWorktrees: deleting worktree %s (reason: %s)", wt.Name, wt.StaleReason)
-
-			// Use git worktree remove
-			cmd := exec.Command("git", "worktree", "remove", wt.Path)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				logging.Error("cleanupStaleWorktrees: failed to delete %s: %v (output: %s)", wt.Name, err, string(output))
-				lastErr = fmt.Errorf("failed to delete worktree %s: %w", wt.Name, err)
-
-				// Parse the error reason
-				outputStr := string(output)
-				var reason string
-				if strings.Contains(outputStr, "modified or untracked files") {
-					reason = "has uncommitted changes"
-				} else if strings.Contains(outputStr, "is not a working tree") {
-					reason = "not a valid worktree"
-				} else {
-					reason = "deletion failed"
-				}
-				failedNames = append(failedNames, wt.Branch)
-				failedReasons = append(failedReasons, reason)
-				continue
-			}
-
-			logging.Info("cleanupStaleWorktrees: successfully deleted %s", wt.Name)
-			cleanedNames = append(cleanedNames, wt.Branch)
-		}
-
-		return staleCleanupCompleteMsg{
-			err:           lastErr,
-			cleanedCount:  len(cleanedNames),
-			cleanedNames:  cleanedNames,
-			failedCount:   len(failedNames),
-			failedNames:   failedNames,
-			failedReasons: failedReasons,
+		logging.Info("deleteNextWorktree: successfully deleted %s", wt.Name)
+		return cleanupItemCompleteMsg{
+			worktreeIndex: index,
+			worktreeName:  wt.Branch,
+			success:       true,
+			errorMsg:      "",
 		}
 	}
 }
@@ -979,7 +988,13 @@ func (m Model) generateAISetupScript() tea.Cmd {
 			contextBuilder.WriteString(fmt.Sprintf("\nProject files found: %s\n", strings.Join(foundFiles, ", ")))
 		}
 
-		contextBuilder.WriteString(`
+		// Add .gren symlink instruction if it should be gitignored
+		grenSymlinkNote := ""
+		if m.initState != nil && !m.initState.trackGrenInGit {
+			grenSymlinkNote = "\n7. Symlink .gren/ configuration directory (it's gitignored, so symlink keeps it in sync)"
+		}
+
+		contextBuilder.WriteString(fmt.Sprintf(`
 The script receives these arguments:
 - $1 = WORKTREE_PATH (absolute path to the new worktree)
 - $2 = BRANCH_NAME (name of the branch)
@@ -994,7 +1009,7 @@ Requirements for the script:
 3. Symlink gitignored config directories (like .claude/) if they exist
 4. Install dependencies using the detected package manager
 5. Handle direnv: run "direnv allow" if .envrc exists and direnv is installed
-6. Be idempotent (safe to run multiple times)
+6. Be idempotent (safe to run multiple times)%s
 
 Example symlink section:
   # Symlink environment files
@@ -1005,7 +1020,7 @@ Example symlink section:
   [ -d "$REPO_ROOT/.claude" ] && ln -sf "$REPO_ROOT/.claude" "$WORKTREE_PATH/.claude"
 
 Output ONLY the bash script content, no explanations. Start with #!/usr/bin/env bash
-`)
+`, grenSymlinkNote))
 
 		// Run Claude CLI with the prompt
 		cmd := exec.Command(claudePath, "-p", contextBuilder.String())

@@ -83,13 +83,26 @@ type pruneCompleteMsg struct {
 	prunedPaths []string
 }
 
-type staleCleanupCompleteMsg struct {
-	err           error
-	cleanedCount  int
-	cleanedNames  []string
-	failedCount   int
-	failedNames   []string
-	failedReasons []string // "has uncommitted changes", etc.
+// New cleanup progress messages for incremental feedback
+type cleanupStartedMsg struct {
+	totalCount int
+}
+
+type cleanupItemStartMsg struct {
+	worktreeIndex int    // Index in staleWorktrees array
+	worktreeName  string // Branch name for logging
+}
+
+type cleanupItemCompleteMsg struct {
+	worktreeIndex int
+	worktreeName  string
+	success       bool
+	errorMsg      string // Human-readable error (e.g., "has uncommitted changes")
+}
+
+type cleanupFinishedMsg struct {
+	totalCleaned int
+	totalFailed  int
 }
 
 type aiScriptGeneratedMsg struct {

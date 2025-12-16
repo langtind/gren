@@ -78,7 +78,7 @@ func TestDetectPackageManager(t *testing.T) {
 
 			// Create default config and detect
 			config, _ := NewDefaultConfig("test-project", tempDir)
-			config, _ = detectProjectSettings(config)
+			config, _ = detectProjectSettings(config, true)
 
 			if config.PackageManager != tt.expected {
 				t.Errorf("PackageManager = %q, want %q", config.PackageManager, tt.expected)
@@ -108,7 +108,7 @@ func TestDetectEnvFiles(t *testing.T) {
 	os.WriteFile(".env.test.local", []byte("TEST=value"), 0644)
 
 	config, _ := NewDefaultConfig("test", tempDir)
-	_, detected := detectProjectSettings(config)
+	_, detected := detectProjectSettings(config, true)
 
 	// Should detect .env.local (other patterns may or may not match depending on glob)
 	found := false
@@ -139,7 +139,7 @@ func TestDetectClaudeDir(t *testing.T) {
 		os.WriteFile(".gitignore", []byte(".claude\n"), 0644)
 
 		config, _ := NewDefaultConfig("test", tempDir)
-		_, detected := detectProjectSettings(config)
+		_, detected := detectProjectSettings(config, true)
 
 		if !detected.ClaudeDir {
 			t.Error("Expected ClaudeDir to be true")
@@ -153,7 +153,7 @@ func TestDetectClaudeDir(t *testing.T) {
 		// No .gitignore
 
 		config, _ := NewDefaultConfig("test", tempDir)
-		_, detected := detectProjectSettings(config)
+		_, detected := detectProjectSettings(config, true)
 
 		if detected.ClaudeDir {
 			t.Error("Expected ClaudeDir to be false when not gitignored")
@@ -178,7 +178,7 @@ func TestInitialize(t *testing.T) {
 		exec.Command("git", "config", "user.email", "test@test.com").Run()
 		exec.Command("git", "config", "user.name", "Test User").Run()
 
-		result := Initialize("test-project")
+		result := Initialize("test-project", true)
 
 		if !result.Success {
 			t.Errorf("Initialize() failed: %v", result.Error)
@@ -252,7 +252,7 @@ func TestInitialize(t *testing.T) {
 		defer os.Chdir(originalDir)
 		os.Chdir(tempDir)
 
-		result := Initialize("")
+		result := Initialize("", true)
 
 		if result.Success {
 			t.Error("Initialize() should fail with empty project name")
@@ -285,7 +285,7 @@ func TestInitialize(t *testing.T) {
 		hookPath := filepath.Join(".gren", "post-create.sh")
 		os.WriteFile(hookPath, []byte(customHook), 0755)
 
-		result := Initialize("test-project")
+		result := Initialize("test-project", true)
 
 		if !result.Success {
 			t.Errorf("Initialize() failed: %v", result.Error)
@@ -325,7 +325,7 @@ func TestInitialize(t *testing.T) {
 		readmePath := filepath.Join(".gren", "README.md")
 		os.WriteFile(readmePath, []byte(customReadme), 0644)
 
-		result := Initialize("test-project")
+		result := Initialize("test-project", true)
 
 		if !result.Success {
 			t.Errorf("Initialize() failed: %v", result.Error)
@@ -430,7 +430,7 @@ func TestDetectConfigFiles(t *testing.T) {
 	os.WriteFile(".nvmrc", []byte("18"), 0644)
 
 	config, _ := NewDefaultConfig("test", tempDir)
-	_, detected := detectProjectSettings(config)
+	_, detected := detectProjectSettings(config, true)
 
 	if len(detected.ConfigFiles) != 2 {
 		t.Errorf("Expected 2 config files, got %d: %v", len(detected.ConfigFiles), detected.ConfigFiles)
@@ -453,7 +453,7 @@ func TestDetectClaudeMd(t *testing.T) {
 	os.WriteFile("CLAUDE.md", []byte("# Instructions"), 0644)
 
 	config, _ := NewDefaultConfig("test", tempDir)
-	_, detected := detectProjectSettings(config)
+	_, detected := detectProjectSettings(config, true)
 
 	if !detected.ClaudeMd {
 		t.Error("Expected ClaudeMd to be true")

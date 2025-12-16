@@ -18,7 +18,7 @@ type InitResult struct {
 }
 
 // Initialize sets up gren configuration for the current repository
-func Initialize(projectName string) InitResult {
+func Initialize(projectName string, trackGrenInGit bool) InitResult {
 	result := InitResult{}
 
 	// Get the repository root (main worktree path)
@@ -35,6 +35,15 @@ func Initialize(projectName string) InitResult {
 		return result
 	}
 
+	// Handle .gitignore based on user choice
+	if !trackGrenInGit {
+		// Add .gren to .gitignore if user wants to keep it local
+		if err := addToGitignore(".gren"); err != nil {
+			result.Error = fmt.Errorf("failed to add .gren to .gitignore: %w", err)
+			return result
+		}
+	}
+
 	// Create default configuration
 	config, err := NewDefaultConfig(projectName, repoRoot)
 	if err != nil {
@@ -42,8 +51,8 @@ func Initialize(projectName string) InitResult {
 		return result
 	}
 
-	// Detect package manager and files to symlink
-	config, detected := detectProjectSettings(config)
+	// Detect package manager and files to symlink (including .gren if gitignored)
+	config, detected := detectProjectSettings(config, trackGrenInGit)
 
 	// Save configuration
 	manager := NewManager()
@@ -83,10 +92,11 @@ type DetectedFiles struct {
 	ConfigFiles []string // e.g. .envrc, .nvmrc
 	ClaudeDir   bool     // .claude directory exists and is gitignored
 	ClaudeMd    bool     // CLAUDE.md exists and is gitignored
+	GrenDir     bool     // .gren directory should be symlinked (if gitignored)
 }
 
 // detectProjectSettings analyzes the project and adjusts configuration
-func detectProjectSettings(config *Config) (*Config, DetectedFiles) {
+func detectProjectSettings(config *Config, trackGrenInGit bool) (*Config, DetectedFiles) {
 	detected := DetectedFiles{}
 
 	// Detect package manager
@@ -127,6 +137,11 @@ func detectProjectSettings(config *Config) (*Config, DetectedFiles) {
 	// Check for CLAUDE.md (if gitignored)
 	if fileExists("CLAUDE.md") && isGitIgnored("CLAUDE.md") {
 		detected.ClaudeMd = true
+	}
+
+	// Check if .gren should be symlinked (if user chose to gitignore it)
+	if !trackGrenInGit && dirExists(".gren") && isGitIgnored(".gren") {
+		detected.GrenDir = true
 	}
 
 	return config, detected
@@ -215,6 +230,17 @@ func generateHookContentWithSymlinks(config *Config, detected DetectedFiles) str
 		builder.WriteString("    echo \"🔗 Symlinking CLAUDE.md...\"\n")
 		builder.WriteString("    ln -sf \"$REPO_ROOT/CLAUDE.md\" \"$WORKTREE_PATH/CLAUDE.md\"\n")
 		builder.WriteString("    echo \"   ✓ CLAUDE.md\"\n")
+		builder.WriteString("fi\n")
+		builder.WriteString("echo \"\"\n\n")
+	}
+
+	// Symlink .gren directory (if gitignored)
+	if detected.GrenDir {
+		builder.WriteString("# Symlink .gren configuration\n")
+		builder.WriteString("if [ -d \"$REPO_ROOT/.gren\" ]; then\n")
+		builder.WriteString("    echo \"🔗 Symlinking .gren...\"\n")
+		builder.WriteString("    ln -sf \"$REPO_ROOT/.gren\" \"$WORKTREE_PATH/.gren\"\n")
+		builder.WriteString("    echo \"   ✓ .gren\"\n")
 		builder.WriteString("fi\n")
 		builder.WriteString("echo \"\"\n\n")
 	}
@@ -320,4 +346,50 @@ func getRepoRoot() (string, error) {
 		return "", fmt.Errorf("not a git repository: %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// addToGitignore adds a pattern to .gitignore if it's not already there
+func addToGitignore(pattern string) error {
+	gitignorePath := ".gitignore"
+
+	// Check if pattern already exists
+	if fileExists(gitignorePath) {
+		content, err := os.ReadFile(gitignorePath)
+		if err != nil {
+			return err
+		}
+
+		// Check if pattern already exists (with or without trailing slash)
+		patterns := []string{pattern, pattern + "/", "/" + pattern, "/" + pattern + "/"}
+		gitignoreStr := string(content)
+		for _, p := range patterns {
+			if strings.Contains(gitignoreStr, p) {
+				return nil // Pattern already exists
+			}
+		}
+	}
+
+	// Append pattern to .gitignore
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Add a newline before the pattern if file doesn't end with one
+	if fileExists(gitignorePath) {
+		content, _ := os.ReadFile(gitignorePath)
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			if _, err := f.WriteString("\n"); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Write the pattern
+	if _, err := f.WriteString(fmt.Sprintf("%s\n", pattern)); err != nil {
+		return err
+	}
+
+	return nil
 }
