@@ -51,7 +51,7 @@ func (m Model) renderHelpContent() string {
 			}{
 				{"n", "New worktree"},
 				{"d", "Delete worktree"},
-				{"p", "Prune missing worktrees"},
+				{"t", "Tools menu (cleanup, prune, refresh)"},
 			},
 		},
 		{
@@ -122,6 +122,8 @@ func (m Model) renderHelpContent() string {
 		{"?N", "Untracked files"},
 		{"↑N", "Unpushed commits"},
 		{"✓", "Clean (no changes)"},
+		{"💤", "Stale branch (merged/closed PR)"},
+		{"#N", "Pull request number"},
 	}
 
 	symbolStyle := lipgloss.NewStyle().
