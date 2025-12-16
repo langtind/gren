@@ -22,6 +22,9 @@ Just as git uses branches to organize code, gren helps you manage the physical d
 - 🎨 Clean, modern terminal design with responsive layout
 - ⌨️ Keyboard-driven navigation with built-in help overlay
 - 🔍 Search and filter branches
+- 💤 Stale worktree detection (merged branches, closed PRs)
+- 🔗 GitHub CLI integration for PR status and badges
+- 🧹 Bulk cleanup of stale and missing worktrees
 
 ## Installation
 
@@ -91,7 +94,7 @@ This enables:
    - `g` Navigate to worktree folder (requires shell integration)
    - `n` Create new worktree
    - `d` Delete worktree
-   - `p` Prune stale worktrees
+   - `t` Tools menu (cleanup stale, prune missing, refresh)
    - `c` Configure gren
    - `i` Initialize gren configuration
    - `?` Show help overlay
@@ -104,6 +107,22 @@ gren          # Launch interactive TUI
 gren --help   # Show help and keyboard shortcuts
 gren --version # Show version information
 ```
+
+## Status Indicators
+
+The TUI displays various indicators to show worktree status:
+
+| Symbol | Description |
+|--------|-------------|
+| `●` | Current worktree (you are here) |
+| `[main]` | Main worktree (original repo) |
+| `+N` | Staged files (ready to commit) |
+| `~N` | Modified files |
+| `?N` | Untracked files |
+| `↑N` | Unpushed commits |
+| `✓` | Clean (no changes) |
+| `💤` | Stale branch (merged/closed PR) |
+| `#N` | Pull request number |
 
 ## CLI Examples
 
@@ -146,6 +165,24 @@ gren create -n feature-123 -existing
 ```
 
 The post-create hook runs automatically after worktree creation.
+
+### Clean up stale worktrees
+
+```bash
+# Preview what would be deleted
+gren cleanup --dry-run
+
+# Delete all stale worktrees (with confirmation)
+gren cleanup
+
+# Delete without confirmation
+gren cleanup -f
+
+# Force delete (ignore uncommitted changes)
+gren cleanup --force-delete
+```
+
+Stale worktrees are branches that have been merged, have closed PRs, or no longer exist on remote.
 
 ## Development
 
