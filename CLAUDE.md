@@ -160,10 +160,77 @@ The threshold is defined as `NarrowWidthThreshold = 160` in `internal/ui/dashboa
 ## Release Process
 
 Releases are automated via GitHub Actions:
-1. Push a git tag starting with `v` (e.g., `v0.1.4`)
-2. GitHub Actions builds binaries for multiple platforms
-3. Creates GitHub release with binaries and checksums
-4. Update `../homebrew-tap/Formula/gren.rb` with new version and checksums
+
+### 1. Create and push tag
+```bash
+# View commits since last tag
+git log --oneline $(git describe --tags --abbrev=0)..HEAD
+
+# Create annotated tag with changelog
+git tag -a v0.X.0 -m "v0.X.0
+
+Features:
+- Feature description
+
+Fixes:
+- Fix description
+"
+
+# Push branch and tag
+git push origin main && git push origin v0.X.0
+```
+
+### 2. Update GitHub release notes
+After GitHub Actions completes, update with detailed changelog:
+```bash
+gh release edit v0.X.0 --notes "$(cat <<'EOF'
+## What's New
+
+### 🆕 Feature Name
+- Description
+
+## Improvements
+- Improvement description
+
+## Bug Fixes
+- Fix description
+
+## Installation
+
+### Homebrew (macOS)
+\`\`\`bash
+brew tap langtind/tap
+brew install gren
+# or upgrade
+brew upgrade gren
+\`\`\`
+
+### Go
+\`\`\`bash
+go install github.com/langtind/gren@v0.X.0
+\`\`\`
+
+**Full Changelog**: https://github.com/langtind/gren/compare/v0.PREV.0...v0.X.0
+EOF
+)"
+```
+
+### 3. Update Homebrew tap
+```bash
+# Get checksums
+gh release download v0.X.0 --pattern checksums.txt --output -
+
+# Update ../homebrew-tap/Formula/gren.rb with:
+# - New version number
+# - SHA256 for darwin-arm64.tar.gz
+# - SHA256 for darwin-amd64.tar.gz
+
+# Commit and push
+cd ../homebrew-tap
+git add Formula/gren.rb
+git commit -m "Update gren to v0.X.0"
+git push
+```
 
 ## Dependencies
 
