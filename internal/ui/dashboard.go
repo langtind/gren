@@ -98,7 +98,11 @@ func (m Model) renderHeader() string {
 
 	// Line 4: Worktree count
 	if len(m.worktrees) > 0 {
-		infoLines = append(infoLines, HeaderInfoStyle.Render(fmt.Sprintf("%d worktrees", len(m.worktrees))))
+		worktreeText := "worktree"
+		if len(m.worktrees) > 1 {
+			worktreeText = "worktrees"
+		}
+		infoLines = append(infoLines, HeaderInfoStyle.Render(fmt.Sprintf("%d %s", len(m.worktrees), worktreeText)))
 	} else {
 		infoLines = append(infoLines, "")
 	}
