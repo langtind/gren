@@ -1,0 +1,11 @@
+{
+  "main_worktree": "/Users/arild/Developer/Private/gren",
+  "worktree_dir": "/Users/arild/Developer/Private/gren-worktrees",
+  "copy_patterns": [
+    ".env*",
+    ".claude/**/*"
+  ],
+  "package_manager": "auto",
+  "post_create_hook": ".gren/post-create.sh",
+  "version": "1.0.0"
+}
