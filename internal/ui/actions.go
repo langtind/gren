@@ -160,27 +160,10 @@ func (m Model) executeAction(action PostCreateAction, worktreePath string) error
 		return nil
 	}
 
+	// Note: Claude Code is handled specially in handlers.go using launchClaudeInWorktree()
+	// which quits the TUI and lets the shell wrapper launch claude
+
 	cmd := exec.Command(action.Command, action.Args...)
-
-	// For Claude Code, we need to handle it specially since it's a TUI app
-	if action.Command == "claude" {
-		// Check if the worktree path exists
-		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-			return fmt.Errorf("worktree path does not exist: %s", worktreePath)
-		}
-
-		// Use 'open' to launch a new terminal window with claude
-		// This works with the default terminal app (Terminal, iTerm, Warp, etc.)
-		script := fmt.Sprintf("cd '%s' && claude", worktreePath)
-		cmd = exec.Command("osascript", "-e", fmt.Sprintf(`
-			tell application "Terminal"
-				do script "%s"
-				activate
-			end tell
-		`, script))
-
-		logging.Debug("Executing Claude via Terminal in: %s", worktreePath)
-	}
 
 	logging.Debug("Executing command: %s %v", action.Command, action.Args)
 

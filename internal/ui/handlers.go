@@ -579,6 +579,12 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					logging.Info("CreateView: navigating to worktree: %s", worktreePath)
 					return m, m.navigateToWorktree(worktreePath)
 				}
+				// Handle claude specially - quit TUI and launch claude in the worktree
+				if action.Command == "claude" {
+					worktreePath := m.getWorktreePath(m.createState.branchName)
+					logging.Info("CreateView: launching Claude Code in: %s", worktreePath)
+					return m, m.launchClaudeInWorktree(worktreePath)
+				}
 				// Execute other actions normally
 				if action.Command != "" {
 					if err := m.executeAction(action, m.getWorktreePath(m.createState.branchName)); err != nil {
@@ -810,6 +816,11 @@ func (m Model) handleOpenInKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if action.Command == "navigate" {
 				logging.Info("OpenInView: navigating to worktree: %s", m.openInState.worktreePath)
 				return m, m.navigateToWorktree(m.openInState.worktreePath)
+			}
+			// Handle claude specially - quit TUI and launch claude in the worktree
+			if action.Command == "claude" {
+				logging.Info("OpenInView: launching Claude Code in: %s", m.openInState.worktreePath)
+				return m, m.launchClaudeInWorktree(m.openInState.worktreePath)
 			}
 			// Execute other actions normally
 			if action.Command != "" {

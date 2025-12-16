@@ -933,6 +933,26 @@ func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
 	}
 }
 
+// launchClaudeInWorktree writes cd + claude command to temp file and quits TUI
+// This allows Claude Code to start in the worktree directory after gren exits
+func (m Model) launchClaudeInWorktree(worktreePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Write cd + claude command to temp file (same mechanism as navigate)
+		tempFile := "/tmp/gren_navigate"
+		command := fmt.Sprintf("cd \"%s\" && claude", worktreePath)
+
+		logging.Info("launchClaudeInWorktree: writing command to %s", tempFile)
+
+		if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
+			logging.Error("launchClaudeInWorktree: failed to write command: %v", err)
+			return fmt.Errorf("failed to write claude command: %w", err)
+		}
+
+		// Quit the TUI to allow wrapper script to execute the command
+		return tea.Quit()
+	}
+}
+
 // generateAISetupScript generates a setup script using Claude CLI
 func (m Model) generateAISetupScript() tea.Cmd {
 	return func() tea.Msg {
