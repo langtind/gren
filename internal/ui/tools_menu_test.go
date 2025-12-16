@@ -295,7 +295,8 @@ func TestHandleCleanupKeysNavigation(t *testing.T) {
 		{"up arrow", tea.KeyMsg{Type: tea.KeyUp}, 1, 0, 3},
 		{"k key", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}, 1, 0, 3},
 		{"down at end", tea.KeyMsg{Type: tea.KeyDown}, 2, 2, 3}, // Should stay at last
-		{"up at start", tea.KeyMsg{Type: tea.KeyUp}, 0, 0, 3},   // Should stay at first
+		{"up at start", tea.KeyMsg{Type: tea.KeyUp}, 0, -1, 3},  // Should go to force delete option
+		{"up at force", tea.KeyMsg{Type: tea.KeyUp}, -1, -1, 3}, // Should stay at force delete (top)
 	}
 
 	for _, tt := range tests {

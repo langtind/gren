@@ -232,6 +232,17 @@ git commit -m "Update gren to v0.X.0"
 git push
 ```
 
+## Debugging
+
+### Log File Location
+- **macOS**: `~/Library/Logs/gren/gren.log`
+- **Linux**: `~/.local/state/gren/logs/gren.log`
+
+View recent logs:
+```bash
+tail -100 ~/Library/Logs/gren/gren.log  # macOS
+```
+
 ## Dependencies
 
 - **Bubble Tea**: TUI framework - handles all terminal input/output and state management

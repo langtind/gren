@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/langtind/gren/internal/logging"
 )
 
 // getAvailableActions returns a list of available post-create actions
@@ -167,27 +169,28 @@ func (m Model) executeAction(action PostCreateAction, worktreePath string) error
 			return fmt.Errorf("worktree path does not exist: %s", worktreePath)
 		}
 
-		// Since Warp doesn't support CLI automation yet, use simple open command
-		// This will open a new terminal window and run the command
-		terminalScript := fmt.Sprintf("cd \"%s\" && claude", worktreePath)
-		cmd = exec.Command("osascript", "-e", fmt.Sprintf(`tell application "Terminal"
-			do script "%s"
-			activate
-		end tell`, terminalScript))
+		// Use 'open' to launch a new terminal window with claude
+		// This works with the default terminal app (Terminal, iTerm, Warp, etc.)
+		script := fmt.Sprintf("cd '%s' && claude", worktreePath)
+		cmd = exec.Command("osascript", "-e", fmt.Sprintf(`
+			tell application "Terminal"
+				do script "%s"
+				activate
+			end tell
+		`, script))
 
-		fmt.Printf("DEBUG: Executing Claude via Terminal in: %s\n", worktreePath)
+		logging.Debug("Executing Claude via Terminal in: %s", worktreePath)
 	}
 
-	// Debug: Log command execution
-	fmt.Printf("DEBUG: Executing command: %s %v\n", action.Command, action.Args)
+	logging.Debug("Executing command: %s %v", action.Command, action.Args)
 
 	err := cmd.Start()
 	if err != nil {
-		fmt.Printf("DEBUG: Command failed: %v\n", err)
+		logging.Error("Command failed: %v", err)
 		return err
 	}
 
-	fmt.Printf("DEBUG: Command started successfully\n")
+	logging.Debug("Command started successfully")
 	return nil
 }
 
