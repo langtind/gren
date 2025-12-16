@@ -53,7 +53,7 @@ var (
 	DashboardMainTagColor     = ColorTextSubtle  // [main] tag - slightly dimmer
 
 	// Header color
-	DashboardHeaderColor = ColorTextMuted
+	DashboardHeaderColor = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#ffffff"} // White
 )
 
 // Legacy aliases for backward compatibility
@@ -99,9 +99,6 @@ var (
 	TableHeaderStyle = lipgloss.NewStyle().
 				Foreground(DashboardHeaderColor).
 				Bold(true).
-				BorderStyle(lipgloss.NormalBorder()).
-				BorderBottom(true).
-				BorderForeground(ColorBorderDim).
 				Padding(0, 1)
 
 	TableRowStyle = lipgloss.NewStyle().
@@ -194,7 +191,7 @@ var (
 	FooterBarStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderTop(true).
-			BorderForeground(ColorBorderDim).
+			BorderForeground(ColorBorder).
 			Padding(0, 1)
 
 	HelpKeyStyle = lipgloss.NewStyle().
