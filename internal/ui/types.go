@@ -220,6 +220,7 @@ type CleanupState struct {
 	selectedIndices     map[int]bool   // Which worktrees are selected for deletion
 	selectedIndicesList []int          // Sorted list of selected indices (built when cleanup starts)
 	cursorIndex         int            // Current cursor position in selection list
+	forceDelete         bool           // Force delete even with uncommitted changes
 	inProgress          bool           // Cleanup currently running
 	currentIndex        int            // Index being deleted (-1 = none)
 	deletedIndices      map[int]bool   // Successfully deleted indices

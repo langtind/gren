@@ -810,7 +810,7 @@ func (wm *WorktreeManager) isRemoteBranchGone(branch string) bool {
 }
 
 // DeleteWorktree deletes a worktree by name or path
-func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string) error {
+func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string, force bool) error {
 	worktrees, err := wm.ListWorktrees(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list worktrees: %w", err)
@@ -846,15 +846,19 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 
 	// 2. Remove worktree using git
 	// Note: --force is required for worktrees with submodules (even after deinit)
+	// or when force parameter is true (to ignore uncommitted changes)
 	var cmd *exec.Cmd
-	if hasSubmodules {
+	if hasSubmodules || force {
 		cmd = exec.Command("git", "worktree", "remove", "--force", targetWorktree.Path)
+		if force {
+			logging.Debug("DeleteWorktree: using --force flag (uncommitted changes will be ignored)")
+		}
 	} else {
 		cmd = exec.Command("git", "worktree", "remove", targetWorktree.Path)
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to remove worktree '%s': %w\n\nOutput: %s\n\nIf the worktree has uncommitted changes, commit or stash them first.",
+		return fmt.Errorf("failed to remove worktree '%s': %w\n\nOutput: %s\n\nIf the worktree has uncommitted changes, commit or stash them first, or use force delete.",
 			targetWorktree.Name, err, string(output))
 	}
 

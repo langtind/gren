@@ -875,7 +875,13 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 		logging.Debug("deleteNextWorktree: deleting index %d: %s (%s)", index, wt.Name, wt.Path)
 
 		// Perform deletion using git worktree remove
-		cmd := exec.Command("git", "worktree", "remove", wt.Path)
+		args := []string{"worktree", "remove"}
+		if m.cleanupState.forceDelete {
+			args = append(args, "--force")
+			logging.Debug("deleteNextWorktree: using --force flag")
+		}
+		args = append(args, wt.Path)
+		cmd := exec.Command("git", args...)
 		output, err := cmd.CombinedOutput()
 
 		// Build completion message

@@ -228,6 +228,27 @@ func (m Model) renderCleanupConfirmationInitial() string {
 	b.WriteString(descStyle.Render(fmt.Sprintf("Select worktrees to delete (%d/%d selected):", selectedCount, totalCount)))
 	b.WriteString("\n\n")
 
+	// Force delete option (cursor index -1)
+	forceCursor := "  "
+	if m.cleanupState.cursorIndex == -1 {
+		forceCursor = "> "
+	}
+	forceCheckbox := "[ ]"
+	if m.cleanupState.forceDelete {
+		forceCheckbox = "[✓]"
+	}
+	var forceStyle lipgloss.Style
+	if m.cleanupState.cursorIndex == -1 {
+		forceStyle = lipgloss.NewStyle().Foreground(ColorWarning).Bold(true)
+	} else {
+		forceStyle = lipgloss.NewStyle().Foreground(ColorWarning)
+	}
+	b.WriteString(forceCursor)
+	b.WriteString(forceStyle.Render(forceCheckbox))
+	b.WriteString(" ")
+	b.WriteString(forceStyle.Render("Force delete (ignore uncommitted changes)"))
+	b.WriteString("\n\n")
+
 	// Interactive list with checkboxes
 	for i, wt := range m.cleanupState.staleWorktrees {
 		// Cursor indicator
@@ -416,8 +437,8 @@ func (m Model) handleCleanupKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 		// Selection mode - handle navigation and toggle
 		switch msg.String() {
 		case "up", "k":
-			// Move cursor up
-			if m.cleanupState.cursorIndex > 0 {
+			// Move cursor up (can go to -1 for force delete option)
+			if m.cleanupState.cursorIndex > -1 {
 				m.cleanupState.cursorIndex--
 			}
 			return m, nil
@@ -431,11 +452,18 @@ func (m Model) handleCleanupKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 		case " ":
 			// Toggle selection at current cursor
-			idx := m.cleanupState.cursorIndex
-			if m.cleanupState.selectedIndices[idx] {
-				delete(m.cleanupState.selectedIndices, idx)
+			if m.cleanupState.cursorIndex == -1 {
+				// Toggle force delete option
+				m.cleanupState.forceDelete = !m.cleanupState.forceDelete
+				logging.Info("Cleanup: force delete toggled to %v", m.cleanupState.forceDelete)
 			} else {
-				m.cleanupState.selectedIndices[idx] = true
+				// Toggle worktree selection
+				idx := m.cleanupState.cursorIndex
+				if m.cleanupState.selectedIndices[idx] {
+					delete(m.cleanupState.selectedIndices, idx)
+				} else {
+					m.cleanupState.selectedIndices[idx] = true
+				}
 			}
 			return m, nil
 

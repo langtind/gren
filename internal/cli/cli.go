@@ -313,7 +313,7 @@ func (c *CLI) handleDelete(args []string) error {
 	}
 
 	ctx := context.Background()
-	err := c.worktreeManager.DeleteWorktree(ctx, worktreeName)
+	err := c.worktreeManager.DeleteWorktree(ctx, worktreeName, false)
 	if err != nil {
 		logging.Error("CLI delete failed: %v", err)
 	} else {
@@ -325,7 +325,8 @@ func (c *CLI) handleDelete(args []string) error {
 // handleCleanup handles the cleanup command (delete all stale worktrees)
 func (c *CLI) handleCleanup(args []string) error {
 	fs := flag.NewFlagSet("cleanup", flag.ExitOnError)
-	force := fs.Bool("f", false, "Force deletion without confirmation")
+	skipConfirmation := fs.Bool("f", false, "Skip confirmation prompt")
+	forceDelete := fs.Bool("force-delete", false, "Force delete even with uncommitted changes")
 	dryRun := fs.Bool("dry-run", false, "Show what would be deleted without actually deleting")
 
 	fs.Usage = func() {
@@ -334,16 +335,18 @@ func (c *CLI) handleCleanup(args []string) error {
 		fmt.Fprintf(fs.Output(), "Options:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(fs.Output(), "\nExamples:\n")
-		fmt.Fprintf(fs.Output(), "  gren cleanup --dry-run    # See what would be deleted\n")
-		fmt.Fprintf(fs.Output(), "  gren cleanup              # Delete with confirmation\n")
-		fmt.Fprintf(fs.Output(), "  gren cleanup -f           # Delete without confirmation\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup --dry-run           # See what would be deleted\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup                     # Delete with confirmation\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup -f                  # Delete without confirmation\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup --force-delete      # Force delete (ignore uncommitted changes)\n")
+		fmt.Fprintf(fs.Output(), "  gren cleanup -f --force-delete   # Skip confirmation and force delete\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	logging.Info("CLI cleanup: force=%v, dry-run=%v", *force, *dryRun)
+	logging.Info("CLI cleanup: skip-confirmation=%v, force-delete=%v, dry-run=%v", *skipConfirmation, *forceDelete, *dryRun)
 
 	// Show spinner while fetching data
 	sp := newSpinner("Fetching worktree status...")
@@ -394,8 +397,8 @@ func (c *CLI) handleCleanup(args []string) error {
 		return nil
 	}
 
-	// Confirmation unless force is specified
-	if !*force {
+	// Confirmation unless skip confirmation is specified
+	if !*skipConfirmation {
 		fmt.Printf("\nDelete these %d worktrees? (y/N): ", len(staleWorktrees))
 		var response string
 		fmt.Scanln(&response)
@@ -410,7 +413,7 @@ func (c *CLI) handleCleanup(args []string) error {
 	// Delete stale worktrees
 	var deleted, failed int
 	for _, wt := range staleWorktrees {
-		err := c.worktreeManager.DeleteWorktree(ctx, wt.Name)
+		err := c.worktreeManager.DeleteWorktree(ctx, wt.Name, *forceDelete)
 		if err != nil {
 			logging.Error("CLI cleanup: failed to delete %s: %v", wt.Name, err)
 			fmt.Printf("  ✗ Failed to delete %s: %v\n", wt.Branch, err)

@@ -344,7 +344,7 @@ func TestDeleteWorktree(t *testing.T) {
 		}
 
 		// Delete it
-		err = manager.DeleteWorktree(ctx, "to-delete")
+		err = manager.DeleteWorktree(ctx, "to-delete", false)
 		if err != nil {
 			t.Fatalf("DeleteWorktree() error: %v", err)
 		}
@@ -372,16 +372,69 @@ func TestDeleteWorktree(t *testing.T) {
 			t.Skip("no current worktree found")
 		}
 
-		err := manager.DeleteWorktree(ctx, currentWorktree)
+		err := manager.DeleteWorktree(ctx, currentWorktree, false)
 		if err == nil {
 			t.Error("DeleteWorktree() expected error when deleting current worktree")
 		}
 	})
 
 	t.Run("fail to delete nonexistent worktree", func(t *testing.T) {
-		err := manager.DeleteWorktree(ctx, "nonexistent-worktree")
+		err := manager.DeleteWorktree(ctx, "nonexistent-worktree", false)
 		if err == nil {
 			t.Error("DeleteWorktree() expected error for nonexistent worktree")
+		}
+	})
+
+	t.Run("force delete worktree with uncommitted changes", func(t *testing.T) {
+		// Create a worktree
+		req := CreateWorktreeRequest{
+			Name:        "force-delete-test",
+			IsNewBranch: true,
+		}
+		_, err := manager.CreateWorktree(ctx, req)
+		if err != nil {
+			t.Fatalf("failed to create worktree: %v", err)
+		}
+
+		// Find the worktree path
+		worktrees, _ := manager.ListWorktrees(ctx)
+		var worktreePath string
+		for _, wt := range worktrees {
+			if wt.Name == "force-delete-test" {
+				worktreePath = wt.Path
+				break
+			}
+		}
+
+		if worktreePath == "" {
+			t.Fatal("could not find worktree path")
+		}
+
+		// Create an uncommitted file in the worktree
+		testFile := filepath.Join(worktreePath, "uncommitted.txt")
+		err = os.WriteFile(testFile, []byte("uncommitted changes"), 0644)
+		if err != nil {
+			t.Fatalf("failed to create uncommitted file: %v", err)
+		}
+
+		// Try to delete without force - should fail
+		err = manager.DeleteWorktree(ctx, "force-delete-test", false)
+		if err == nil {
+			t.Error("DeleteWorktree() should fail for worktree with uncommitted changes without force")
+		}
+
+		// Delete with force - should succeed
+		err = manager.DeleteWorktree(ctx, "force-delete-test", true)
+		if err != nil {
+			t.Errorf("DeleteWorktree() with force should succeed: %v", err)
+		}
+
+		// Verify it's gone
+		worktrees, _ = manager.ListWorktrees(ctx)
+		for _, wt := range worktrees {
+			if wt.Name == "force-delete-test" {
+				t.Error("worktree still exists after force delete")
+			}
 		}
 	})
 }
@@ -640,7 +693,7 @@ func TestDeleteWorktreeByPath(t *testing.T) {
 		}
 
 		// Delete by path
-		err = manager.DeleteWorktree(ctx, worktreePath)
+		err = manager.DeleteWorktree(ctx, worktreePath, false)
 		if err != nil {
 			t.Fatalf("DeleteWorktree() by path error: %v", err)
 		}
