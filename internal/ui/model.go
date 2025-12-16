@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -247,31 +246,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cleanupState.currentIndex = -1
 		}
 
-		// Build error message if there were failures
-		if msg.totalFailed > 0 && msg.totalCleaned > 0 {
-			// Partial success
-			var failedInfo strings.Builder
-			for idx, errMsg := range m.cleanupState.failedWorktrees {
-				wt := m.cleanupState.staleWorktrees[idx]
-				failedInfo.WriteString(fmt.Sprintf("\n  • %s (%s)", wt.Branch, errMsg))
-			}
-			m.err = fmt.Errorf("deleted %d worktree(s), %d failed:%s",
-				msg.totalCleaned, msg.totalFailed, failedInfo.String())
-		} else if msg.totalFailed > 0 {
-			// All failed
-			var failedInfo strings.Builder
-			for idx, errMsg := range m.cleanupState.failedWorktrees {
-				wt := m.cleanupState.staleWorktrees[idx]
-				failedInfo.WriteString(fmt.Sprintf("\n  • %s (%s)", wt.Branch, errMsg))
-			}
-			m.err = fmt.Errorf("cleanup failed - %d worktree(s):%s",
-				msg.totalFailed, failedInfo.String())
-		} else {
-			m.err = nil
-		}
+		// Note: Cleanup errors are stored in cleanupState.failedWorktrees and displayed
+		// in the CleanupView's failure summary modal. We intentionally don't set m.err
+		// here to avoid duplicate error display in the global dashboard view.
 
 		// Refresh worktree list to reflect deletions
-		if err := m.refreshWorktrees(); err != nil && m.err == nil {
+		if err := m.refreshWorktrees(); err != nil {
 			m.err = err
 		}
 
