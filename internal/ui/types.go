@@ -38,6 +38,7 @@ type Worktree struct {
 	ModifiedCount  int    // Number of modified files (not staged)
 	UntrackedCount int    // Number of untracked files
 	UnpushedCount  int    // Number of unpushed commits
+	HasSubmodules  bool   // true if worktree has submodules (requires --force to delete)
 
 	// Stale detection fields
 	BranchStatus string // "active", "stale", or "" if not yet checked

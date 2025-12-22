@@ -507,3 +507,282 @@ func TestGetToolActions(t *testing.T) {
 		}
 	})
 }
+
+// TestCleanupSubmoduleIndicator tests that submodule indicator is shown in cleanup UI
+func TestCleanupSubmoduleIndicator(t *testing.T) {
+	t.Run("shows submodule indicator for worktree with submodules", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/with-submodules", BranchStatus: "stale", StaleReason: "pr_merged", HasSubmodules: true},
+					{Branch: "feature/no-submodules", BranchStatus: "stale", StaleReason: "no_unique_commits", HasSubmodules: false},
+				},
+				selectedIndices: map[int]bool{0: true, 1: true},
+				cursorIndex:     0,
+			},
+		}
+
+		result := m.renderCleanupConfirmation()
+
+		// Should show submodule indicator (📦) for worktree with submodules
+		if !strings.Contains(result, "📦") {
+			t.Error("Should show 📦 indicator for worktree with submodules")
+		}
+
+		// Should show legend when any worktree has submodules
+		if !strings.Contains(result, "has submodules") {
+			t.Error("Should show legend explaining 📦 indicator")
+		}
+	})
+
+	t.Run("shows force delete label change when submodules selected", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/with-submodules", BranchStatus: "stale", StaleReason: "pr_merged", HasSubmodules: true},
+				},
+				selectedIndices: map[int]bool{0: true}, // Submodule worktree selected
+				cursorIndex:     0,
+			},
+		}
+
+		result := m.renderCleanupConfirmation()
+
+		// Should show "required for submodules" in force delete label
+		if !strings.Contains(result, "required for submodules") {
+			t.Error("Force delete label should mention 'required for submodules' when submodule worktree is selected")
+		}
+	})
+
+	t.Run("shows normal force delete label when no submodules selected", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/no-submodules", BranchStatus: "stale", StaleReason: "pr_merged", HasSubmodules: false},
+				},
+				selectedIndices: map[int]bool{0: true},
+				cursorIndex:     0,
+			},
+		}
+
+		result := m.renderCleanupConfirmation()
+
+		// Should show normal force delete label (not "required for submodules")
+		if strings.Contains(result, "required for submodules") {
+			t.Error("Force delete label should NOT mention 'required for submodules' when no submodule worktrees are selected")
+		}
+		if !strings.Contains(result, "ignore uncommitted changes") {
+			t.Error("Force delete label should mention 'ignore uncommitted changes' when no submodules")
+		}
+	})
+
+	t.Run("no submodule legend when no worktrees have submodules", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/no-submodules1", BranchStatus: "stale", StaleReason: "pr_merged", HasSubmodules: false},
+					{Branch: "feature/no-submodules2", BranchStatus: "stale", StaleReason: "no_unique_commits", HasSubmodules: false},
+				},
+				selectedIndices: map[int]bool{0: true, 1: true},
+				cursorIndex:     0,
+			},
+		}
+
+		result := m.renderCleanupConfirmation()
+
+		// Should NOT show submodule indicator or legend
+		if strings.Contains(result, "📦") {
+			t.Error("Should NOT show 📦 indicator when no worktrees have submodules")
+		}
+	})
+}
+
+// TestCleanupAutoForceDeleteForSubmodules tests that force delete is auto-enabled for submodules
+func TestCleanupAutoForceDeleteForSubmodules(t *testing.T) {
+	t.Run("auto-enables force delete when confirming with submodules selected", func(t *testing.T) {
+		m := Model{
+			currentView: CleanupView,
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/with-submodules", BranchStatus: "stale", HasSubmodules: true},
+					{Branch: "feature/no-submodules", BranchStatus: "stale", HasSubmodules: false},
+				},
+				selectedIndices: map[int]bool{0: true}, // Only submodule worktree selected
+				cursorIndex:     0,
+				forceDelete:     false, // Not manually enabled
+			},
+		}
+
+		msg := tea.KeyMsg{Type: tea.KeyEnter}
+		newModel, cmd := m.handleCleanupKeys(msg)
+
+		// Should auto-enable forceDelete
+		if !newModel.cleanupState.forceDelete {
+			t.Error("forceDelete should be auto-enabled when confirming with submodule worktrees selected")
+		}
+
+		// Should start cleanup
+		if cmd == nil {
+			t.Error("Should return cleanup command")
+		}
+		if !newModel.cleanupState.confirmed {
+			t.Error("Should set confirmed=true")
+		}
+	})
+
+	t.Run("does not auto-enable force delete when no submodules selected", func(t *testing.T) {
+		m := Model{
+			currentView: CleanupView,
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/with-submodules", BranchStatus: "stale", HasSubmodules: true},
+					{Branch: "feature/no-submodules", BranchStatus: "stale", HasSubmodules: false},
+				},
+				selectedIndices: map[int]bool{1: true}, // Only non-submodule worktree selected
+				cursorIndex:     1,
+				forceDelete:     false,
+			},
+		}
+
+		msg := tea.KeyMsg{Type: tea.KeyEnter}
+		newModel, _ := m.handleCleanupKeys(msg)
+
+		// Should NOT auto-enable forceDelete
+		if newModel.cleanupState.forceDelete {
+			t.Error("forceDelete should NOT be auto-enabled when no submodule worktrees are selected")
+		}
+	})
+
+	t.Run("preserves manually enabled force delete", func(t *testing.T) {
+		m := Model{
+			currentView: CleanupView,
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/no-submodules", BranchStatus: "stale", HasSubmodules: false},
+				},
+				selectedIndices: map[int]bool{0: true},
+				cursorIndex:     0,
+				forceDelete:     true, // Manually enabled
+			},
+		}
+
+		msg := tea.KeyMsg{Type: tea.KeyEnter}
+		newModel, _ := m.handleCleanupKeys(msg)
+
+		// Should preserve forceDelete
+		if !newModel.cleanupState.forceDelete {
+			t.Error("forceDelete should remain true when manually enabled")
+		}
+	})
+}
+
+// TestCleanupForceDeleteCheckboxAutoCheck tests that force checkbox appears checked when submodules are selected
+func TestCleanupForceDeleteCheckboxAutoCheck(t *testing.T) {
+	t.Run("force checkbox shown as checked when submodules selected", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/with-submodules", BranchStatus: "stale", HasSubmodules: true},
+				},
+				selectedIndices: map[int]bool{0: true}, // Submodule selected
+				cursorIndex:     0,
+				forceDelete:     false, // Not manually toggled, but should appear checked
+			},
+		}
+
+		result := m.renderCleanupConfirmation()
+
+		// The force delete checkbox should appear checked when submodules are selected
+		// Even though forceDelete=false, the visual should show [✓] because submodules are selected
+		if !strings.Contains(result, "[✓]") {
+			t.Error("Force delete checkbox should appear checked when submodule worktrees are selected")
+		}
+	})
+}
+
+// TestCleanupProgressShowsOnlySelectedWorktrees verifies that the progress view
+// only displays worktrees that were actually selected for deletion, not all stale worktrees.
+// Bug: When user selects 2 of 3 stale worktrees, progress showed all 3 with "0/3" instead of "0/2".
+func TestCleanupProgressShowsOnlySelectedWorktrees(t *testing.T) {
+	t.Run("progress shows only selected worktrees not all stale", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/generate-endpoint", BranchStatus: "stale", StaleReason: "pr_merged"},
+					{Branch: "vid-342-supabase-tag", BranchStatus: "stale", StaleReason: "pr_merged"},
+					{Branch: "vid-359-fixing-failing-tests", BranchStatus: "stale", StaleReason: "pr_merged"},
+				},
+				// Only 2 of 3 worktrees selected (indices 1 and 2)
+				selectedIndices: map[int]bool{1: true, 2: true},
+				deletedIndices:  map[int]bool{},
+				failedWorktrees: map[int]string{},
+				inProgress:      true,
+				currentIndex:    1, // Currently deleting first selected
+				totalCleaned:    0,
+				totalFailed:     0,
+			},
+		}
+
+		result := m.renderCleanupProgress()
+
+		// Should show "0/2" not "0/3" since only 2 worktrees were selected
+		if strings.Contains(result, "0/3") {
+			t.Error("Progress should show 0/2 (only selected count), but shows 0/3 (all stale count)")
+		}
+		if !strings.Contains(result, "0/2") {
+			t.Errorf("Progress should show '0/2' for 2 selected worktrees, got: %s", result)
+		}
+
+		// Should NOT show the unselected worktree (feature/generate-endpoint)
+		if strings.Contains(result, "feature/generate-endpoint") {
+			t.Error("Progress should NOT show unselected worktree 'feature/generate-endpoint'")
+		}
+
+		// Should show the selected worktrees
+		if !strings.Contains(result, "vid-342-supabase-tag") {
+			t.Error("Progress should show selected worktree 'vid-342-supabase-tag'")
+		}
+		if !strings.Contains(result, "vid-359-fixing-failing-tests") {
+			t.Error("Progress should show selected worktree 'vid-359-fixing-failing-tests'")
+		}
+	})
+
+	t.Run("progress total matches selected count after partial deletion", func(t *testing.T) {
+		m := Model{
+			cleanupState: &CleanupState{
+				staleWorktrees: []Worktree{
+					{Branch: "feature/unselected", BranchStatus: "stale"},
+					{Branch: "feature/selected1", BranchStatus: "stale"},
+					{Branch: "feature/selected2", BranchStatus: "stale"},
+				},
+				selectedIndices: map[int]bool{1: true, 2: true}, // 2 selected
+				deletedIndices:  map[int]bool{1: true},          // 1 already deleted
+				failedWorktrees: map[int]string{},
+				inProgress:      true,
+				currentIndex:    2, // Now deleting second selected
+				totalCleaned:    1,
+				totalFailed:     0,
+			},
+		}
+
+		result := m.renderCleanupProgress()
+
+		// Should show "1/2" - 1 deleted out of 2 selected
+		if !strings.Contains(result, "1/2") {
+			t.Errorf("Progress should show '1/2' after 1 of 2 selected deleted, got: %s", result)
+		}
+
+		// Should NOT show unselected or deleted worktrees
+		if strings.Contains(result, "feature/unselected") {
+			t.Error("Should NOT show unselected worktree")
+		}
+		if strings.Contains(result, "feature/selected1") {
+			t.Error("Should NOT show already deleted worktree")
+		}
+
+		// Should show the remaining selected worktree being deleted
+		if !strings.Contains(result, "feature/selected2") {
+			t.Error("Should show the currently deleting worktree")
+		}
+	})
+}

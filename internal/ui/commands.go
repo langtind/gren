@@ -874,11 +874,61 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 		wt := m.cleanupState.staleWorktrees[index]
 		logging.Debug("deleteNextWorktree: deleting index %d: %s (%s)", index, wt.Name, wt.Path)
 
-		// Perform deletion using git worktree remove
+		// 1. Remove symlinks that point outside the worktree (they cause issues with git worktree remove)
+		entries, err := os.ReadDir(wt.Path)
+		if err == nil {
+			for _, entry := range entries {
+				entryPath := filepath.Join(wt.Path, entry.Name())
+				if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+					target, err := os.Readlink(entryPath)
+					if err == nil {
+						if !filepath.IsAbs(target) {
+							target = filepath.Join(wt.Path, target)
+						}
+						absTarget, _ := filepath.Abs(target)
+						absWorktree, _ := filepath.Abs(wt.Path)
+						if !strings.HasPrefix(absTarget, absWorktree) {
+							logging.Debug("deleteNextWorktree: removing external symlink: %s -> %s", entryPath, absTarget)
+							os.Remove(entryPath)
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Deinit submodules if present (required before git worktree remove can succeed)
+		hasSubmodules := wt.HasSubmodules
+		if !hasSubmodules {
+			// Double-check in case it wasn't detected earlier
+			if _, err := os.Stat(filepath.Join(wt.Path, ".gitmodules")); err == nil {
+				hasSubmodules = true
+			}
+		}
+
+		if hasSubmodules {
+			logging.Debug("deleteNextWorktree: worktree has submodules, running deinit")
+			deinitCmd := exec.Command("git", "-C", wt.Path, "submodule", "deinit", "--all", "--force")
+			deinitOutput, err := deinitCmd.CombinedOutput()
+			if err != nil {
+				logging.Error("deleteNextWorktree: failed to deinit submodules: %v, output: %s", err, string(deinitOutput))
+				return cleanupItemCompleteMsg{
+					worktreeIndex: index,
+					worktreeName:  wt.Branch,
+					success:       false,
+					errorMsg:      "submodule deinit failed",
+				}
+			}
+			logging.Debug("deleteNextWorktree: submodules deinited successfully")
+		}
+
+		// 3. Perform deletion using git worktree remove
+		// Note: --force is required for worktrees with submodules (even after deinit)
+		useForce := hasSubmodules || m.cleanupState.forceDelete
 		args := []string{"worktree", "remove"}
-		if m.cleanupState.forceDelete {
+		if useForce {
 			args = append(args, "--force")
-			logging.Debug("deleteNextWorktree: using --force flag")
+			logging.Debug("deleteNextWorktree: using --force flag (hasSubmodules=%v, forceDelete=%v)",
+				hasSubmodules, m.cleanupState.forceDelete)
 		}
 		args = append(args, wt.Path)
 		cmd := exec.Command("git", args...)
@@ -891,7 +941,9 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 			// Parse error reason for user-friendly message
 			outputStr := string(output)
 			var reason string
-			if strings.Contains(outputStr, "modified or untracked files") {
+			if strings.Contains(outputStr, "submodules") {
+				reason = "has submodules (try force delete)"
+			} else if strings.Contains(outputStr, "modified or untracked files") {
 				reason = "has uncommitted changes"
 			} else if strings.Contains(outputStr, "is not a working tree") {
 				reason = "not a valid worktree"
@@ -1166,6 +1218,7 @@ func (m Model) startGitHubCheck() tea.Cmd {
 				ModifiedCount:  wt.ModifiedCount,
 				UntrackedCount: wt.UntrackedCount,
 				UnpushedCount:  wt.UnpushedCount,
+				HasSubmodules:  wt.HasSubmodules,
 				BranchStatus:   wt.BranchStatus,
 				StaleReason:    wt.StaleReason,
 			}

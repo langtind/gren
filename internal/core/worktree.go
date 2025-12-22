@@ -50,6 +50,7 @@ type WorktreeInfo struct {
 	ModifiedCount  int    // Number of modified files (not staged)
 	UntrackedCount int    // Number of untracked files
 	UnpushedCount  int    // Number of unpushed commits
+	HasSubmodules  bool   // True if worktree contains .gitmodules (requires --force to delete)
 
 	// Stale detection fields
 	BranchStatus string // "active", "stale", or "" if not yet checked
@@ -318,6 +319,11 @@ func (wm *WorktreeManager) enrichWorktreeStatus(wt *WorktreeInfo) {
 	// Skip if worktree is missing
 	if wt.Status == "missing" {
 		return
+	}
+
+	// Check for submodules (affects deletion - requires --force)
+	if _, err := os.Stat(filepath.Join(wt.Path, ".gitmodules")); err == nil {
+		wt.HasSubmodules = true
 	}
 
 	// Get file counts
@@ -850,7 +856,9 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 	var cmd *exec.Cmd
 	if hasSubmodules || force {
 		cmd = exec.Command("git", "worktree", "remove", "--force", targetWorktree.Path)
-		if force {
+		if hasSubmodules {
+			logging.Debug("DeleteWorktree: using --force flag (worktree has submodules)")
+		} else {
 			logging.Debug("DeleteWorktree: using --force flag (uncommitted changes will be ignored)")
 		}
 	} else {
@@ -858,8 +866,17 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to remove worktree '%s': %w\n\nOutput: %s\n\nIf the worktree has uncommitted changes, commit or stash them first, or use force delete.",
-			targetWorktree.Name, err, string(output))
+		outputStr := string(output)
+		var hint string
+		if strings.Contains(outputStr, "submodules") {
+			hint = "The worktree contains submodules. Try running:\n  git -C " + targetWorktree.Path + " submodule deinit --all --force\nThen try deleting again with force."
+		} else if strings.Contains(outputStr, "modified or untracked") {
+			hint = "The worktree has uncommitted changes. Commit or stash them first, or use force delete."
+		} else {
+			hint = "Use force delete to remove anyway."
+		}
+		return fmt.Errorf("failed to remove worktree '%s': %w\n\nOutput: %s\n\n%s",
+			targetWorktree.Name, err, outputStr, hint)
 	}
 
 	// Note: Branch is kept - user can delete manually if needed

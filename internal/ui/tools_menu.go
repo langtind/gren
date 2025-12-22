@@ -221,6 +221,15 @@ func (m Model) renderCleanupConfirmationInitial() string {
 	b.WriteString(titleStyle.Render("⚠ Cleanup Stale Worktrees"))
 	b.WriteString("\n\n")
 
+	// Check if any selected worktree has submodules
+	hasSelectedSubmodules := false
+	for i, wt := range m.cleanupState.staleWorktrees {
+		if m.cleanupState.selectedIndices[i] && wt.HasSubmodules {
+			hasSelectedSubmodules = true
+			break
+		}
+	}
+
 	// Description
 	selectedCount := len(m.cleanupState.selectedIndices)
 	totalCount := len(m.cleanupState.staleWorktrees)
@@ -234,7 +243,9 @@ func (m Model) renderCleanupConfirmationInitial() string {
 		forceCursor = "> "
 	}
 	forceCheckbox := "[ ]"
-	if m.cleanupState.forceDelete {
+	// Auto-check if submodules are selected
+	forceEnabled := m.cleanupState.forceDelete || hasSelectedSubmodules
+	if forceEnabled {
 		forceCheckbox = "[✓]"
 	}
 	var forceStyle lipgloss.Style
@@ -246,7 +257,11 @@ func (m Model) renderCleanupConfirmationInitial() string {
 	b.WriteString(forceCursor)
 	b.WriteString(forceStyle.Render(forceCheckbox))
 	b.WriteString(" ")
-	b.WriteString(forceStyle.Render("Force delete (ignore uncommitted changes)"))
+	forceLabel := "Force delete (ignore uncommitted changes)"
+	if hasSelectedSubmodules {
+		forceLabel = "Force delete (required for submodules)"
+	}
+	b.WriteString(forceStyle.Render(forceLabel))
 	b.WriteString("\n\n")
 
 	// Interactive list with checkboxes
@@ -271,10 +286,13 @@ func (m Model) renderCleanupConfirmationInitial() string {
 			lineStyle = lipgloss.NewStyle().Foreground(ColorTextPrimary)
 		}
 
-		// Build reason text
+		// Build reason text with submodule indicator
 		reason := wt.StaleReason
 		if wt.PRNumber > 0 {
 			reason = fmt.Sprintf("%s (PR #%d %s)", reason, wt.PRNumber, wt.PRState)
+		}
+		if wt.HasSubmodules {
+			reason += " 📦"
 		}
 
 		// Render line
@@ -303,6 +321,19 @@ func (m Model) renderCleanupConfirmationInitial() string {
 		promptStyle.Render(": cancel")
 	b.WriteString(help)
 
+	// Submodule legend if any worktree has submodules
+	hasAnySubmodules := false
+	for _, wt := range m.cleanupState.staleWorktrees {
+		if wt.HasSubmodules {
+			hasAnySubmodules = true
+			break
+		}
+	}
+	if hasAnySubmodules {
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(ColorTextMuted).Render("📦 = has submodules (requires force delete)"))
+	}
+
 	return b.String()
 }
 
@@ -321,15 +352,20 @@ func (m Model) renderCleanupProgress() string {
 	b.WriteString(titleStyle.Render("⚠ Cleaning Up Stale Worktrees"))
 	b.WriteString("\n\n")
 
-	// Progress counter
+	// Progress counter - only count SELECTED worktrees, not all stale ones
 	progressStyle := lipgloss.NewStyle().Foreground(ColorTextSecondary)
-	total := len(m.cleanupState.staleWorktrees)
+	total := len(m.cleanupState.selectedIndices)
 	completed := m.cleanupState.totalCleaned + m.cleanupState.totalFailed
 	b.WriteString(progressStyle.Render(fmt.Sprintf("Progress: %d/%d", completed, total)))
 	b.WriteString("\n\n")
 
-	// List all worktrees with their current status
+	// List only SELECTED worktrees with their current status
 	for i, wt := range m.cleanupState.staleWorktrees {
+		// Skip worktrees that were not selected for deletion
+		if !m.cleanupState.selectedIndices[i] {
+			continue
+		}
+
 		// Check status of this worktree
 		if m.cleanupState.deletedIndices[i] {
 			// Successfully deleted - skip (removed from view)
@@ -473,8 +509,18 @@ func (m Model) handleCleanupKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 				logging.Info("Cleanup: no worktrees selected, ignoring enter")
 				return m, nil
 			}
-			logging.Info("Cleanup: user confirmed deletion of %d worktrees",
-				len(m.cleanupState.selectedIndices))
+
+			// Auto-enable force delete if any selected worktree has submodules
+			for i, wt := range m.cleanupState.staleWorktrees {
+				if m.cleanupState.selectedIndices[i] && wt.HasSubmodules {
+					m.cleanupState.forceDelete = true
+					logging.Info("Cleanup: auto-enabled force delete due to submodules")
+					break
+				}
+			}
+
+			logging.Info("Cleanup: user confirmed deletion of %d worktrees (force=%v)",
+				len(m.cleanupState.selectedIndices), m.cleanupState.forceDelete)
 			m.cleanupState.confirmed = true
 			return m, m.cleanupStaleWorktrees()
 

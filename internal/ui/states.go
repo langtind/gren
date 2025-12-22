@@ -103,6 +103,7 @@ func convertCoreWorktreeToUI(wt core.WorktreeInfo) Worktree {
 		ModifiedCount:  wt.ModifiedCount,
 		UntrackedCount: wt.UntrackedCount,
 		UnpushedCount:  wt.UnpushedCount,
+		HasSubmodules:  wt.HasSubmodules,
 		BranchStatus:   wt.BranchStatus,
 		StaleReason:    wt.StaleReason,
 		PRNumber:       wt.PRNumber,

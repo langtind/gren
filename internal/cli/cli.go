@@ -383,12 +383,21 @@ func (c *CLI) handleCleanup(args []string) error {
 
 	// Show what will be deleted
 	fmt.Printf("Found %d stale worktree(s):\n", len(staleWorktrees))
+	hasAnySubmodules := false
 	for _, wt := range staleWorktrees {
 		reason := wt.StaleReason
 		if wt.PRNumber > 0 {
 			reason = fmt.Sprintf("%s (PR #%d %s)", reason, wt.PRNumber, wt.PRState)
 		}
-		fmt.Printf("  - %s [%s]\n", wt.Branch, reason)
+		submoduleIndicator := ""
+		if wt.HasSubmodules {
+			submoduleIndicator = " 📦"
+			hasAnySubmodules = true
+		}
+		fmt.Printf("  - %s [%s]%s\n", wt.Branch, reason, submoduleIndicator)
+	}
+	if hasAnySubmodules {
+		fmt.Println("\n  📦 = has submodules (will use force delete automatically)")
 	}
 
 	// Dry run mode - just show what would happen
