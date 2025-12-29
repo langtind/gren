@@ -173,10 +173,18 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			logging.Info("Using local branch (has %d unpushed commits): %s", syncStatus.Ahead, branchName)
 			cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
 		} else {
-			// Local is in sync or behind - use remote for latest code
-			gitCmd = fmt.Sprintf("git worktree add --track -b %s %s %s", branchName, worktreePath, sourceRef)
-			logging.Info("Using remote branch for latest code: %s", sourceRef)
-			cmd = exec.Command("git", "worktree", "add", "--track", "-b", branchName, worktreePath, sourceRef)
+			// Local is in sync or behind remote
+			if req.IsNewBranch {
+				// Creating new branch - use remote for latest code
+				gitCmd = fmt.Sprintf("git worktree add --track -b %s %s %s", branchName, worktreePath, sourceRef)
+				logging.Info("Using remote branch for latest code: %s", sourceRef)
+				cmd = exec.Command("git", "worktree", "add", "--track", "-b", branchName, worktreePath, sourceRef)
+			} else {
+				// Using existing branch (--existing flag) - use local branch directly
+				gitCmd = fmt.Sprintf("git worktree add %s %s", worktreePath, branchName)
+				logging.Info("Using existing local branch: %s", branchName)
+				cmd = exec.Command("git", "worktree", "add", worktreePath, branchName)
+			}
 		}
 	} else if req.IsNewBranch {
 		// Branch doesn't exist - create new from base
