@@ -838,13 +838,6 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 	return nil
 }
 
-// runCommand executes a shell command and returns the output
-func runCommand(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	output, err := cmd.Output()
-	return string(output), err
-}
-
 // validateFilePath checks if a file path is safe (no path traversal)
 func validateFilePath(path string) error {
 	// Check for path traversal attempts
