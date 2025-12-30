@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -89,35 +90,24 @@ func TestRenderCleanupConfirmationEmpty(t *testing.T) {
 }
 
 func TestHandleCleanupKeysCancel(t *testing.T) {
-	tests := []struct {
-		name string
-		key  tea.KeyMsg
-	}{
-		{"escape", tea.KeyMsg{Type: tea.KeyEscape}},
+	m := Model{
+		currentView: CleanupView,
+		cleanupState: &CleanupState{
+			staleWorktrees: []Worktree{
+				{Branch: "feature/stale", BranchStatus: "stale"},
+			},
+			selectedIndices: map[int]bool{0: true},
+			cursorIndex:     0,
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := Model{
-				currentView: CleanupView,
-				cleanupState: &CleanupState{
-					staleWorktrees: []Worktree{
-						{Branch: "feature/stale", BranchStatus: "stale"},
-					},
-					selectedIndices: map[int]bool{0: true},
-					cursorIndex:     0,
-				},
-			}
+	newModel, _ := m.handleCleanupKeys(tea.KeyMsg{Type: tea.KeyEscape})
 
-			newModel, _ := m.handleCleanupKeys(tt.key)
-
-			if newModel.currentView != DashboardView {
-				t.Errorf("%s should return to DashboardView, got %v", tt.name, newModel.currentView)
-			}
-			if newModel.cleanupState != nil {
-				t.Errorf("%s should clear cleanupState", tt.name)
-			}
-		})
+	if newModel.currentView != DashboardView {
+		t.Errorf("escape should return to DashboardView, got %v", newModel.currentView)
+	}
+	if newModel.cleanupState != nil {
+		t.Error("escape should clear cleanupState")
 	}
 }
 
@@ -189,7 +179,7 @@ func TestHandleCleanupKeysNavigation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			staleWorktrees := make([]Worktree, tt.totalWorktrees)
 			for i := 0; i < tt.totalWorktrees; i++ {
-				staleWorktrees[i] = Worktree{Branch: "feature/stale" + string(rune('1'+i)), BranchStatus: "stale"}
+				staleWorktrees[i] = Worktree{Branch: fmt.Sprintf("feature/stale%d", i+1), BranchStatus: "stale"}
 			}
 
 			m := Model{
@@ -542,8 +532,10 @@ func TestCleanupForceDeleteCheckboxAutoCheck(t *testing.T) {
 
 		// The force delete checkbox should appear checked when submodules are selected
 		// Even though forceDelete=false, the visual should show [✓] because submodules are selected
-		if !strings.Contains(result, "[✓]") {
-			t.Error("Force delete checkbox should appear checked when submodule worktrees are selected")
+		// Count checkmarks: should be at least 2 (force checkbox + selected worktree)
+		checkmarkCount := strings.Count(result, "[✓]")
+		if checkmarkCount < 2 {
+			t.Errorf("Expected at least 2 checkmarks (force + worktree), got %d", checkmarkCount)
 		}
 	})
 }
