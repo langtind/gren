@@ -925,3 +925,279 @@ func setupTempGitRepoWithCleanWorktrees(t *testing.T) (string, func()) {
 
 	return dir, cleanup
 }
+
+// Compare command tests
+
+func TestHandleCompareMissingName(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(mockRepo, configManager)
+
+	err := cli.ParseAndExecute([]string{"gren", "compare"})
+	if err == nil {
+		t.Error("expected error for missing worktree name")
+	}
+	if !strings.Contains(err.Error(), "worktree name is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestHandleCompareNonexistent(t *testing.T) {
+	dir, cleanup := setupTempGitRepo(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	err := cli.ParseAndExecute([]string{"gren", "compare", "nonexistent"})
+	if err == nil {
+		t.Error("expected error for nonexistent worktree")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestHandleCompareNoChanges(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	// Initialize gren
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	// Create a worktree
+	err := cli.ParseAndExecute([]string{"gren", "create", "-n", "compare-test"})
+	if err != nil {
+		t.Fatalf("create worktree failed: %v", err)
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// Compare (no changes yet)
+	err = cli.ParseAndExecute([]string{"gren", "compare", "compare-test"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("compare command error: %v", err)
+	}
+
+	if !strings.Contains(output, "No changes") {
+		t.Errorf("expected 'No changes' message, got: %s", output)
+	}
+}
+
+func TestHandleCompareWithChanges(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	// Initialize gren
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	// Create a worktree
+	err := cli.ParseAndExecute([]string{"gren", "create", "-n", "compare-changes"})
+	if err != nil {
+		t.Fatalf("create worktree failed: %v", err)
+	}
+
+	// Find worktree path and create a change
+	worktreeDir := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-worktrees", "compare-changes")
+	testFile := filepath.Join(worktreeDir, "new-file.txt")
+	os.WriteFile(testFile, []byte("new content"), 0644)
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// Compare
+	err = cli.ParseAndExecute([]string{"gren", "compare", "compare-changes"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("compare command error: %v", err)
+	}
+
+	// Should show the changed file
+	if !strings.Contains(output, "new-file.txt") {
+		t.Errorf("expected to see new-file.txt in output, got: %s", output)
+	}
+	if !strings.Contains(output, "+") {
+		t.Errorf("expected + indicator for added file, got: %s", output)
+	}
+}
+
+func TestHandleCompareWithDiff(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	// Initialize gren
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	// Create a worktree
+	err := cli.ParseAndExecute([]string{"gren", "create", "-n", "compare-diff"})
+	if err != nil {
+		t.Fatalf("create worktree failed: %v", err)
+	}
+
+	// Find worktree path and create a change
+	worktreeDir := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-worktrees", "compare-diff")
+	testFile := filepath.Join(worktreeDir, "diff-file.txt")
+	os.WriteFile(testFile, []byte("diff content"), 0644)
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// Compare with --diff flag (flags must come before positional args)
+	err = cli.ParseAndExecute([]string{"gren", "compare", "--diff", "compare-diff"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("compare --diff command error: %v", err)
+	}
+
+	// Should show diff output
+	if !strings.Contains(output, "diff-file.txt") {
+		t.Errorf("expected to see diff-file.txt in diff output, got: %s", output)
+	}
+}
+
+func TestHandleCompareWithApply(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	// Initialize gren
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	// Create a worktree
+	err := cli.ParseAndExecute([]string{"gren", "create", "-n", "compare-apply"})
+	if err != nil {
+		t.Fatalf("create worktree failed: %v", err)
+	}
+
+	// Find worktree path and create a change
+	worktreeDir := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-worktrees", "compare-apply")
+	testFile := filepath.Join(worktreeDir, "apply-file.txt")
+	os.WriteFile(testFile, []byte("apply content"), 0644)
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// Compare with --apply flag (flags must come before positional args)
+	err = cli.ParseAndExecute([]string{"gren", "compare", "--apply", "compare-apply"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("compare --apply command error: %v", err)
+	}
+
+	// Should show success message
+	if !strings.Contains(output, "Successfully applied") {
+		t.Errorf("expected success message, got: %s", output)
+	}
+
+	// Verify file was applied to main worktree
+	appliedFile := filepath.Join(dir, "apply-file.txt")
+	content, err := os.ReadFile(appliedFile)
+	if err != nil {
+		t.Fatalf("applied file not found: %v", err)
+	}
+	if string(content) != "apply content" {
+		t.Errorf("applied file content = %q, want 'apply content'", string(content))
+	}
+}
+
+func TestShowHelpIncludesCompare(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(mockRepo, configManager)
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	cli.ShowHelp()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if !strings.Contains(output, "compare") {
+		t.Error("help should mention compare command")
+	}
+}

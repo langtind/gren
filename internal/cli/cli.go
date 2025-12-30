@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -99,6 +101,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleNavigate(args[2:])
 	case "shell-init":
 		return c.handleShellInit(args[2:])
+	case "compare":
+		return c.handleCompare(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -666,6 +670,7 @@ func (c *CLI) ShowHelp() {
 	fmt.Println("  gren create -n <name>   Create new worktree")
 	fmt.Println("  gren list              List all worktrees")
 	fmt.Println("  gren delete <name>     Delete a worktree")
+	fmt.Println("  gren compare <name>    Compare changes from another worktree")
 	fmt.Println("  gren navigate <name>   Navigate to worktree (requires shell setup)")
 	fmt.Println("  gren shell-init <shell> Generate shell integration for navigation")
 	fmt.Println("  gren init              Initialize gren in repository")
@@ -675,4 +680,173 @@ func (c *CLI) ShowHelp() {
 	fmt.Println("  --version              Show version information")
 	fmt.Println()
 	fmt.Println("Use 'gren <command> --help' for more information about a command.")
+}
+
+// handleCompare handles the compare command
+func (c *CLI) handleCompare(args []string) error {
+	fs := flag.NewFlagSet("compare", flag.ExitOnError)
+	diff := fs.Bool("diff", false, "Show unified diff output for all files")
+	apply := fs.Bool("apply", false, "Apply all changes from source to current worktree")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren compare <worktree-name> [options]\n")
+		fmt.Fprintf(fs.Output(), "\nCompare changes between worktrees\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren compare feature-branch           # List changed files\n")
+		fmt.Fprintf(fs.Output(), "  gren compare feature-branch --diff    # Show diff output\n")
+		fmt.Fprintf(fs.Output(), "  gren compare feature-branch --apply   # Apply all changes\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() == 0 {
+		fs.Usage()
+		return fmt.Errorf("worktree name is required")
+	}
+
+	sourceWorktree := fs.Arg(0)
+	ctx := context.Background()
+
+	logging.Info("CLI compare: comparing %s to current worktree", sourceWorktree)
+
+	// Get the comparison result
+	result, err := c.worktreeManager.CompareWorktrees(ctx, sourceWorktree)
+	if err != nil {
+		return fmt.Errorf("compare failed: %w", err)
+	}
+
+	if len(result.Files) == 0 {
+		fmt.Println("No changes found between worktrees")
+		return nil
+	}
+
+	// Handle apply mode
+	if *apply {
+		fmt.Printf("Applying %d file(s) from %s...\n", len(result.Files), sourceWorktree)
+		if err := c.worktreeManager.ApplyChanges(ctx, sourceWorktree, result.Files); err != nil {
+			return fmt.Errorf("apply failed: %w", err)
+		}
+		fmt.Printf("Successfully applied %d file(s)\n", len(result.Files))
+		return nil
+	}
+
+	// Handle diff mode
+	if *diff {
+		return c.showCompareWithDiff(sourceWorktree, result)
+	}
+
+	// Default: show file list
+	fmt.Printf("Changes from %s → %s:\n\n", result.SourceWorktree, result.TargetWorktree)
+	for _, file := range result.Files {
+		statusIcon := "?"
+		switch file.Status {
+		case core.FileAdded:
+			statusIcon = "+"
+		case core.FileModified:
+			statusIcon = "~"
+		case core.FileDeleted:
+			statusIcon = "-"
+		}
+		committedTag := ""
+		if file.IsCommitted {
+			committedTag = " (committed)"
+		}
+		fmt.Printf("  %s %s%s\n", statusIcon, file.Path, committedTag)
+	}
+	fmt.Printf("\n%d file(s) changed\n", len(result.Files))
+	fmt.Println("\nUse --diff to see detailed changes or --apply to copy files")
+
+	return nil
+}
+
+// showCompareWithDiff shows the comparison with unified diff output
+func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareResult) error {
+	ctx := context.Background()
+
+	// Get worktree paths
+	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
+	if err != nil {
+		return err
+	}
+
+	var sourcePath, currentPath string
+	for _, wt := range worktrees {
+		if wt.Name == sourceWorktree || wt.Path == sourceWorktree {
+			sourcePath = wt.Path
+		}
+		if wt.IsCurrent {
+			currentPath = wt.Path
+		}
+	}
+
+	// Validate paths were found
+	if sourcePath == "" {
+		return fmt.Errorf("source worktree '%s' not found", sourceWorktree)
+	}
+	if currentPath == "" {
+		return fmt.Errorf("current worktree not found")
+	}
+
+	fmt.Printf("Changes from %s → %s:\n", result.SourceWorktree, result.TargetWorktree)
+	fmt.Println(strings.Repeat("=", 60))
+
+	for _, file := range result.Files {
+		fmt.Printf("\n--- %s ---\n", file.Path)
+
+		// Validate path to prevent path traversal attacks
+		if err := validateFilePath(file.Path); err != nil {
+			fmt.Printf("[Error: %v]\n", err)
+			continue
+		}
+
+		switch file.Status {
+		case core.FileAdded:
+			fmt.Println("[NEW FILE]")
+			// Show file content using filepath.Join for safe path construction
+			srcFile := filepath.Join(sourcePath, file.Path)
+			content, err := os.ReadFile(srcFile)
+			if err != nil {
+				fmt.Printf("[Error reading file: %v]\n", err)
+			} else {
+				lines := strings.Split(string(content), "\n")
+				for _, line := range lines {
+					fmt.Printf("+ %s\n", line)
+				}
+			}
+		case core.FileDeleted:
+			fmt.Println("[DELETED]")
+		case core.FileModified:
+			// Use git diff for cross-platform compatibility (works on Windows via Git)
+			currentFile := filepath.Join(currentPath, file.Path)
+			sourceFile := filepath.Join(sourcePath, file.Path)
+			cmd := exec.Command("git", "diff", "--no-index", "--", currentFile, sourceFile)
+			output, _ := cmd.CombinedOutput()
+			if len(output) > 0 {
+				fmt.Println(string(output))
+			} else {
+				fmt.Println("[Binary or no diff available]")
+			}
+		default:
+			fmt.Printf("[Unknown status: %v]\n", file.Status)
+		}
+	}
+
+	return nil
+}
+
+// validateFilePath checks if a file path is safe (no path traversal)
+func validateFilePath(path string) error {
+	// Check for path traversal attempts
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("invalid path (contains '..'): %s", path)
+	}
+	// Check for absolute paths
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("invalid path (absolute path not allowed): %s", path)
+	}
+	return nil
 }

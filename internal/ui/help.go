@@ -51,6 +51,7 @@ func (m Model) renderHelpContent() string {
 			}{
 				{"n", "New worktree"},
 				{"d", "Delete worktree"},
+				{"m", "Compare/merge changes from worktree"},
 				{"t", "Tools menu (cleanup, prune, refresh)"},
 			},
 		},
@@ -134,6 +135,101 @@ func (m Model) renderHelpContent() string {
 		b.WriteString("  ")
 		b.WriteString(symbolStyle.Render(item.symbol))
 		b.WriteString(descStyle.Render(item.desc))
+		b.WriteString("\n")
+	}
+
+	// Footer
+	b.WriteString("\n")
+	footerStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	b.WriteString(footerStyle.Render("Press ? or esc to close"))
+
+	return b.String()
+}
+
+// renderCompareHelpOverlay renders help for the compare view
+func (m Model) renderCompareHelpOverlay(baseView string) string {
+	helpContent := m.renderCompareHelpContent()
+	return m.renderWithModalWidth(baseView, helpContent, 70, ColorPrimary)
+}
+
+// renderCompareHelpContent renders help content specific to compare view
+func (m Model) renderCompareHelpContent() string {
+	var b strings.Builder
+
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Foreground(ColorPrimary).
+		Bold(true)
+	b.WriteString(titleStyle.Render("Compare & Merge"))
+	b.WriteString("\n\n")
+
+	// Description
+	descStyle := lipgloss.NewStyle().
+		Foreground(ColorText)
+	b.WriteString(descStyle.Render("Compare changes from another worktree and selectively"))
+	b.WriteString("\n")
+	b.WriteString(descStyle.Render("apply them to your current worktree."))
+	b.WriteString("\n\n")
+
+	// When to use
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(ColorSecondary).
+		Bold(true)
+	b.WriteString(sectionStyle.Render("When to use this?"))
+	b.WriteString("\n")
+
+	useCases := []string{
+		"• Cherry-pick specific file changes without git merge",
+		"• Pull changes from an experimental branch",
+		"• Copy config or setup changes between worktrees",
+		"• Review and selectively apply uncommitted work",
+	}
+	for _, uc := range useCases {
+		b.WriteString(descStyle.Render("  " + uc))
+		b.WriteString("\n")
+	}
+
+	// Why not PR?
+	b.WriteString("\n")
+	b.WriteString(sectionStyle.Render("Why not use a PR?"))
+	b.WriteString("\n")
+	whyNot := []string{
+		"• PRs merge entire branches - this picks individual files",
+		"• Works with uncommitted changes (no commit needed)",
+		"• Faster for quick experiments and prototypes",
+		"• No git history pollution for throwaway changes",
+	}
+	for _, w := range whyNot {
+		b.WriteString(descStyle.Render("  " + w))
+		b.WriteString("\n")
+	}
+
+	// Keyboard shortcuts
+	b.WriteString("\n")
+	b.WriteString(sectionStyle.Render("Keyboard Shortcuts"))
+	b.WriteString("\n")
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(ColorPrimary).
+		Width(10)
+
+	shortcuts := []struct {
+		key  string
+		desc string
+	}{
+		{"↑/↓/j/k", "Navigate files / Scroll diff"},
+		{"→/l", "Focus diff panel"},
+		{"←/h", "Back to file list"},
+		{"space", "Toggle file selection"},
+		{"a", "Select/deselect all"},
+		{"y", "Apply selected files"},
+		{"esc", "Back"},
+	}
+
+	for _, s := range shortcuts {
+		b.WriteString("  ")
+		b.WriteString(keyStyle.Render(s.key))
+		b.WriteString(descStyle.Render(s.desc))
 		b.WriteString("\n")
 	}
 

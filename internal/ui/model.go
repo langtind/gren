@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -280,6 +281,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case compareInitMsg:
+		if msg.err != nil {
+			m.err = fmt.Errorf("compare failed: %w", msg.err)
+			m.currentView = DashboardView
+			return m, nil
+		}
+		m.compareState = &CompareState{
+			sourceWorktree: msg.sourceWorktree,
+			sourcePath:     msg.sourcePath,
+			files:          msg.files,
+			selectedIndex:  0,
+			scrollOffset:   0,
+			selectAll:      true, // All selected by default
+			diffContent:    "",   // Will be loaded below
+		}
+		// Load diff for first file
+		if len(msg.files) > 0 {
+			return m, m.loadCompareDiff(msg.sourcePath, msg.files[0].Path)
+		}
+		return m, nil
+
+	case compareApplyCompleteMsg:
+		if m.compareState != nil {
+			if msg.err != nil {
+				m.compareState.applyError = msg.err.Error()
+			} else {
+				m.compareState.appliedCount = msg.appliedCount
+			}
+			m.compareState.applyComplete = true
+			m.compareState.applyInProgress = false
+		}
+		return m, nil
+
+	case compareDiffViewedMsg:
+		// Diff viewing completed (returned from external pager)
+		if msg.err != nil {
+			m.err = msg.err
+		}
+		return m, nil
+
+	case compareDiffLoadedMsg:
+		// Diff content loaded for compare view
+		if m.compareState != nil {
+			if msg.err != nil {
+				m.compareState.diffContent = fmt.Sprintf("Error loading diff: %v", msg.err)
+			} else {
+				m.compareState.diffContent = msg.content
+				m.compareState.diffScrollOffset = 0 // Reset scroll position
+			}
+		}
+		return m, nil
+
 	case worktreeCreatedMsg:
 		if m.createState != nil {
 			if msg.err != nil {
@@ -396,6 +449,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
+		// Handle spinner animation for compare loading
+		if m.currentView == CompareView && m.compareState == nil {
+			var cmd tea.Cmd
+			m.compareSpinner, cmd = m.compareSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
 		if len(cmds) > 0 {
 			return m, tea.Batch(cmds...)
 		}
@@ -441,6 +501,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.currentView == CleanupView {
 			return m.handleCleanupKeys(keyMsg)
+		}
+		if m.currentView == CompareView {
+			return m.handleCompareKeys(keyMsg)
 		}
 
 		// Dashboard keys
@@ -544,6 +607,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentView = ToolsView
 			}
 			return m, nil
+
+		case key.Matches(keyMsg, m.keys.Compare):
+			// Compare selected worktree to current
+			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
+				// Can't compare current worktree to itself
+				if selectedWorktree.IsCurrent {
+					logging.Debug("Dashboard: cannot compare current worktree to itself")
+					return m, nil
+				}
+				if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
+					logging.Info("Dashboard: entering CompareView for worktree: %s (shortcut 'm')", selectedWorktree.Name)
+					m.currentView = CompareView
+					// Initialize spinner for loading state
+					s := spinner.New()
+					s.Spinner = spinner.Dot
+					s.Style = lipgloss.NewStyle().Foreground(ColorPrimary)
+					m.compareSpinner = s
+					return m, tea.Batch(m.initializeCompareState(selectedWorktree.Name), m.compareSpinner.Tick)
+				}
+			}
+			return m, nil
 		}
 	}
 
@@ -595,6 +679,11 @@ func (m Model) View() string {
 		// Render dashboard with cleanup confirmation modal overlay (wider modal, warning color)
 		baseView = m.dashboardView()
 		return m.renderWithModalWidth(baseView, m.renderCleanupConfirmation(), 70, ColorWarning)
+	case CompareView:
+		baseView = m.renderCompareView()
+		if m.helpVisible {
+			return m.renderCompareHelpOverlay(baseView)
+		}
 	default:
 		baseView = m.dashboardView()
 	}

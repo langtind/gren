@@ -23,6 +23,7 @@ const (
 	OpenInView
 	ConfigView
 	ToolsView
+	CompareView
 )
 
 // Worktree represents a git worktree
@@ -205,6 +206,31 @@ type ConfigState struct {
 	selectedIndex int          // Currently selected file index
 }
 
+// CompareState holds the state for the compare view
+type CompareState struct {
+	sourceWorktree   string            // Name of the source worktree being compared
+	sourcePath       string            // Path to source worktree
+	files            []CompareFileItem // List of files with selection state
+	selectedIndex    int               // Currently selected file index
+	scrollOffset     int               // For scrolling long file lists
+	selectAll        bool              // Whether all files are selected
+	applyInProgress  bool              // Whether apply operation is running
+	applyComplete    bool              // Whether apply operation completed
+	applyError       string            // Error message from apply operation
+	appliedCount     int               // Number of files successfully applied
+	diffContent      string            // Diff content for currently selected file
+	diffScrollOffset int               // Scroll offset for diff viewer
+	diffFocused      bool              // Whether diff panel is focused (for scrolling)
+}
+
+// CompareFileItem represents a file in the compare view with selection state
+type CompareFileItem struct {
+	Path        string
+	Status      string // "added", "modified", "deleted"
+	IsCommitted bool
+	Selected    bool
+}
+
 // DeleteState holds the state for worktree deletion
 type DeleteState struct {
 	currentStep       DeleteStep
@@ -250,6 +276,7 @@ type Model struct {
 	cleanupState *CleanupState
 	openInState  *OpenInState
 	configState  *ConfigState
+	compareState *CompareState
 
 	// Screen dimensions
 	width  int
@@ -270,6 +297,9 @@ type Model struct {
 
 	// Delete operation spinner
 	deleteSpinner spinner.Model
+
+	// Compare loading spinner
+	compareSpinner spinner.Model
 }
 
 // KeyMap defines key bindings for the application
@@ -289,6 +319,7 @@ type KeyMap struct {
 	Navigate key.Binding
 	Help     key.Binding
 	Tools    key.Binding
+	Compare  key.Binding
 }
 
 // HelpState holds the state for the help overlay
@@ -358,6 +389,10 @@ func DefaultKeyMap() KeyMap {
 		Tools: key.NewBinding(
 			key.WithKeys("t"),
 			key.WithHelp("t", "tools"),
+		),
+		Compare: key.NewBinding(
+			key.WithKeys("m"),
+			key.WithHelp("m", "compare/merge"),
 		),
 	}
 }
