@@ -142,10 +142,19 @@ func (m Model) handleToolsKeys(keyMsg tea.KeyMsg) (Model, tea.Cmd) {
 		s.Spinner = spinner.Dot
 		s.Style = lipgloss.NewStyle().Foreground(ColorWarning)
 
-		// Select all worktrees by default
+		// Only pre-select worktrees that are SAFE to delete:
+		// - PR is merged AND worktree is clean (no uncommitted changes)
+		// Do NOT pre-select:
+		// - Worktrees with uncommitted changes (regardless of stale reason)
+		// - Worktrees with "no_unique_commits" (could be new branch user just started)
 		selectedIndices := make(map[int]bool)
-		for i := range staleWorktrees {
-			selectedIndices[i] = true
+		for i, wt := range staleWorktrees {
+			hasUncommittedChanges := wt.ModifiedCount > 0 || wt.StagedCount > 0 || wt.UntrackedCount > 0
+			isSafeToDelete := wt.StaleReason == "pr_merged" && !hasUncommittedChanges
+
+			if isSafeToDelete {
+				selectedIndices[i] = true
+			}
 		}
 
 		m.cleanupState = &CleanupState{
@@ -286,13 +295,18 @@ func (m Model) renderCleanupConfirmationInitial() string {
 			lineStyle = lipgloss.NewStyle().Foreground(ColorTextPrimary)
 		}
 
-		// Build reason text with submodule indicator
+		// Build reason text with indicators
 		reason := wt.StaleReason
 		if wt.PRNumber > 0 {
 			reason = fmt.Sprintf("%s (PR #%d %s)", reason, wt.PRNumber, wt.PRState)
 		}
 		if wt.HasSubmodules {
 			reason += " 📦"
+		}
+		// Add uncommitted changes indicator
+		hasUncommittedChanges := wt.ModifiedCount > 0 || wt.StagedCount > 0 || wt.UntrackedCount > 0
+		if hasUncommittedChanges {
+			reason += " ⚠ requires force"
 		}
 
 		// Render line
