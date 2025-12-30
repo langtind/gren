@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -942,6 +943,137 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.openConfigFile(selectedFile.Path)
 		}
 		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleCompareKeys handles keyboard input for the compare view
+func (m Model) handleCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.compareState == nil {
+		return m, nil
+	}
+
+	logging.Debug("CompareView key: %q, diffFocused: %v", msg.String(), m.compareState.diffFocused)
+
+	// If apply is complete, any key returns to dashboard
+	if m.compareState.applyComplete {
+		logging.Debug("CompareView: returning to Dashboard after apply")
+		m.currentView = DashboardView
+		m.compareState = nil
+		return m, nil
+	}
+
+	// Handle diff focused mode (scrolling diff)
+	if m.compareState.diffFocused {
+		switch {
+		case key.Matches(msg, m.keys.Back), msg.String() == "q" || msg.String() == "Q":
+			// Exit diff focus mode
+			m.compareState.diffFocused = false
+			return m, nil
+		case key.Matches(msg, m.keys.Up), msg.String() == "k" || msg.String() == "K":
+			// Scroll diff up
+			if m.compareState.diffScrollOffset > 0 {
+				m.compareState.diffScrollOffset--
+			}
+			return m, nil
+		case key.Matches(msg, m.keys.Down), msg.String() == "j" || msg.String() == "J":
+			// Scroll diff down
+			diffLines := len(strings.Split(m.compareState.diffContent, "\n"))
+			visibleLines := m.height - 10
+			if m.compareState.diffScrollOffset < diffLines-visibleLines {
+				m.compareState.diffScrollOffset++
+			}
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Normal mode (file list focused)
+	switch {
+	case msg.String() == "q" || msg.String() == "Q":
+		// Return to dashboard
+		logging.Debug("CompareView: back to Dashboard")
+		m.currentView = DashboardView
+		m.compareState = nil
+		return m, nil
+	case key.Matches(msg, m.keys.Up), msg.String() == "k" || msg.String() == "K":
+		// Navigate up in the file list
+		if m.compareState.selectedIndex > 0 {
+			m.compareState.selectedIndex--
+			m.compareState.diffScrollOffset = 0 // Reset diff scroll
+			// Adjust scroll offset if needed
+			if m.compareState.selectedIndex < m.compareState.scrollOffset {
+				m.compareState.scrollOffset = m.compareState.selectedIndex
+			}
+			// Load diff for new selection
+			file := m.compareState.files[m.compareState.selectedIndex]
+			return m, m.loadCompareDiff(m.compareState.sourcePath, file.Path)
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Down), msg.String() == "j" || msg.String() == "J":
+		// Navigate down in the file list
+		if m.compareState.selectedIndex < len(m.compareState.files)-1 {
+			m.compareState.selectedIndex++
+			m.compareState.diffScrollOffset = 0 // Reset diff scroll
+			// Adjust scroll offset if needed
+			visibleLines := m.height - 10
+			if visibleLines < 5 {
+				visibleLines = 5
+			}
+			if m.compareState.selectedIndex >= m.compareState.scrollOffset+visibleLines {
+				m.compareState.scrollOffset = m.compareState.selectedIndex - visibleLines + 1
+			}
+			// Load diff for new selection
+			file := m.compareState.files[m.compareState.selectedIndex]
+			return m, m.loadCompareDiff(m.compareState.sourcePath, file.Path)
+		}
+		return m, nil
+	case key.Matches(msg, m.keys.Enter):
+		// Enter diff focus mode (for scrolling)
+		m.compareState.diffFocused = true
+		return m, nil
+	case msg.String() == " ": // Space key
+		// Toggle selection for current file
+		if m.compareState.selectedIndex < len(m.compareState.files) {
+			m.compareState.files[m.compareState.selectedIndex].Selected = !m.compareState.files[m.compareState.selectedIndex].Selected
+			logging.Debug("CompareView: toggled selection for %s: %v",
+				m.compareState.files[m.compareState.selectedIndex].Path,
+				m.compareState.files[m.compareState.selectedIndex].Selected)
+		}
+		return m, nil
+	case msg.String() == "a" || msg.String() == "A":
+		// Toggle all files
+		allSelected := true
+		for _, f := range m.compareState.files {
+			if !f.Selected {
+				allSelected = false
+				break
+			}
+		}
+		// Toggle: if all selected, deselect all; otherwise select all
+		newState := !allSelected
+		for i := range m.compareState.files {
+			m.compareState.files[i].Selected = newState
+		}
+		m.compareState.selectAll = newState
+		logging.Debug("CompareView: toggled all files to: %v", newState)
+		return m, nil
+	case msg.String() == "y" || msg.String() == "Y":
+		// Apply selected files
+		selectedCount := 0
+		for _, f := range m.compareState.files {
+			if f.Selected {
+				selectedCount++
+			}
+		}
+		if selectedCount == 0 {
+			logging.Debug("CompareView: no files selected to apply")
+			return m, nil
+		}
+		logging.Info("CompareView: applying %d selected files", selectedCount)
+		m.compareState.applyInProgress = true
+		return m, m.applyCompareChanges()
 	}
 
 	return m, nil

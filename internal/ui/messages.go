@@ -118,3 +118,24 @@ type githubRefreshCompleteMsg struct {
 type openPRCompleteMsg struct {
 	err error
 }
+
+type compareInitMsg struct {
+	sourceWorktree string
+	sourcePath     string
+	files          []CompareFileItem
+	err            error
+}
+
+type compareApplyCompleteMsg struct {
+	appliedCount int
+	err          error
+}
+
+type compareDiffViewedMsg struct {
+	err error
+}
+
+type compareDiffLoadedMsg struct {
+	content string
+	err     error
+}

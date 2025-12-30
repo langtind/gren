@@ -1256,3 +1256,183 @@ func (m Model) openPRInBrowser(branch string) tea.Cmd {
 		return openPRCompleteMsg{err: nil}
 	}
 }
+
+// initializeCompareState initializes the compare view with file changes from source worktree
+func (m Model) initializeCompareState(sourceWorktree string) tea.Cmd {
+	// Capture dependencies for the closure
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+
+	return func() tea.Msg {
+		logging.Info("initializeCompareState: comparing %s to current worktree", sourceWorktree)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		ctx := context.Background()
+
+		// Get source worktree path
+		worktrees, err := worktreeManager.ListWorktrees(ctx)
+		if err != nil {
+			return compareInitMsg{err: err}
+		}
+
+		var sourcePath string
+		for _, wt := range worktrees {
+			if wt.Name == sourceWorktree || wt.Branch == sourceWorktree {
+				sourcePath = wt.Path
+				break
+			}
+		}
+
+		result, err := worktreeManager.CompareWorktrees(ctx, sourceWorktree)
+		if err != nil {
+			logging.Error("initializeCompareState: failed: %v", err)
+			return compareInitMsg{err: err}
+		}
+
+		// Convert core.FileChange to ui.CompareFileItem
+		var files []CompareFileItem
+		for _, f := range result.Files {
+			files = append(files, CompareFileItem{
+				Path:        f.Path,
+				Status:      f.Status.String(),
+				IsCommitted: f.IsCommitted,
+				Selected:    true, // Select all by default
+			})
+		}
+
+		return compareInitMsg{
+			sourceWorktree: sourceWorktree,
+			sourcePath:     sourcePath,
+			files:          files,
+		}
+	}
+}
+
+// applyCompareChanges applies selected file changes from source worktree to current worktree
+func (m Model) applyCompareChanges() tea.Cmd {
+	// Capture state for the closure
+	if m.compareState == nil {
+		return func() tea.Msg {
+			return compareApplyCompleteMsg{err: fmt.Errorf("compare state is nil")}
+		}
+	}
+
+	sourceWorktree := m.compareState.sourceWorktree
+	selectedFiles := make([]CompareFileItem, 0)
+	for _, f := range m.compareState.files {
+		if f.Selected {
+			selectedFiles = append(selectedFiles, f)
+		}
+	}
+
+	// Capture dependencies
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+
+	return func() tea.Msg {
+		if len(selectedFiles) == 0 {
+			return compareApplyCompleteMsg{appliedCount: 0}
+		}
+
+		logging.Info("applyCompareChanges: applying %d files from %s", len(selectedFiles), sourceWorktree)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		ctx := context.Background()
+
+		// Convert UI items to core.FileChange
+		var coreFiles []core.FileChange
+		for _, f := range selectedFiles {
+			var status core.FileStatus
+			switch f.Status {
+			case "added":
+				status = core.FileAdded
+			case "modified":
+				status = core.FileModified
+			case "deleted":
+				status = core.FileDeleted
+			}
+			coreFiles = append(coreFiles, core.FileChange{
+				Path:        f.Path,
+				Status:      status,
+				IsCommitted: f.IsCommitted,
+			})
+		}
+
+		err := worktreeManager.ApplyChanges(ctx, sourceWorktree, coreFiles)
+		if err != nil {
+			logging.Error("applyCompareChanges: failed: %v", err)
+			return compareApplyCompleteMsg{err: err}
+		}
+
+		return compareApplyCompleteMsg{appliedCount: len(coreFiles)}
+	}
+}
+
+// loadCompareDiff loads diff content for a specific file using actual file comparison
+func (m Model) loadCompareDiff(sourcePath string, filePath string) tea.Cmd {
+	return func() tea.Msg {
+		logging.Info("loadCompareDiff: loading diff for %s from %s", filePath, sourcePath)
+
+		if sourcePath == "" {
+			return compareDiffLoadedMsg{content: "(Source path not available)", err: nil}
+		}
+
+		// Get current working directory (current worktree)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return compareDiffLoadedMsg{content: "(Could not get current directory)", err: nil}
+		}
+
+		sourceFile := filepath.Join(sourcePath, filePath)
+		currentFile := filepath.Join(cwd, filePath)
+
+		// Check if source file exists
+		sourceExists := true
+		if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
+			sourceExists = false
+		}
+
+		// Check if current file exists
+		currentExists := true
+		if _, err := os.Stat(currentFile); os.IsNotExist(err) {
+			currentExists = false
+		}
+
+		var content string
+
+		if !sourceExists && !currentExists {
+			content = "(File does not exist in either worktree)"
+		} else if !sourceExists {
+			content = "(File deleted in source worktree)"
+		} else if !currentExists {
+			// New file - show content
+			data, err := os.ReadFile(sourceFile)
+			if err != nil {
+				content = fmt.Sprintf("(Could not read file: %v)", err)
+			} else {
+				// Format as new file diff
+				lines := strings.Split(string(data), "\n")
+				var diffLines []string
+				diffLines = append(diffLines, fmt.Sprintf("diff --git a/%s b/%s", filePath, filePath))
+				diffLines = append(diffLines, "new file")
+				diffLines = append(diffLines, fmt.Sprintf("+++ b/%s", filePath))
+				diffLines = append(diffLines, "@@ -0,0 +1,"+fmt.Sprintf("%d", len(lines))+" @@")
+				for _, line := range lines {
+					diffLines = append(diffLines, "+"+line)
+				}
+				content = strings.Join(diffLines, "\n")
+			}
+		} else {
+			// Both files exist - run diff
+			cmd := exec.Command("diff", "-u", currentFile, sourceFile)
+			output, _ := cmd.Output() // diff returns exit code 1 when files differ
+			if len(output) == 0 {
+				content = "(No differences)"
+			} else {
+				content = string(output)
+			}
+		}
+
+		return compareDiffLoadedMsg{content: content, err: nil}
+	}
+}

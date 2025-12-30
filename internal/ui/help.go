@@ -51,6 +51,7 @@ func (m Model) renderHelpContent() string {
 			}{
 				{"n", "New worktree"},
 				{"d", "Delete worktree"},
+				{"m", "Compare/merge changes from worktree"},
 				{"t", "Tools menu (cleanup, prune, refresh)"},
 			},
 		},
