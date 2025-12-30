@@ -240,10 +240,30 @@ func deduplicateFiles(files []FileChange) []FileChange {
 	return result
 }
 
+// validatePath checks if a path is safe (no path traversal)
+func validatePath(path string) error {
+	// Check for path traversal attempts
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("invalid path (contains '..'): %s", path)
+	}
+	// Check for absolute paths
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("invalid path (absolute path not allowed): %s", path)
+	}
+	return nil
+}
+
 // ApplyChanges applies selected file changes from source worktree to current worktree
 func (wm *WorktreeManager) ApplyChanges(ctx context.Context, sourceWorktree string, files []FileChange) error {
 	if len(files) == 0 {
 		return nil
+	}
+
+	// Validate all paths before applying any changes
+	for _, file := range files {
+		if err := validatePath(file.Path); err != nil {
+			return fmt.Errorf("security error: %w", err)
+		}
 	}
 
 	logging.Info("ApplyChanges: applying %d files from %s", len(files), sourceWorktree)

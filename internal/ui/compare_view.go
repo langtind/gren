@@ -13,47 +13,47 @@ func (m Model) renderCompareView() string {
 		// Show loading state while compare is being initialized
 		titleStyle := lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7D56F4"))
+			Foreground(ColorPrimary)
 		return fmt.Sprintf("%s %s", m.compareSpinner.View(), titleStyle.Render("Loading comparison..."))
 	}
 
 	state := m.compareState
 
-	// Styles
+	// Styles - using shared color constants from styles.go
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#7D56F4"))
+		Foreground(ColorPrimary)
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7D56F4")).
+		BorderForeground(ColorPrimary).
 		Padding(0, 1)
 
 	selectedStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#7D56F4")).
-		Foreground(lipgloss.Color("#FFFFFF"))
+		Background(ColorBgSelected).
+		Foreground(ColorTextPrimary)
 
 	addedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A6E3A1"))
+		Foreground(ColorSuccess)
 
 	modifiedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F9E2AF"))
+		Foreground(ColorWarning)
 
 	deletedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F38BA8"))
+		Foreground(ColorError)
 
 	diffAddStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A6E3A1"))
+		Foreground(ColorSuccess)
 
 	diffDelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F38BA8"))
+		Foreground(ColorError)
 
 	diffHeaderStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#89B4FA")).
+		Foreground(ColorSecondary).
 		Bold(true)
 
 	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6C7086"))
+		Foreground(ColorTextMuted)
 
 	// Show completion or error message
 	if state.applyComplete {
@@ -61,11 +61,9 @@ func (m Model) renderCompareView() string {
 		b.WriteString(titleStyle.Render(fmt.Sprintf("Compare: %s → current", state.sourceWorktree)))
 		b.WriteString("\n\n")
 		if state.applyError != "" {
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#F38BA8")).Render(
-				fmt.Sprintf("Error: %s", state.applyError)))
+			b.WriteString(ErrorStyle.Render(fmt.Sprintf("Error: %s", state.applyError)))
 		} else {
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#A6E3A1")).Render(
-				fmt.Sprintf("Successfully applied %d file(s)", state.appliedCount)))
+			b.WriteString(SuccessStyle.Render(fmt.Sprintf("Successfully applied %d file(s)", state.appliedCount)))
 		}
 		b.WriteString("\n\n")
 		b.WriteString("Press [q] or [esc] to return to dashboard")
@@ -261,13 +259,13 @@ func (m Model) renderCompareView() string {
 	// Create boxed panels with fixed height
 	leftBoxStyle := boxStyle
 	if !state.diffFocused {
-		leftBoxStyle = leftBoxStyle.BorderForeground(lipgloss.Color("#A6E3A1")) // Green when focused
+		leftBoxStyle = leftBoxStyle.BorderForeground(ColorSuccess) // Green when focused
 	}
 	leftPanel := leftBoxStyle.Width(leftWidth - 2).Height(panelHeight - 2).Render(leftContent)
 
 	rightBoxStyle := boxStyle
 	if state.diffFocused {
-		rightBoxStyle = rightBoxStyle.BorderForeground(lipgloss.Color("#A6E3A1")) // Green when focused
+		rightBoxStyle = rightBoxStyle.BorderForeground(ColorSuccess) // Green when focused
 	}
 	rightPanel := rightBoxStyle.Width(rightWidth - 2).Height(panelHeight - 2).Render(rightContent)
 

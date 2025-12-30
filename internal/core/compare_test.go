@@ -5,8 +5,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// runGit executes a git command and fails the test if it errors
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)
+	}
+}
 
 func TestCompareWorktrees(t *testing.T) {
 	_, manager, cleanup := setupTestEnvironment(t)
@@ -268,8 +279,8 @@ func TestCompareWorktreesWithCommittedChanges(t *testing.T) {
 	}
 
 	// Stage and commit the change
-	exec.Command("git", "-C", sourcePath, "add", "committed-file.txt").Run()
-	exec.Command("git", "-C", sourcePath, "commit", "-m", "Add committed file").Run()
+	runGit(t, sourcePath, "add", "committed-file.txt")
+	runGit(t, sourcePath, "commit", "-m", "Add committed file")
 
 	t.Run("compare detects committed changes vs main", func(t *testing.T) {
 		result, err := manager.CompareWorktrees(ctx, "committed-source")
@@ -514,12 +525,55 @@ func TestApplyChangesErrors(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Create a worktree for path traversal tests
+	req := CreateWorktreeRequest{
+		Name:        "error-source",
+		IsNewBranch: true,
+	}
+	_, err := manager.CreateWorktree(ctx, req)
+	if err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+
 	t.Run("apply fails for nonexistent worktree", func(t *testing.T) {
 		err := manager.ApplyChanges(ctx, "nonexistent-worktree", []FileChange{
 			{Path: "file.txt", Status: FileAdded, IsCommitted: false},
 		})
 		if err == nil {
 			t.Error("expected error for nonexistent worktree")
+		}
+	})
+
+	t.Run("apply rejects path traversal", func(t *testing.T) {
+		err := manager.ApplyChanges(ctx, "error-source", []FileChange{
+			{Path: "../../../etc/passwd", Status: FileAdded, IsCommitted: false},
+		})
+		if err == nil {
+			t.Error("expected error for path traversal attempt")
+		}
+		if err != nil && !strings.Contains(err.Error(), "security error") {
+			t.Errorf("expected security error, got: %v", err)
+		}
+	})
+
+	t.Run("apply rejects absolute paths", func(t *testing.T) {
+		err := manager.ApplyChanges(ctx, "error-source", []FileChange{
+			{Path: "/etc/passwd", Status: FileAdded, IsCommitted: false},
+		})
+		if err == nil {
+			t.Error("expected error for absolute path")
+		}
+		if err != nil && !strings.Contains(err.Error(), "security error") {
+			t.Errorf("expected security error, got: %v", err)
+		}
+	})
+
+	t.Run("apply rejects hidden path traversal", func(t *testing.T) {
+		err := manager.ApplyChanges(ctx, "error-source", []FileChange{
+			{Path: "foo/../../bar", Status: FileAdded, IsCommitted: false},
+		})
+		if err == nil {
+			t.Error("expected error for hidden path traversal")
 		}
 	})
 }
@@ -616,7 +670,7 @@ func TestCompareDetectsDeletedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	exec.Command("git", "-C", sourcePath, "add", "deleted-file.txt").Run()
+	runGit(t, sourcePath, "add", "deleted-file.txt")
 
 	// Now remove it (staged for deletion)
 	os.Remove(testFile)
@@ -672,11 +726,11 @@ func TestCompareDetectsRenamedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
-	exec.Command("git", "-C", sourcePath, "add", "original.txt").Run()
-	exec.Command("git", "-C", sourcePath, "commit", "-m", "Add original file").Run()
+	runGit(t, sourcePath, "add", "original.txt")
+	runGit(t, sourcePath, "commit", "-m", "Add original file")
 
 	// Rename the file using git mv
-	exec.Command("git", "-C", sourcePath, "mv", "original.txt", "renamed.txt").Run()
+	runGit(t, sourcePath, "mv", "original.txt", "renamed.txt")
 
 	result, err := manager.CompareWorktrees(ctx, "rename-source")
 	if err != nil {
@@ -725,8 +779,8 @@ func TestCompareCommittedDeletes(t *testing.T) {
 
 	// Delete README.md which exists in main branch, and commit the deletion
 	readmeFile := filepath.Join(sourcePath, "README.md")
-	exec.Command("git", "-C", sourcePath, "rm", readmeFile).Run()
-	exec.Command("git", "-C", sourcePath, "commit", "-m", "Delete README").Run()
+	runGit(t, sourcePath, "rm", readmeFile)
+	runGit(t, sourcePath, "commit", "-m", "Delete README")
 
 	result, err := manager.CompareWorktrees(ctx, "committed-delete-source")
 	if err != nil {
