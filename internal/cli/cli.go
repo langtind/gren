@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -99,6 +100,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleNavigate(args[2:])
 	case "shell-init":
 		return c.handleShellInit(args[2:])
+	case "compare", "cmp":
+		return c.handleCompare(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -599,6 +602,168 @@ func (c *CLI) handleShellInit(args []string) error {
 	return nil
 }
 
+// handleCompare handles the compare command
+func (c *CLI) handleCompare(args []string) error {
+	fs := flag.NewFlagSet("compare", flag.ExitOnError)
+	apply := fs.Bool("apply", false, "Apply all changes from the worktree to current worktree")
+	list := fs.Bool("list", false, "List changed files only")
+	showDiff := fs.Bool("diff", false, "Show full diff output")
+	file := fs.String("file", "", "Show diff for a specific file only")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren compare <worktree> [options]\n")
+		fmt.Fprintf(fs.Output(), "\nCompare changes between a worktree and the current worktree\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren compare feature-branch            # Show diff summary\n")
+		fmt.Fprintf(fs.Output(), "  gren compare --list feature-branch     # List changed files\n")
+		fmt.Fprintf(fs.Output(), "  gren compare --diff feature-branch     # Show full diff\n")
+		fmt.Fprintf(fs.Output(), "  gren compare --file src/main.go feature-branch  # Diff single file\n")
+		fmt.Fprintf(fs.Output(), "  gren compare --apply feature-branch    # Apply all changes\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() == 0 {
+		logging.Error("CLI compare: worktree name is required")
+		fs.Usage()
+		return fmt.Errorf("worktree name is required")
+	}
+
+	worktreeName := fs.Arg(0)
+	logging.Info("CLI compare: worktree=%s, apply=%v, list=%v, diff=%v, file=%s", worktreeName, *apply, *list, *showDiff, *file)
+
+	ctx := context.Background()
+
+	// If showing diff for a specific file, use git diff directly
+	if *showDiff || *file != "" {
+		return c.showWorktreeDiff(ctx, worktreeName, *file)
+	}
+
+	// Compare worktrees
+	spin := newSpinner("Comparing worktrees...")
+	spin.Start()
+	result, err := c.worktreeManager.CompareWorktrees(ctx, worktreeName)
+	spin.Stop()
+
+	if err != nil {
+		logging.Error("CLI compare: failed to compare worktrees: %v", err)
+		return fmt.Errorf("failed to compare worktrees: %w", err)
+	}
+
+	if len(result.Files) == 0 {
+		fmt.Println("No changes found between worktrees.")
+		return nil
+	}
+
+	// Show summary
+	fmt.Printf("\n=== Compare: %s → %s ===\n\n", result.SourceWorktree, result.TargetWorktree)
+
+	// Count by type
+	added, modified, deleted := 0, 0, 0
+	for _, f := range result.Files {
+		switch f.Status {
+		case core.FileAdded:
+			added++
+		case core.FileModified:
+			modified++
+		case core.FileDeleted:
+			deleted++
+		}
+	}
+
+	fmt.Printf("Summary: %d added, %d modified, %d deleted\n\n", added, modified, deleted)
+
+	// List files if requested or if no action specified
+	if *list || (!*apply) {
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "STATUS\tFILE\tSOURCE")
+		fmt.Fprintln(w, "------\t----\t------")
+		for _, f := range result.Files {
+			source := "uncommitted"
+			if f.IsCommitted {
+				source = "committed"
+			}
+			statusIcon := ""
+			switch f.Status {
+			case core.FileAdded:
+				statusIcon = "✚ added"
+			case core.FileModified:
+				statusIcon = "✎ modified"
+			case core.FileDeleted:
+				statusIcon = "✖ deleted"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\n", statusIcon, f.Path, source)
+		}
+		w.Flush()
+		fmt.Println()
+	}
+
+	// Apply changes if requested
+	if *apply {
+		fmt.Printf("Applying %d changes...\n", len(result.Files))
+		if err := c.worktreeManager.ApplyChanges(ctx, worktreeName, result.Files); err != nil {
+			logging.Error("CLI compare: failed to apply changes: %v", err)
+			return fmt.Errorf("failed to apply changes: %w", err)
+		}
+		fmt.Printf("✅ Successfully applied %d changes from %s\n", len(result.Files), worktreeName)
+	} else {
+		fmt.Printf("To apply these changes, run:\n  gren compare %s --apply\n", worktreeName)
+	}
+
+	return nil
+}
+
+// showWorktreeDiff shows the git diff between worktrees
+func (c *CLI) showWorktreeDiff(ctx context.Context, worktreeName string, specificFile string) error {
+	// Get all worktrees to find the source path
+	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	var sourcePath string
+	for _, wt := range worktrees {
+		if wt.Name == worktreeName || wt.Path == worktreeName {
+			sourcePath = wt.Path
+			break
+		}
+	}
+
+	if sourcePath == "" {
+		return fmt.Errorf("worktree '%s' not found", worktreeName)
+	}
+
+	// Build git diff command
+	// We diff the source worktree against the current directory
+	var cmd *exec.Cmd
+	if specificFile != "" {
+		// Diff specific file
+		cmd = exec.Command("git", "-C", sourcePath, "diff", "--color=always", "HEAD", "--", specificFile)
+	} else {
+		// Diff all uncommitted changes in the source worktree
+		cmd = exec.Command("git", "-C", sourcePath, "diff", "--color=always", "HEAD")
+	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	logging.Debug("Running: git -C %s diff --color=always HEAD %s", sourcePath, specificFile)
+
+	if err := cmd.Run(); err != nil {
+		// Exit code 1 from git diff just means there are differences
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return nil
+		}
+		return fmt.Errorf("git diff failed: %w", err)
+	}
+
+	return nil
+}
+
 const bashZshInit = `# gren navigation wrapper
 _gren_original_command=$(which gren)
 
@@ -666,6 +831,7 @@ func (c *CLI) ShowHelp() {
 	fmt.Println("  gren create -n <name>   Create new worktree")
 	fmt.Println("  gren list              List all worktrees")
 	fmt.Println("  gren delete <name>     Delete a worktree")
+	fmt.Println("  gren compare <name>    Compare changes with another worktree")
 	fmt.Println("  gren navigate <name>   Navigate to worktree (requires shell setup)")
 	fmt.Println("  gren shell-init <shell> Generate shell integration for navigation")
 	fmt.Println("  gren init              Initialize gren in repository")
