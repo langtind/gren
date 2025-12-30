@@ -297,6 +297,9 @@ type Model struct {
 
 	// Delete operation spinner
 	deleteSpinner spinner.Model
+
+	// Compare loading spinner
+	compareSpinner spinner.Model
 }
 
 // KeyMap defines key bindings for the application

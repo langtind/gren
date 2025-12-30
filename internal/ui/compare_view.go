@@ -10,7 +10,11 @@ import (
 // renderCompareView renders the compare worktrees view with split layout
 func (m Model) renderCompareView() string {
 	if m.compareState == nil {
-		return "No compare state"
+		// Show loading state while compare is being initialized
+		titleStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#7D56F4"))
+		return fmt.Sprintf("%s %s", m.compareSpinner.View(), titleStyle.Render("Loading comparison..."))
 	}
 
 	state := m.compareState
@@ -81,12 +85,16 @@ func (m Model) renderCompareView() string {
 		return b.String()
 	}
 
-	// Calculate dimensions
+	// Calculate dimensions - fixed layout
 	totalWidth := m.width
 	if totalWidth < 80 {
 		totalWidth = 80
 	}
-	totalHeight := m.height - 6 // Leave room for header and footer
+	// Reserve: 1 title, 1 blank, panels, 1 selection count, 1 footer = 4 lines
+	panelHeight := m.height - 4
+	if panelHeight < 10 {
+		panelHeight = 10
+	}
 
 	// Left panel (file list) gets 35% width, right panel (diff) gets 65%
 	leftWidth := totalWidth * 35 / 100
@@ -95,14 +103,24 @@ func (m Model) renderCompareView() string {
 	}
 	rightWidth := totalWidth - leftWidth - 4 // Account for borders and spacing
 
-	// Build left panel (file list)
-	var leftContent strings.Builder
-	leftContent.WriteString(dimStyle.Render("FILES") + "\n")
-	leftContent.WriteString(strings.Repeat("─", leftWidth-4) + "\n")
+	// Content height inside panels (subtract border and header)
+	contentHeight := panelHeight - 4
+	if contentHeight < 3 {
+		contentHeight = 3
+	}
 
-	visibleFiles := totalHeight - 4
-	if visibleFiles < 3 {
-		visibleFiles = 3
+	// Build left panel (file list)
+	var leftLines []string
+	filesLabel := "FILES"
+	if !state.diffFocused {
+		filesLabel = "FILES (focused)"
+	}
+	leftLines = append(leftLines, dimStyle.Render(filesLabel))
+	leftLines = append(leftLines, strings.Repeat("─", leftWidth-4))
+
+	visibleFiles := contentHeight - 2 // Subtract header lines
+	if visibleFiles < 1 {
+		visibleFiles = 1
 	}
 
 	startIdx := state.scrollOffset
@@ -158,30 +176,41 @@ func (m Model) renderCompareView() string {
 			line = fmt.Sprintf("%s %s %s", checkbox, pathStyle.Render(icon), pathStyle.Render(displayPath))
 		}
 
-		leftContent.WriteString(line + "\n")
+		leftLines = append(leftLines, line)
 	}
 
-	// Show scroll indicator if needed
+	// Pad to fill height
+	for len(leftLines) < contentHeight {
+		leftLines = append(leftLines, "")
+	}
+
+	// Show scroll indicator if needed (replace last line)
 	if len(state.files) > visibleFiles {
 		scrollInfo := fmt.Sprintf("[%d/%d]", state.selectedIndex+1, len(state.files))
-		leftContent.WriteString(dimStyle.Render(scrollInfo))
+		leftLines[len(leftLines)-1] = dimStyle.Render(scrollInfo)
 	}
 
+	leftContent := strings.Join(leftLines, "\n")
+
 	// Build right panel (diff viewer)
-	var rightContent strings.Builder
+	var rightLines []string
 	diffLabel := "DIFF"
 	if state.diffFocused {
 		diffLabel = "DIFF (focused)"
 	}
-	rightContent.WriteString(dimStyle.Render(diffLabel) + "\n")
-	rightContent.WriteString(strings.Repeat("─", rightWidth-4) + "\n")
+	rightLines = append(rightLines, dimStyle.Render(diffLabel))
+	rightLines = append(rightLines, strings.Repeat("─", rightWidth-4))
+
+	visibleDiffLines := contentHeight - 2 // Subtract header lines
+	if visibleDiffLines < 1 {
+		visibleDiffLines = 1
+	}
 
 	if state.diffContent == "" {
-		rightContent.WriteString(dimStyle.Render("Loading diff..."))
+		rightLines = append(rightLines, dimStyle.Render("Loading diff..."))
 	} else {
 		// Render diff with syntax highlighting
 		diffLines := strings.Split(state.diffContent, "\n")
-		visibleDiffLines := totalHeight - 4
 
 		startLine := state.diffScrollOffset
 		endLine := startLine + visibleDiffLines
@@ -198,34 +227,49 @@ func (m Model) renderCompareView() string {
 
 			// Color based on diff type
 			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-				rightContent.WriteString(diffAddStyle.Render(line) + "\n")
+				rightLines = append(rightLines, diffAddStyle.Render(line))
 			} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-				rightContent.WriteString(diffDelStyle.Render(line) + "\n")
+				rightLines = append(rightLines, diffDelStyle.Render(line))
 			} else if strings.HasPrefix(line, "@@") {
-				rightContent.WriteString(diffHeaderStyle.Render(line) + "\n")
+				rightLines = append(rightLines, diffHeaderStyle.Render(line))
 			} else if strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") ||
 				strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
-				rightContent.WriteString(diffHeaderStyle.Render(line) + "\n")
+				rightLines = append(rightLines, diffHeaderStyle.Render(line))
 			} else {
-				rightContent.WriteString(line + "\n")
+				rightLines = append(rightLines, line)
 			}
 		}
 
 		// Show scroll indicator for diff
 		if len(diffLines) > visibleDiffLines {
 			scrollInfo := fmt.Sprintf("[line %d/%d]", startLine+1, len(diffLines))
-			rightContent.WriteString(dimStyle.Render(scrollInfo))
+			// Pad and add scroll info
+			for len(rightLines) < contentHeight-1 {
+				rightLines = append(rightLines, "")
+			}
+			rightLines = append(rightLines, dimStyle.Render(scrollInfo))
 		}
 	}
 
-	// Create boxed panels
-	leftPanel := boxStyle.Width(leftWidth - 2).Render(leftContent.String())
+	// Pad to fill height
+	for len(rightLines) < contentHeight {
+		rightLines = append(rightLines, "")
+	}
+
+	rightContent := strings.Join(rightLines, "\n")
+
+	// Create boxed panels with fixed height
+	leftBoxStyle := boxStyle
+	if !state.diffFocused {
+		leftBoxStyle = leftBoxStyle.BorderForeground(lipgloss.Color("#A6E3A1")) // Green when focused
+	}
+	leftPanel := leftBoxStyle.Width(leftWidth - 2).Height(panelHeight - 2).Render(leftContent)
 
 	rightBoxStyle := boxStyle
 	if state.diffFocused {
 		rightBoxStyle = rightBoxStyle.BorderForeground(lipgloss.Color("#A6E3A1")) // Green when focused
 	}
-	rightPanel := rightBoxStyle.Width(rightWidth - 2).Render(rightContent.String())
+	rightPanel := rightBoxStyle.Width(rightWidth - 2).Height(panelHeight - 2).Render(rightContent)
 
 	// Join panels horizontally
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, " ", rightPanel)
@@ -233,9 +277,9 @@ func (m Model) renderCompareView() string {
 	// Build final view
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(fmt.Sprintf("Compare: %s → current worktree", state.sourceWorktree)))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 	b.WriteString(panels)
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	// Selection count
 	selectedCount := 0
@@ -247,13 +291,23 @@ func (m Model) renderCompareView() string {
 	b.WriteString(fmt.Sprintf("%d of %d files selected", selectedCount, len(state.files)))
 	b.WriteString("\n")
 
-	// Help footer
-	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
+	// Help footer - same style as dashboard
+	width := m.width - 2
+	sep := HelpSeparatorStyle.Render(" │ ")
+
+	var footer string
 	if state.diffFocused {
-		b.WriteString(helpStyle.Render("[↑/↓/j/k] Scroll diff  [esc/q] Exit focus"))
+		nav := HelpItem("↑↓jk", "scroll")
+		other := HelpItem("←h", "back") + " " + HelpItem("?", "help") + " " + HelpItem("esc", "exit")
+		footer = nav + sep + other
 	} else {
-		b.WriteString(helpStyle.Render("[↑/↓/j/k] Navigate  [space] Toggle  [a] All  [enter] Focus diff  [y] Apply  [q] Back"))
+		nav := HelpItem("↑↓jk", "nav")
+		selection := HelpItem("space", "toggle") + " " + HelpItem("a", "all")
+		actions := HelpItem("→l", "focus") + " " + HelpItem("y", "apply")
+		other := HelpItem("?", "help") + " " + HelpItem("esc", "back")
+		footer = nav + sep + selection + sep + actions + sep + other
 	}
+	b.WriteString(FooterBarStyle.Width(width).Render(footer))
 
 	return b.String()
 }

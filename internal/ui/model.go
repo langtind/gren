@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -448,6 +449,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
+		// Handle spinner animation for compare loading
+		if m.currentView == CompareView && m.compareState == nil {
+			var cmd tea.Cmd
+			m.compareSpinner, cmd = m.compareSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
 		if len(cmds) > 0 {
 			return m, tea.Batch(cmds...)
 		}
@@ -611,7 +619,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.repoInfo != nil && m.repoInfo.IsInitialized {
 					logging.Info("Dashboard: entering CompareView for worktree: %s (shortcut 'm')", selectedWorktree.Name)
 					m.currentView = CompareView
-					return m, m.initializeCompareState(selectedWorktree.Name)
+					// Initialize spinner for loading state
+					s := spinner.New()
+					s.Spinner = spinner.Dot
+					s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
+					m.compareSpinner = s
+					return m, tea.Batch(m.initializeCompareState(selectedWorktree.Name), m.compareSpinner.Tick)
 				}
 			}
 			return m, nil
@@ -668,6 +681,9 @@ func (m Model) View() string {
 		return m.renderWithModalWidth(baseView, m.renderCleanupConfirmation(), 70, ColorWarning)
 	case CompareView:
 		baseView = m.renderCompareView()
+		if m.helpVisible {
+			return m.renderCompareHelpOverlay(baseView)
+		}
 	default:
 		baseView = m.dashboardView()
 	}

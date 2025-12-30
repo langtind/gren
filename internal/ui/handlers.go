@@ -967,7 +967,7 @@ func (m Model) handleCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle diff focused mode (scrolling diff)
 	if m.compareState.diffFocused {
 		switch {
-		case key.Matches(msg, m.keys.Back), msg.String() == "q" || msg.String() == "Q":
+		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Left), msg.String() == "h" || msg.String() == "H":
 			// Exit diff focus mode
 			m.compareState.diffFocused = false
 			return m, nil
@@ -991,9 +991,17 @@ func (m Model) handleCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Normal mode (file list focused)
 	switch {
-	case msg.String() == "q" || msg.String() == "Q":
-		// Return to dashboard
-		logging.Debug("CompareView: back to Dashboard")
+	case msg.String() == "?":
+		// Toggle help overlay
+		m.helpVisible = !m.helpVisible
+		return m, nil
+	case key.Matches(msg, m.keys.Back):
+		// Esc - close help if visible, otherwise go back
+		if m.helpVisible {
+			m.helpVisible = false
+			return m, nil
+		}
+		logging.Debug("CompareView: back to Dashboard (esc)")
 		m.currentView = DashboardView
 		m.compareState = nil
 		return m, nil
@@ -1029,7 +1037,7 @@ func (m Model) handleCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadCompareDiff(m.compareState.sourcePath, file.Path)
 		}
 		return m, nil
-	case key.Matches(msg, m.keys.Enter):
+	case key.Matches(msg, m.keys.Enter), key.Matches(msg, m.keys.Right), msg.String() == "l" || msg.String() == "L":
 		// Enter diff focus mode (for scrolling)
 		m.compareState.diffFocused = true
 		return m, nil
