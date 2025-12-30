@@ -1426,9 +1426,9 @@ func (m Model) loadCompareDiff(sourcePath string, filePath string) tea.Cmd {
 				content = strings.Join(diffLines, "\n")
 			}
 		} else {
-			// Both files exist - run diff
-			cmd := exec.Command("diff", "-u", currentFile, sourceFile)
-			output, _ := cmd.Output() // diff returns exit code 1 when files differ
+			// Both files exist - use git diff for cross-platform compatibility
+			cmd := exec.Command("git", "diff", "--no-index", "--", currentFile, sourceFile)
+			output, _ := cmd.CombinedOutput() // git diff returns exit code 1 when files differ
 			if len(output) == 0 {
 				content = "(No differences)"
 			} else {

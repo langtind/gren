@@ -219,9 +219,14 @@ func (m Model) renderCompareView() string {
 
 		for i := startLine; i < endLine; i++ {
 			line := diffLines[i]
-			// Truncate long lines
-			if len(line) > rightWidth-4 {
-				line = line[:rightWidth-7] + "..."
+			// Truncate long lines using rune-aware width calculation
+			maxWidth := rightWidth - 4
+			if lipgloss.Width(line) > maxWidth {
+				// Truncate by runes, not bytes, to avoid splitting UTF-8 characters
+				runes := []rune(line)
+				if len(runes) > maxWidth-3 {
+					line = string(runes[:maxWidth-3]) + "..."
+				}
 			}
 
 			// Color based on diff type

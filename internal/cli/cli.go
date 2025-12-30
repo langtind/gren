@@ -783,6 +783,14 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 		}
 	}
 
+	// Validate paths were found
+	if sourcePath == "" {
+		return fmt.Errorf("source worktree '%s' not found", sourceWorktree)
+	}
+	if currentPath == "" {
+		return fmt.Errorf("current worktree not found")
+	}
+
 	fmt.Printf("Changes from %s → %s:\n", result.SourceWorktree, result.TargetWorktree)
 	fmt.Println(strings.Repeat("=", 60))
 
@@ -801,7 +809,9 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 			// Show file content using filepath.Join for safe path construction
 			srcFile := filepath.Join(sourcePath, file.Path)
 			content, err := os.ReadFile(srcFile)
-			if err == nil {
+			if err != nil {
+				fmt.Printf("[Error reading file: %v]\n", err)
+			} else {
 				lines := strings.Split(string(content), "\n")
 				for _, line := range lines {
 					fmt.Printf("+ %s\n", line)
@@ -810,16 +820,18 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 		case core.FileDeleted:
 			fmt.Println("[DELETED]")
 		case core.FileModified:
-			// Run diff between the files with proper argument handling (no shell injection)
+			// Use git diff for cross-platform compatibility (works on Windows via Git)
 			currentFile := filepath.Join(currentPath, file.Path)
 			sourceFile := filepath.Join(sourcePath, file.Path)
-			cmd := exec.Command("diff", "-u", currentFile, sourceFile)
+			cmd := exec.Command("git", "diff", "--no-index", "--", currentFile, sourceFile)
 			output, _ := cmd.CombinedOutput()
 			if len(output) > 0 {
 				fmt.Println(string(output))
 			} else {
 				fmt.Println("[Binary or no diff available]")
 			}
+		default:
+			fmt.Printf("[Unknown status: %v]\n", file.Status)
 		}
 	}
 
