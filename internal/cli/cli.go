@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -788,11 +789,18 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 	for _, file := range result.Files {
 		fmt.Printf("\n--- %s ---\n", file.Path)
 
+		// Validate path to prevent path traversal attacks
+		if err := validateFilePath(file.Path); err != nil {
+			fmt.Printf("[Error: %v]\n", err)
+			continue
+		}
+
 		switch file.Status {
 		case core.FileAdded:
 			fmt.Println("[NEW FILE]")
-			// Show file content
-			content, err := os.ReadFile(sourcePath + "/" + file.Path)
+			// Show file content using filepath.Join for safe path construction
+			srcFile := filepath.Join(sourcePath, file.Path)
+			content, err := os.ReadFile(srcFile)
 			if err == nil {
 				lines := strings.Split(string(content), "\n")
 				for _, line := range lines {
@@ -802,12 +810,13 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 		case core.FileDeleted:
 			fmt.Println("[DELETED]")
 		case core.FileModified:
-			// Run git diff between the files
-			cmd := fmt.Sprintf("diff -u %s/%s %s/%s 2>/dev/null || true",
-				currentPath, file.Path, sourcePath, file.Path)
-			output, _ := runCommand("sh", "-c", cmd)
-			if output != "" {
-				fmt.Println(output)
+			// Run diff between the files with proper argument handling (no shell injection)
+			currentFile := filepath.Join(currentPath, file.Path)
+			sourceFile := filepath.Join(sourcePath, file.Path)
+			cmd := exec.Command("diff", "-u", currentFile, sourceFile)
+			output, _ := cmd.CombinedOutput()
+			if len(output) > 0 {
+				fmt.Println(string(output))
 			} else {
 				fmt.Println("[Binary or no diff available]")
 			}
@@ -822,4 +831,17 @@ func runCommand(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	output, err := cmd.Output()
 	return string(output), err
+}
+
+// validateFilePath checks if a file path is safe (no path traversal)
+func validateFilePath(path string) error {
+	// Check for path traversal attempts
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("invalid path (contains '..'): %s", path)
+	}
+	// Check for absolute paths
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("invalid path (absolute path not allowed): %s", path)
+	}
+	return nil
 }

@@ -1350,6 +1350,9 @@ func (m Model) applyCompareChanges() tea.Cmd {
 				status = core.FileModified
 			case "deleted":
 				status = core.FileDeleted
+			default:
+				logging.Warn("applyCompareChanges: unknown status %q for file %s, skipping", f.Status, f.Path)
+				continue
 			}
 			coreFiles = append(coreFiles, core.FileChange{
 				Path:        f.Path,

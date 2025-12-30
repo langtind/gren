@@ -165,7 +165,8 @@ func (m Model) renderCompareView() string {
 
 		if i == state.selectedIndex {
 			// Pad to fill width for selection highlight
-			padding := leftWidth - 4 - len(line)
+			// Use lipgloss.Width for correct Unicode character width calculation
+			padding := leftWidth - 4 - lipgloss.Width(line)
 			if padding > 0 {
 				line += strings.Repeat(" ", padding)
 			}

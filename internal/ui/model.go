@@ -616,13 +616,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					logging.Debug("Dashboard: cannot compare current worktree to itself")
 					return m, nil
 				}
-				if m.repoInfo != nil && m.repoInfo.IsInitialized {
+				if m.repoInfo != nil && m.repoInfo.IsGitRepo && m.repoInfo.IsInitialized {
 					logging.Info("Dashboard: entering CompareView for worktree: %s (shortcut 'm')", selectedWorktree.Name)
 					m.currentView = CompareView
 					// Initialize spinner for loading state
 					s := spinner.New()
 					s.Spinner = spinner.Dot
-					s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4"))
+					s.Style = lipgloss.NewStyle().Foreground(ColorPrimary)
 					m.compareSpinner = s
 					return m, tea.Batch(m.initializeCompareState(selectedWorktree.Name), m.compareSpinner.Tick)
 				}
