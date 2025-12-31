@@ -14,7 +14,7 @@
 | Branch-basert Adressering | ✅ Ferdig | `489008f` | - |
 | Spesiell Navigasjon (-) | ✅ Ferdig | `a0bb7a8` | - |
 | Statusline Command | ✅ Ferdig | `c4931d2` | - |
-| **Unified Merge Command** | ⏳ Pending | - | 🔴 HØY |
+| **Unified Merge Command** | ✅ Ferdig | `2d2e34d` | - |
 | **for-each Command** | ⏳ Pending | - | 🟡 MEDIUM |
 | **LLM Commit Messages** | ⏳ Pending | - | 🟡 MEDIUM |
 | **CI Status Integration** | ⏳ Pending | - | 🟡 MEDIUM |
