@@ -1158,6 +1158,7 @@ func (m Model) refreshAllStatus() tea.Cmd {
 		if ghStatus == core.GitHubAvailable {
 			logging.Info("refreshAllStatus: GitHub CLI available, fetching PR status")
 			worktreeManager.EnrichWithGitHubStatus(worktrees)
+			worktreeManager.EnrichWithCIStatus(worktrees)
 		} else {
 			logging.Debug("refreshAllStatus: GitHub CLI not available, skipping PR status")
 		}
@@ -1221,6 +1222,7 @@ func (m Model) startGitHubCheck() tea.Cmd {
 
 		// Enrich with GitHub status
 		worktreeManager.EnrichWithGitHubStatus(coreWorktrees)
+		worktreeManager.EnrichWithCIStatus(coreWorktrees)
 
 		// Convert back to UI worktrees
 		uiWorktrees := make([]Worktree, len(coreWorktrees))

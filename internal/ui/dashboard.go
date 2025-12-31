@@ -398,25 +398,28 @@ func commitTimeScore(timeStr string) int {
 
 func (m Model) renderTableHeader(width int) string {
 	// Column widths (proportional) - no NAME column, branch is the identifier
-	branchWidth := width * 35 / 100
+	branchWidth := width * 33 / 100
 	lastCommitWidth := width * 12 / 100
 	statusWidth := width * 12 / 100
-	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
+	ciWidth := width * 3 / 100
+	pathWidth := width - branchWidth - lastCommitWidth - statusWidth - ciWidth
 
 	branchCol := TableHeaderStyle.Width(branchWidth).Render("BRANCH")
 	lastCommitCol := TableHeaderStyle.Width(lastCommitWidth).Render("LAST COMMIT")
 	statusCol := TableHeaderStyle.Width(statusWidth).Render("STATUS")
+	ciCol := TableHeaderStyle.Width(ciWidth).Render("CI")
 	pathCol := TableHeaderStyle.Width(pathWidth).Render("PATH")
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, pathCol)
+	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, ciCol, pathCol)
 }
 
 func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	// Column widths (proportional) - must match header
-	branchWidth := width * 35 / 100
+	branchWidth := width * 33 / 100
 	lastCommitWidth := width * 12 / 100
 	statusWidth := width * 12 / 100
-	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
+	ciWidth := width * 3 / 100
+	pathWidth := width - branchWidth - lastCommitWidth - statusWidth - ciWidth
 
 	branch := wt.Branch
 	if wt.Marker != "" {
@@ -470,9 +473,10 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	branchCol := rowStyle.Width(branchWidth).Render(branchStyle.Render(truncate(branch, branchWidth-2)))
 	lastCommitCol := rowStyle.Width(lastCommitWidth).Render(DashboardCommitStyle.Render(truncate(wt.LastCommit, lastCommitWidth-2)))
 	statusCol := rowStyle.Width(statusWidth).Render(status)
+	ciCol := rowStyle.Width(ciWidth).Render(CIStatusBadge(wt.CIStatus, bgColor))
 	pathCol := rowStyle.Width(pathWidth).Render(DashboardPathStyle.Render(pathText))
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, pathCol)
+	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, ciCol, pathCol)
 }
 
 // shortenPath replaces home directory with ~ and truncates if needed

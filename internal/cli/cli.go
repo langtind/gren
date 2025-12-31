@@ -242,6 +242,7 @@ func (c *CLI) handleList(args []string) error {
 	if c.worktreeManager.CheckGitHubAvailability() == core.GitHubAvailable {
 		logging.Debug("CLI list: enriching with GitHub status")
 		c.worktreeManager.EnrichWithGitHubStatus(worktrees)
+		c.worktreeManager.EnrichWithCIStatus(worktrees)
 	}
 
 	if sp != nil {

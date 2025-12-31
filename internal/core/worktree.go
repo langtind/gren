@@ -61,6 +61,11 @@ type WorktreeInfo struct {
 	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
 	PRURL    string // Full URL to PR for "Open in browser"
 
+	// CI status fields (populated async via gh CLI)
+	CIStatus     string // "success", "failure", "pending", "error", "" if unknown
+	CIConclusion string // Detailed conclusion from GitHub Actions
+	ChecksURL    string // URL to checks page
+
 	Marker MarkerType
 }
 
@@ -1131,6 +1136,94 @@ func (wm *WorktreeManager) OpenPRInBrowser(branch string) error {
 	}
 
 	return nil
+}
+
+type CIInfo struct {
+	Status     string
+	Conclusion string
+	ChecksURL  string
+}
+
+func (wm *WorktreeManager) FetchCIStatus(branch string) *CIInfo {
+	logging.Debug("FetchCIStatus: checking CI for branch %q", branch)
+
+	cmd := exec.Command("gh", "pr", "checks", branch, "--json", "state,name,conclusion")
+	output, err := cmd.Output()
+	if err != nil {
+		logging.Debug("FetchCIStatus: no checks for branch %q: %v", branch, err)
+		return nil
+	}
+
+	var checks []struct {
+		State      string `json:"state"`
+		Name       string `json:"name"`
+		Conclusion string `json:"conclusion"`
+	}
+	if err := json.Unmarshal(output, &checks); err != nil {
+		logging.Debug("FetchCIStatus: failed to parse checks: %v", err)
+		return nil
+	}
+
+	if len(checks) == 0 {
+		return nil
+	}
+
+	info := &CIInfo{}
+	hasFailure := false
+	hasPending := false
+	allSuccess := true
+
+	for _, check := range checks {
+		switch check.State {
+		case "FAILURE", "ERROR":
+			hasFailure = true
+			allSuccess = false
+		case "PENDING", "QUEUED", "IN_PROGRESS":
+			hasPending = true
+			allSuccess = false
+		case "SUCCESS":
+		default:
+			allSuccess = false
+		}
+	}
+
+	if hasFailure {
+		info.Status = "failure"
+		info.Conclusion = "Some checks failed"
+	} else if hasPending {
+		info.Status = "pending"
+		info.Conclusion = "Checks in progress"
+	} else if allSuccess {
+		info.Status = "success"
+		info.Conclusion = "All checks passed"
+	} else {
+		info.Status = "unknown"
+	}
+
+	return info
+}
+
+func (wm *WorktreeManager) EnrichWithCIStatus(worktrees []WorktreeInfo) {
+	logging.Debug("EnrichWithCIStatus: enriching %d worktrees", len(worktrees))
+
+	for i := range worktrees {
+		wt := &worktrees[i]
+
+		if wt.IsMain || wt.Branch == "(detached)" || wt.Branch == "(bare)" {
+			continue
+		}
+
+		if wt.PRNumber == 0 {
+			continue
+		}
+
+		ci := wm.FetchCIStatus(wt.Branch)
+		if ci != nil {
+			wt.CIStatus = ci.Status
+			wt.CIConclusion = ci.Conclusion
+			wt.ChecksURL = ci.ChecksURL
+		}
+	}
 }
 
 func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*MergeResult, error) {

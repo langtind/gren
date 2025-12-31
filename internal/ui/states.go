@@ -109,6 +109,8 @@ func convertCoreWorktreeToUI(wt core.WorktreeInfo) Worktree {
 		PRNumber:       wt.PRNumber,
 		PRState:        wt.PRState,
 		PRURL:          wt.PRURL,
+		CIStatus:       wt.CIStatus,
+		CIConclusion:   wt.CIConclusion,
 		Marker:         string(wt.Marker),
 	}
 }

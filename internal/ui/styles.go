@@ -477,6 +477,36 @@ func StatusBadgeDetailed(status, branchStatus string, staged, modified, untracke
 	return strings.Join(parts, "")
 }
 
+func CIStatusBadge(ciStatus string, bgColor lipgloss.AdaptiveColor) string {
+	if ciStatus == "" {
+		return ""
+	}
+
+	var style lipgloss.Style
+	var symbol string
+
+	switch ciStatus {
+	case "success":
+		symbol = "●"
+		style = lipgloss.NewStyle().Foreground(ColorSuccess)
+	case "failure":
+		symbol = "●"
+		style = lipgloss.NewStyle().Foreground(ColorError)
+	case "pending":
+		symbol = "●"
+		style = lipgloss.NewStyle().Foreground(ColorWarning)
+	default:
+		symbol = "○"
+		style = lipgloss.NewStyle().Foreground(ColorTextMuted)
+	}
+
+	if bgColor.Dark != "" || bgColor.Light != "" {
+		style = style.Background(bgColor)
+	}
+
+	return style.Render(symbol)
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Wizard / View Styles
 // ═══════════════════════════════════════════════════════════════════════════

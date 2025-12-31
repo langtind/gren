@@ -50,6 +50,10 @@ type Worktree struct {
 	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
 	PRURL    string // Full URL to PR for "Open in browser"
 
+	// CI status fields
+	CIStatus     string // "success", "failure", "pending", "" if unknown
+	CIConclusion string
+
 	Marker string
 }
 
