@@ -19,7 +19,7 @@
 | Dev Server URL Column | ⏳ Pending | - |
 | Progressive CLI Rendering | ⏳ Pending | - |
 | Unified Merge Command | ⏳ Pending | - |
-| Statusline Command | ⏳ Pending | - |
+| Statusline Command | ✅ Ferdig | `c4931d2` |
 
 ---
 
