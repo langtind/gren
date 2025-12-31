@@ -17,7 +17,7 @@
 | **Unified Merge Command** | ✅ Ferdig | `2d2e34d` | - |
 | **for-each Command** | ✅ Ferdig | `9be6f6e` | - |
 | **LLM Commit Messages** | ✅ Ferdig | `0632022` | - |
-| **CI Status Integration** | ⏳ Pending | - | 🟡 MEDIUM |
+| **CI Status Integration** | ✅ Ferdig | `251af59` | - |
 | **Progressive CLI Rendering** | ⏳ Pending | - | 🟢 LAV |
 | **Dev Server URL Column** | ⏳ Pending | - | 🟢 LAV |
 
