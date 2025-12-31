@@ -112,6 +112,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleStatusline(args[2:])
 	case "merge":
 		return c.handleMerge(args[2:])
+	case "for-each":
+		return c.handleForEach(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -1331,6 +1333,98 @@ func (c *CLI) handleMerge(args []string) error {
 	}
 	if result.WorktreeRemoved {
 		fmt.Printf("   Removed worktree: %s\n", result.WorktreePath)
+	}
+
+	return nil
+}
+
+func (c *CLI) handleForEach(args []string) error {
+	fs := flag.NewFlagSet("for-each", flag.ExitOnError)
+	skipCurrent := fs.Bool("skip-current", false, "Skip the current worktree")
+	skipMain := fs.Bool("skip-main", false, "Skip the main worktree")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren for-each [options] -- <command>\n")
+		fmt.Fprintf(fs.Output(), "\nRun a command in all worktrees\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nTemplate variables:\n")
+		fmt.Fprintf(fs.Output(), "  {{ branch }}           Branch name\n")
+		fmt.Fprintf(fs.Output(), "  {{ branch | sanitize }} Branch with / replaced by -\n")
+		fmt.Fprintf(fs.Output(), "  {{ worktree }}         Absolute path to worktree\n")
+		fmt.Fprintf(fs.Output(), "  {{ worktree_name }}    Worktree directory name\n")
+		fmt.Fprintf(fs.Output(), "  {{ repo }}             Repository name\n")
+		fmt.Fprintf(fs.Output(), "  {{ repo_root }}        Absolute path to main repo\n")
+		fmt.Fprintf(fs.Output(), "  {{ commit }}           Full HEAD commit SHA\n")
+		fmt.Fprintf(fs.Output(), "  {{ short_commit }}     Short HEAD commit SHA\n")
+		fmt.Fprintf(fs.Output(), "  {{ default_branch }}   Default branch (main/master)\n")
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren for-each -- git status --short\n")
+		fmt.Fprintf(fs.Output(), "  gren for-each -- npm install\n")
+		fmt.Fprintf(fs.Output(), "  gren for-each -- \"echo Branch: {{ branch }}\"\n")
+		fmt.Fprintf(fs.Output(), "  gren for-each --skip-main -- git pull\n")
+	}
+
+	dashIndex := -1
+	for i, arg := range args {
+		if arg == "--" {
+			dashIndex = i
+			break
+		}
+	}
+
+	if dashIndex == -1 {
+		fs.Usage()
+		return fmt.Errorf("missing -- separator before command")
+	}
+
+	if err := fs.Parse(args[:dashIndex]); err != nil {
+		return err
+	}
+
+	command := args[dashIndex+1:]
+	if len(command) == 0 {
+		fs.Usage()
+		return fmt.Errorf("no command provided")
+	}
+
+	ctx := context.Background()
+
+	opts := core.ForEachOptions{
+		Command:     command,
+		SkipCurrent: *skipCurrent,
+		SkipMain:    *skipMain,
+	}
+
+	results, err := c.worktreeManager.ForEach(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	successCount := 0
+	failCount := 0
+
+	for _, r := range results {
+		fmt.Printf("\n\033[1m%s\033[0m (%s)\n", r.Worktree.Branch, r.Worktree.Path)
+		fmt.Print(r.Output)
+
+		if r.Error != nil {
+			fmt.Printf("\033[31m✗ Exit code: %d\033[0m\n", r.ExitCode)
+			failCount++
+		} else {
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n---\n")
+	fmt.Printf("✅ %d succeeded", successCount)
+	if failCount > 0 {
+		fmt.Printf(", \033[31m✗ %d failed\033[0m", failCount)
+	}
+	fmt.Println()
+
+	if failCount > 0 {
+		return fmt.Errorf("%d worktree(s) failed", failCount)
 	}
 
 	return nil

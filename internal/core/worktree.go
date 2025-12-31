@@ -84,6 +84,35 @@ type MergeResult struct {
 	SkipReason      string
 }
 
+// ForEachOptions contains parameters for running a command in all worktrees
+type ForEachOptions struct {
+	Command     []string // Command and arguments to run
+	SkipCurrent bool     // Skip the current worktree
+	SkipMain    bool     // Skip the main worktree
+	Parallel    bool     // Run in parallel (default: sequential)
+}
+
+// ForEachResult contains the result of running a command in a worktree
+type ForEachResult struct {
+	Worktree *WorktreeInfo
+	Output   string
+	ExitCode int
+	Error    error
+}
+
+// TemplateContext holds variables for template expansion in for-each commands
+type TemplateContext struct {
+	Branch          string // Branch name
+	BranchSanitized string // Branch name with / → -
+	Worktree        string // Absolute path to worktree
+	WorktreeName    string // Worktree directory name
+	Repo            string // Repository name
+	RepoRoot        string // Absolute path to main repo
+	Commit          string // Full HEAD commit SHA
+	ShortCommit     string // Short HEAD commit SHA (7 chars)
+	DefaultBranch   string // Default branch (main/master)
+}
+
 // CheckPrerequisites verifies that required tools are available
 func (wm *WorktreeManager) CheckPrerequisites() error {
 	var missing []string
@@ -1333,4 +1362,133 @@ func (wm *WorktreeManager) fastForwardMerge(source, target string) error {
 	}
 
 	return nil
+}
+
+func (wm *WorktreeManager) ForEach(ctx context.Context, opts ForEachOptions) ([]ForEachResult, error) {
+	logging.Info("ForEach: running command in all worktrees: %v", opts.Command)
+
+	worktrees, err := wm.ListWorktrees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	repoRoot, _ := wm.getRepoRoot()
+	repoName := filepath.Base(repoRoot)
+	defaultBranch, _ := wm.getDefaultBranch()
+
+	var results []ForEachResult
+
+	for _, wt := range worktrees {
+		if opts.SkipCurrent && wt.IsCurrent {
+			continue
+		}
+		if opts.SkipMain && wt.IsMain {
+			continue
+		}
+		if wt.Status == "missing" {
+			continue
+		}
+
+		tmplCtx := wm.buildTemplateContext(&wt, repoRoot, repoName, defaultBranch)
+		expandedCmd := wm.expandCommand(opts.Command, tmplCtx)
+
+		result := ForEachResult{Worktree: &wt}
+
+		var cmd *exec.Cmd
+		if len(expandedCmd) == 1 {
+			cmd = exec.CommandContext(ctx, "sh", "-c", expandedCmd[0])
+		} else {
+			cmd = exec.CommandContext(ctx, expandedCmd[0], expandedCmd[1:]...)
+		}
+		cmd.Dir = wt.Path
+
+		output, err := cmd.CombinedOutput()
+		result.Output = string(output)
+
+		if err != nil {
+			result.Error = err
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				result.ExitCode = exitErr.ExitCode()
+			} else {
+				result.ExitCode = 1
+			}
+		}
+
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+func (wm *WorktreeManager) buildTemplateContext(wt *WorktreeInfo, repoRoot, repoName, defaultBranch string) TemplateContext {
+	commit := wm.getCommitSHA(wt.Path)
+	shortCommit := commit
+	if len(commit) > 7 {
+		shortCommit = commit[:7]
+	}
+
+	return TemplateContext{
+		Branch:          wt.Branch,
+		BranchSanitized: sanitizeBranch(wt.Branch),
+		Worktree:        wt.Path,
+		WorktreeName:    wt.Name,
+		Repo:            repoName,
+		RepoRoot:        repoRoot,
+		Commit:          commit,
+		ShortCommit:     shortCommit,
+		DefaultBranch:   defaultBranch,
+	}
+}
+
+func (wm *WorktreeManager) getCommitSHA(worktreePath string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = worktreePath
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func sanitizeBranch(branch string) string {
+	result := strings.ReplaceAll(branch, "/", "-")
+	result = strings.ReplaceAll(result, "\\", "-")
+	return result
+}
+
+func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) []string {
+	expanded := make([]string, len(command))
+	for i, arg := range command {
+		expanded[i] = expandTemplate(arg, ctx)
+	}
+	return expanded
+}
+
+func expandTemplate(template string, ctx TemplateContext) string {
+	replacements := map[string]string{
+		"{{ branch }}":            ctx.Branch,
+		"{{branch}}":              ctx.Branch,
+		"{{ branch | sanitize }}": ctx.BranchSanitized,
+		"{{branch|sanitize}}":     ctx.BranchSanitized,
+		"{{ worktree }}":          ctx.Worktree,
+		"{{worktree}}":            ctx.Worktree,
+		"{{ worktree_name }}":     ctx.WorktreeName,
+		"{{worktree_name}}":       ctx.WorktreeName,
+		"{{ repo }}":              ctx.Repo,
+		"{{repo}}":                ctx.Repo,
+		"{{ repo_root }}":         ctx.RepoRoot,
+		"{{repo_root}}":           ctx.RepoRoot,
+		"{{ commit }}":            ctx.Commit,
+		"{{commit}}":              ctx.Commit,
+		"{{ short_commit }}":      ctx.ShortCommit,
+		"{{short_commit}}":        ctx.ShortCommit,
+		"{{ default_branch }}":    ctx.DefaultBranch,
+		"{{default_branch}}":      ctx.DefaultBranch,
+	}
+
+	result := template
+	for pattern, value := range replacements {
+		result = strings.ReplaceAll(result, pattern, value)
+	}
+	return result
 }
