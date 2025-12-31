@@ -651,6 +651,18 @@ func TestHandleNavigateSuccess(t *testing.T) {
 		t.Fatalf("create worktree failed: %v", err)
 	}
 
+	// Create a temp file for directive output (simulates shell integration)
+	directiveFile, err := os.CreateTemp("", "gren-directive-*")
+	if err != nil {
+		t.Fatalf("failed to create directive file: %v", err)
+	}
+	directiveFile.Close()
+	defer os.Remove(directiveFile.Name())
+
+	// Set GREN_DIRECTIVE_FILE to simulate shell integration
+	os.Setenv("GREN_DIRECTIVE_FILE", directiveFile.Name())
+	defer os.Unsetenv("GREN_DIRECTIVE_FILE")
+
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -669,15 +681,15 @@ func TestHandleNavigateSuccess(t *testing.T) {
 		t.Fatalf("navigate command failed: %v", err)
 	}
 
-	// Verify temp file was created
-	if _, err := os.Stat("/tmp/gren_navigate"); err != nil {
-		t.Error("navigation temp file was not created")
+	// Verify directive file was written
+	if info, err := os.Stat(directiveFile.Name()); err != nil || info.Size() == 0 {
+		t.Error("directive file was not written")
 	}
 
 	// Read and verify the content
-	content, _ := os.ReadFile("/tmp/gren_navigate")
+	content, _ := os.ReadFile(directiveFile.Name())
 	if !strings.Contains(string(content), "cd ") {
-		t.Errorf("navigation file should contain cd command, got: %s", content)
+		t.Errorf("directive file should contain cd command, got: %s", content)
 	}
 }
 

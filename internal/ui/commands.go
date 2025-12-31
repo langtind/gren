@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
+	"github.com/langtind/gren/internal/directive"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -969,14 +970,11 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 	}
 }
 
-// navigateToWorktree writes navigation command to temp file and quits TUI
+// navigateToWorktree writes navigation command to directive file and quits TUI
 func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
 	return func() tea.Msg {
-		// Write navigation command to temp file
-		tempFile := "/tmp/gren_navigate"
-		command := fmt.Sprintf("cd \"%s\"", worktreePath)
-
-		if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
+		// Write navigation command via directive package
+		if err := directive.WriteCD(worktreePath); err != nil {
 			return fmt.Errorf("failed to write navigation command: %w", err)
 		}
 
@@ -985,18 +983,15 @@ func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
 	}
 }
 
-// launchClaudeInWorktree writes cd + claude command to temp file and quits TUI
+// launchClaudeInWorktree writes cd + claude command to directive file and quits TUI
 // This allows Claude Code to start in the worktree directory after gren exits
 func (m Model) launchClaudeInWorktree(worktreePath string) tea.Cmd {
 	return func() tea.Msg {
-		// Write cd + claude command to temp file (same mechanism as navigate)
-		tempFile := "/tmp/gren_navigate"
-		command := fmt.Sprintf("cd \"%s\" && claude", worktreePath)
+		// Write cd + claude command via directive package
+		logging.Info("launchClaudeInWorktree: writing directive for path %s", worktreePath)
 
-		logging.Info("launchClaudeInWorktree: writing command to %s", tempFile)
-
-		if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
-			logging.Error("launchClaudeInWorktree: failed to write command: %v", err)
+		if err := directive.WriteCDAndRun(worktreePath, "claude"); err != nil {
+			logging.Error("launchClaudeInWorktree: failed to write directive: %v", err)
 			return fmt.Errorf("failed to write claude command: %w", err)
 		}
 

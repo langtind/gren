@@ -14,6 +14,7 @@ import (
 
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
+	"github.com/langtind/gren/internal/directive"
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
 )
@@ -546,17 +547,19 @@ func (c *CLI) handleNavigate(args []string) error {
 		return fmt.Errorf("worktree '%s' not found", worktreeName)
 	}
 
-	// Write navigation command to temp file
-	tempFile := "/tmp/gren_navigate"
-	command := fmt.Sprintf("cd \"%s\"", targetWorktree.Path)
-
-	if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
-		logging.Error("CLI navigate: failed to write navigation command: %v", err)
+	// Write navigation command via directive package
+	if err := directive.WriteCD(targetWorktree.Path); err != nil {
+		logging.Error("CLI navigate: failed to write navigation directive: %v", err)
 		return fmt.Errorf("failed to write navigation command: %w", err)
 	}
 
-	logging.Info("CLI navigate: wrote navigation command to %s for path %s", tempFile, targetWorktree.Path)
-	fmt.Printf("Navigation command written. Use the gren wrapper script to navigate to %s\n", targetWorktree.Path)
+	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
+	if directive.IsShellIntegrationActive() {
+		// Shell wrapper will handle navigation, no message needed
+	} else {
+		fmt.Printf("Navigation command written. Ensure shell integration is set up.\n")
+		fmt.Printf("Run: eval \"$(gren shell-init zsh)\"  # or bash/fish\n")
+	}
 	return nil
 }
 
@@ -603,62 +606,94 @@ func (c *CLI) handleShellInit(args []string) error {
 	return nil
 }
 
-const bashZshInit = `# gren navigation wrapper
-_gren_original_command=$(which gren)
+const bashZshInit = `# gren shell integration
+# Uses directive files for navigation and command execution
+# See: https://github.com/langtind/gren
 
-gren() {
-    local TEMP_FILE="/tmp/gren_navigate"
-    rm -f "$TEMP_FILE"
+# Only initialize if gren is available
+if command -v gren >/dev/null 2>&1 || [[ -n "${GREN_BIN:-}" ]]; then
 
-    "$_gren_original_command" "$@"
-    local exit_code=$?
-
-    if [ -f "$TEMP_FILE" ]; then
-        local COMMAND=$(cat "$TEMP_FILE")
-        rm -f "$TEMP_FILE"
-        eval "$COMMAND"
-        echo "📂 Now in: $(pwd)"
-        # Auto-allow direnv if available
-        if command -v direnv &> /dev/null && [ -f ".envrc" ]; then
-            direnv allow 2>/dev/null
+    # Override gren command with directive file passing.
+    # Creates a temp file, passes path via GREN_DIRECTIVE_FILE, sources it after.
+    # GREN_BIN can override the binary path (for testing dev builds).
+    gren() {
+        # Completion mode: call binary directly, no directive file needed.
+        if [[ -n "${COMPLETE:-}" ]]; then
+            command "${GREN_BIN:-gren}" "$@"
+            return
         fi
-    fi
 
-    return $exit_code
-}
+        local directive_file exit_code=0
+        directive_file="$(mktemp)"
 
-# Convenient aliases for navigation
-alias gcd='gren navigate'
-alias gnav='gren navigate'
+        GREN_DIRECTIVE_FILE="$directive_file" command "${GREN_BIN:-gren}" "$@" || exit_code=$?
+
+        if [[ -s "$directive_file" ]]; then
+            source "$directive_file"
+            # Show new directory if we changed
+            if [[ "$PWD" != "$OLDPWD" ]]; then
+                echo "📂 Now in: $(pwd)"
+                # Auto-allow direnv if available
+                if command -v direnv &> /dev/null && [[ -f ".envrc" ]]; then
+                    direnv allow 2>/dev/null
+                fi
+            fi
+        fi
+
+        rm -f "$directive_file"
+        return "$exit_code"
+    }
+
+    # Convenient aliases for navigation
+    alias gcd='gren navigate'
+    alias gnav='gren navigate'
+fi
 `
 
-const fishInit = `# gren navigation wrapper for fish shell
-set _gren_original_command (which gren)
+const fishInit = `# gren shell integration for fish
+# Uses directive files for navigation and command execution
+# See: https://github.com/langtind/gren
 
-function gren
-    set TEMP_FILE "/tmp/gren_navigate"
-    rm -f $TEMP_FILE
+# Only initialize if gren is available
+if command -v gren >/dev/null 2>&1; or set -q GREN_BIN
 
-    $_gren_original_command $argv
-    set exit_code $status
-
-    if test -f $TEMP_FILE
-        set COMMAND (cat $TEMP_FILE)
-        rm -f $TEMP_FILE
-        eval $COMMAND
-        echo "📂 Now in: "(pwd)
-        # Auto-allow direnv if available
-        if command -v direnv &> /dev/null; and test -f ".envrc"
-            direnv allow 2>/dev/null
+    # Override gren command with directive file passing.
+    # Creates a temp file, passes path via GREN_DIRECTIVE_FILE, sources it after.
+    # GREN_BIN can override the binary path (for testing dev builds).
+    function gren
+        # Completion mode: call binary directly, no directive file needed.
+        if set -q COMPLETE
+            command (set -q GREN_BIN; and echo $GREN_BIN; or echo gren) $argv
+            return
         end
+
+        set -l directive_file (mktemp)
+        set -l exit_code 0
+        set -l old_pwd $PWD
+
+        GREN_DIRECTIVE_FILE=$directive_file command (set -q GREN_BIN; and echo $GREN_BIN; or echo gren) $argv
+        or set exit_code $status
+
+        if test -s $directive_file
+            source $directive_file
+            # Show new directory if we changed
+            if test "$PWD" != "$old_pwd"
+                echo "📂 Now in: "(pwd)
+                # Auto-allow direnv if available
+                if command -v direnv >/dev/null 2>&1; and test -f ".envrc"
+                    direnv allow 2>/dev/null
+                end
+            end
+        end
+
+        rm -f $directive_file
+        return $exit_code
     end
 
-    return $exit_code
+    # Convenient aliases for navigation
+    alias gcd='gren navigate'
+    alias gnav='gren navigate'
 end
-
-# Convenient aliases for navigation
-alias gcd='gren navigate'
-alias gnav='gren navigate'
 `
 
 // ShowHelp shows the general help message
