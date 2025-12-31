@@ -18,8 +18,8 @@
 | **for-each Command** | ✅ Ferdig | `9be6f6e` | - |
 | **LLM Commit Messages** | ✅ Ferdig | `0632022` | - |
 | **CI Status Integration** | ✅ Ferdig | `251af59` | - |
-| **Progressive CLI Rendering** | ⏳ Pending | - | 🟢 LAV |
-| **Dev Server URL Column** | ⏳ Pending | - | 🟢 LAV |
+| **Progressive CLI Rendering** | ⏭️ Skipped | - | Unødvendig (har spinner) |
+| **Dev Server URL Column** | ⏭️ Skipped | - | Nisje use case |
 
 ---
 
