@@ -11,7 +11,7 @@
 | TOML Config Support | ✅ Ferdig | `11828b0` |
 | Extended Hooks System | ✅ Ferdig | `a4d25d2` |
 | Claude Code Plugin | ✅ Ferdig | `e6b67b2` |
-| Branch-basert Adressering | ⏳ Pending | - |
+| Branch-basert Adressering | ✅ Ferdig | `489008f` |
 | Spesiell Navigasjon (-) | ⏳ Pending | - |
 | for-each Command | ⏳ Pending | - |
 | LLM Commit Messages | ⏳ Pending | - |

@@ -523,6 +523,9 @@ func (c *CLI) handleNavigate(args []string) error {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren switch <branch-or-name>\n")
 		fmt.Fprintf(fs.Output(), "\nNavigate to a worktree by branch name or worktree name\n\n")
+		fmt.Fprintf(fs.Output(), "Special identifiers:\n")
+		fmt.Fprintf(fs.Output(), "  -   Switch to previous worktree (like cd -)\n")
+		fmt.Fprintf(fs.Output(), "  @   Current worktree (useful in scripts)\n\n")
 		fmt.Fprintf(fs.Output(), "Matching priority:\n")
 		fmt.Fprintf(fs.Output(), "  1. Exact worktree name match\n")
 		fmt.Fprintf(fs.Output(), "  2. Exact branch name match\n")
@@ -531,6 +534,7 @@ func (c *CLI) handleNavigate(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren switch feat-auth           # Switch by worktree name\n")
 		fmt.Fprintf(fs.Output(), "  gren switch feature/auth        # Switch by branch name\n")
 		fmt.Fprintf(fs.Output(), "  gren switch auth                # Partial match\n")
+		fmt.Fprintf(fs.Output(), "  gren switch -                   # Previous worktree\n")
 		fmt.Fprintf(fs.Output(), "  gren navigate feature-branch    # Alias\n")
 		fmt.Fprintf(fs.Output(), "  gren cd feature-branch          # Alias\n")
 	}
@@ -555,7 +559,38 @@ func (c *CLI) handleNavigate(args []string) error {
 		return fmt.Errorf("failed to list worktrees: %w", err)
 	}
 
-	targetWorktree := findWorktreeByQuery(worktrees, query)
+	currentPath := getCurrentWorktreePath(worktrees)
+
+	var targetWorktree *core.WorktreeInfo
+
+	switch query {
+	case "-":
+		prevPath, err := getPreviousWorktree()
+		if err != nil || prevPath == "" {
+			return fmt.Errorf("no previous worktree")
+		}
+		for i, wt := range worktrees {
+			if wt.Path == prevPath {
+				targetWorktree = &worktrees[i]
+				break
+			}
+		}
+		if targetWorktree == nil {
+			return fmt.Errorf("previous worktree no longer exists: %s", prevPath)
+		}
+	case "@":
+		for i, wt := range worktrees {
+			if wt.IsCurrent {
+				targetWorktree = &worktrees[i]
+				break
+			}
+		}
+		if targetWorktree == nil {
+			return fmt.Errorf("not in a worktree")
+		}
+	default:
+		targetWorktree = findWorktreeByQuery(worktrees, query)
+	}
 
 	if targetWorktree == nil {
 		logging.Error("CLI navigate: no worktree matching '%s'", query)
@@ -565,6 +600,10 @@ func (c *CLI) handleNavigate(args []string) error {
 			fmt.Printf("  %s (%s)\n", wt.Name, wt.Branch)
 		}
 		return fmt.Errorf("worktree '%s' not found", query)
+	}
+
+	if currentPath != "" && currentPath != targetWorktree.Path {
+		_ = setPreviousWorktree(currentPath)
 	}
 
 	if err := directive.WriteCD(targetWorktree.Path); err != nil {
@@ -610,6 +649,35 @@ func findWorktreeByQuery(worktrees []core.WorktreeInfo, query string) *core.Work
 	}
 
 	return nil
+}
+
+func getPreviousWorktree() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "config", "--local", "gren.previousWorktree")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func setPreviousWorktree(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "config", "--local", "gren.previousWorktree", path)
+	return cmd.Run()
+}
+
+func getCurrentWorktreePath(worktrees []core.WorktreeInfo) string {
+	for _, wt := range worktrees {
+		if wt.IsCurrent {
+			return wt.Path
+		}
+	}
+	return ""
 }
 
 // handleShellInit handles the shell-init command for setting up navigation
