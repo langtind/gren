@@ -110,6 +110,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleSetupClaudePlugin(args[2:])
 	case "statusline":
 		return c.handleStatusline(args[2:])
+	case "merge":
+		return c.handleMerge(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -1260,5 +1262,76 @@ func (c *CLI) handleStatusline(args []string) error {
 	}
 
 	fmt.Println(strings.Join(parts, " "))
+	return nil
+}
+
+func (c *CLI) handleMerge(args []string) error {
+	fs := flag.NewFlagSet("merge", flag.ExitOnError)
+	noSquash := fs.Bool("no-squash", false, "Preserve individual commits instead of squashing")
+	noRemove := fs.Bool("no-remove", false, "Keep worktree after merge")
+	noVerify := fs.Bool("no-verify", false, "Skip pre-merge and post-merge hooks")
+	noRebase := fs.Bool("no-rebase", false, "Skip rebase (fail if not already rebased)")
+	yes := fs.Bool("y", false, "Skip confirmation prompts")
+	force := fs.Bool("f", false, "Force merge even with uncommitted changes")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren merge [target] [options]\n")
+		fmt.Fprintf(fs.Output(), "\nMerge current worktree into target branch\n\n")
+		fmt.Fprintf(fs.Output(), "Pipeline:\n")
+		fmt.Fprintf(fs.Output(), "  1. Stage and commit uncommitted changes\n")
+		fmt.Fprintf(fs.Output(), "  2. Squash commits into one (unless --no-squash)\n")
+		fmt.Fprintf(fs.Output(), "  3. Rebase onto target (unless --no-rebase)\n")
+		fmt.Fprintf(fs.Output(), "  4. Run pre-merge hooks (tests, lint)\n")
+		fmt.Fprintf(fs.Output(), "  5. Fast-forward merge to target\n")
+		fmt.Fprintf(fs.Output(), "  6. Remove worktree and branch (unless --no-remove)\n")
+		fmt.Fprintf(fs.Output(), "  7. Run post-merge hooks\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren merge                  # Merge to default branch\n")
+		fmt.Fprintf(fs.Output(), "  gren merge main             # Merge to main\n")
+		fmt.Fprintf(fs.Output(), "  gren merge --no-remove      # Keep worktree after merge\n")
+		fmt.Fprintf(fs.Output(), "  gren merge --no-squash      # Preserve commit history\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	target := ""
+	if fs.NArg() > 0 {
+		target = fs.Arg(0)
+	}
+
+	ctx := context.Background()
+
+	opts := core.MergeOptions{
+		Target: target,
+		Squash: !*noSquash,
+		Remove: !*noRemove,
+		Verify: !*noVerify,
+		Rebase: !*noRebase,
+		Yes:    *yes,
+		Force:  *force,
+	}
+
+	result, err := c.worktreeManager.Merge(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	if result.Skipped {
+		fmt.Printf("⏭️  Merge skipped: %s\n", result.SkipReason)
+		return nil
+	}
+
+	fmt.Printf("✅ Merged %s into %s\n", result.SourceBranch, result.TargetBranch)
+	if result.CommitsSquashed > 0 {
+		fmt.Printf("   Squashed %d commits\n", result.CommitsSquashed)
+	}
+	if result.WorktreeRemoved {
+		fmt.Printf("   Removed worktree: %s\n", result.WorktreePath)
+	}
+
 	return nil
 }

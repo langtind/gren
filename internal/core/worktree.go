@@ -64,6 +64,26 @@ type WorktreeInfo struct {
 	Marker MarkerType
 }
 
+type MergeOptions struct {
+	Target string
+	Squash bool
+	Remove bool
+	Verify bool
+	Rebase bool
+	Yes    bool
+	Force  bool
+}
+
+type MergeResult struct {
+	SourceBranch    string
+	TargetBranch    string
+	CommitsSquashed int
+	WorktreeRemoved bool
+	WorktreePath    string
+	Skipped         bool
+	SkipReason      string
+}
+
 // CheckPrerequisites verifies that required tools are available
 func (wm *WorktreeManager) CheckPrerequisites() error {
 	var missing []string
@@ -1079,6 +1099,237 @@ func (wm *WorktreeManager) OpenPRInBrowser(branch string) error {
 	cmd := exec.Command("gh", "pr", "view", branch, "--web")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to open PR: %w", err)
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*MergeResult, error) {
+	logging.Info("Merge: starting merge with opts=%+v", opts)
+
+	result := &MergeResult{}
+
+	currentPath, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	result.WorktreePath = currentPath
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+	result.SourceBranch = currentBranch
+
+	targetBranch := opts.Target
+	if targetBranch == "" {
+		targetBranch, err = wm.getDefaultBranch()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine default branch: %w", err)
+		}
+	}
+	result.TargetBranch = targetBranch
+
+	if currentBranch == targetBranch {
+		result.Skipped = true
+		result.SkipReason = "already on target branch"
+		return result, nil
+	}
+
+	worktrees, err := wm.ListWorktrees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	var currentWorktree *WorktreeInfo
+	for i, wt := range worktrees {
+		if wt.IsCurrent {
+			currentWorktree = &worktrees[i]
+			break
+		}
+	}
+
+	if currentWorktree == nil {
+		return nil, fmt.Errorf("could not find current worktree")
+	}
+
+	if currentWorktree.IsMain {
+		result.Skipped = true
+		result.SkipReason = "cannot merge from main worktree"
+		return result, nil
+	}
+
+	hasChanges := currentWorktree.ModifiedCount > 0 || currentWorktree.UntrackedCount > 0 || currentWorktree.StagedCount > 0
+	if hasChanges && !opts.Force {
+		if err := wm.stageAndCommitChanges(currentBranch); err != nil {
+			return nil, fmt.Errorf("failed to commit changes: %w", err)
+		}
+	}
+
+	if opts.Squash {
+		count, err := wm.getCommitsAhead(currentBranch, targetBranch)
+		if err != nil {
+			logging.Warn("Merge: could not count commits ahead: %v", err)
+		} else if count > 1 {
+			if err := wm.squashCommits(targetBranch, count); err != nil {
+				return nil, fmt.Errorf("failed to squash commits: %w", err)
+			}
+			result.CommitsSquashed = count
+		}
+	}
+
+	if opts.Rebase {
+		if err := wm.rebaseOnto(targetBranch); err != nil {
+			return nil, fmt.Errorf("rebase failed: %w", err)
+		}
+	}
+
+	if opts.Verify {
+		hookResult := wm.RunPreMergeHook(currentPath, currentBranch, targetBranch)
+		if hookResult.Ran && hookResult.Err != nil {
+			return nil, fmt.Errorf("pre-merge hook failed: %s\n%s", hookResult.Err, hookResult.Output)
+		}
+	}
+
+	if err := wm.fastForwardMerge(currentBranch, targetBranch); err != nil {
+		return nil, fmt.Errorf("merge failed: %w", err)
+	}
+
+	if opts.Remove {
+		if opts.Verify {
+			wm.RunPreRemoveHook(currentPath, currentBranch)
+		}
+
+		repoRoot, _ := wm.getRepoRoot()
+		if err := wm.DeleteWorktree(ctx, currentBranch, true); err != nil {
+			logging.Warn("Merge: failed to remove worktree: %v", err)
+		} else {
+			result.WorktreeRemoved = true
+		}
+
+		if repoRoot != "" {
+			os.Chdir(repoRoot)
+		}
+	}
+
+	if opts.Verify {
+		wm.RunPostMergeHook(currentPath, currentBranch, targetBranch)
+	}
+
+	return result, nil
+}
+
+func (wm *WorktreeManager) getCurrentBranch() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (wm *WorktreeManager) getDefaultBranch() (string, error) {
+	for _, branch := range []string{"main", "master"} {
+		cmd := exec.Command("git", "rev-parse", "--verify", branch)
+		if err := cmd.Run(); err == nil {
+			return branch, nil
+		}
+	}
+
+	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	output, err := cmd.Output()
+	if err == nil {
+		ref := strings.TrimSpace(string(output))
+		if strings.HasPrefix(ref, "refs/remotes/origin/") {
+			return strings.TrimPrefix(ref, "refs/remotes/origin/"), nil
+		}
+	}
+
+	return "", fmt.Errorf("could not determine default branch")
+}
+
+func (wm *WorktreeManager) stageAndCommitChanges(branch string) error {
+	logging.Info("Merge: staging and committing changes")
+
+	addCmd := exec.Command("git", "add", "-A")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %s", string(output))
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("WIP: changes on %s", branch))
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(output), "nothing to commit") {
+			return fmt.Errorf("git commit failed: %s", string(output))
+		}
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) getCommitsAhead(branch, target string) (int, error) {
+	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", target, branch))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	var count int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+func (wm *WorktreeManager) squashCommits(target string, count int) error {
+	logging.Info("Merge: squashing %d commits", count)
+
+	mergeBase := exec.Command("git", "merge-base", "HEAD", target)
+	baseOutput, err := mergeBase.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge base: %w", err)
+	}
+	base := strings.TrimSpace(string(baseOutput))
+
+	resetCmd := exec.Command("git", "reset", "--soft", base)
+	if output, err := resetCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset failed: %s", string(output))
+	}
+
+	branch, _ := wm.getCurrentBranch()
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("Squashed commits from %s", branch))
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) rebaseOnto(target string) error {
+	logging.Info("Merge: rebasing onto %s", target)
+
+	cmd := exec.Command("git", "rebase", target)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		exec.Command("git", "rebase", "--abort").Run()
+		return fmt.Errorf("rebase failed (conflicts?): %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) fastForwardMerge(source, target string) error {
+	logging.Info("Merge: fast-forward merging %s into %s", source, target)
+
+	sourceRef := exec.Command("git", "rev-parse", source)
+	sourceOutput, err := sourceRef.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get source ref: %w", err)
+	}
+	sourceCommit := strings.TrimSpace(string(sourceOutput))
+
+	updateRef := exec.Command("git", "update-ref", fmt.Sprintf("refs/heads/%s", target), sourceCommit)
+	if output, err := updateRef.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to update target ref: %s", string(output))
 	}
 
 	return nil
