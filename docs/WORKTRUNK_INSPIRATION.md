@@ -16,7 +16,7 @@
 | Statusline Command | ✅ Ferdig | `c4931d2` | - |
 | **Unified Merge Command** | ✅ Ferdig | `2d2e34d` | - |
 | **for-each Command** | ✅ Ferdig | `9be6f6e` | - |
-| **LLM Commit Messages** | ⏳ Pending | - | 🟡 MEDIUM |
+| **LLM Commit Messages** | ✅ Ferdig | `0632022` | - |
 | **CI Status Integration** | ⏳ Pending | - | 🟡 MEDIUM |
 | **Progressive CLI Rendering** | ⏳ Pending | - | 🟢 LAV |
 | **Dev Server URL Column** | ⏳ Pending | - | 🟢 LAV |
