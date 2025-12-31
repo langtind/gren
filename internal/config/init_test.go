@@ -197,9 +197,9 @@ func TestInitialize(t *testing.T) {
 			t.Errorf(".gren directory not created: %v", err)
 		}
 
-		// Verify config file exists
-		if _, err := os.Stat(filepath.Join(".gren", "config.json")); err != nil {
-			t.Errorf("config.json not created: %v", err)
+		// Verify config file exists (now saved as TOML)
+		if _, err := os.Stat(filepath.Join(".gren", "config.toml")); err != nil {
+			t.Errorf("config.toml not created: %v", err)
 		}
 
 		// Verify hook file exists

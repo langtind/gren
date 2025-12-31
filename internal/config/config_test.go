@@ -119,8 +119,8 @@ func TestManagerLoadSave(t *testing.T) {
 			t.Fatalf("Save() error: %v", err)
 		}
 
-		// Verify file exists
-		configPath := filepath.Join(ConfigDir, ConfigFile)
+		// Verify file exists (now saved as TOML)
+		configPath := filepath.Join(ConfigDir, ConfigFileTOML)
 		if _, err := os.Stat(configPath); err != nil {
 			t.Fatalf("config file not created: %v", err)
 		}

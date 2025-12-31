@@ -384,9 +384,9 @@ func TestHandleInit(t *testing.T) {
 		t.Error(".gren directory was not created")
 	}
 
-	// Verify config file was created
-	if _, err := os.Stat(".gren/config.json"); err != nil {
-		t.Error("config.json was not created")
+	// Verify config file was created (now saved as TOML)
+	if _, err := os.Stat(".gren/config.toml"); err != nil {
+		t.Error("config.toml was not created")
 	}
 }
 
