@@ -30,7 +30,7 @@ func TestCompareWorktrees(t *testing.T) {
 		Name:        "compare-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestApplyChanges(t *testing.T) {
 		Name:        "apply-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestCompareWorktreesWithCommittedChanges(t *testing.T) {
 		Name:        "committed-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestApplyChangesDelete(t *testing.T) {
 		Name:        "delete-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestApplyChangesErrors(t *testing.T) {
 		Name:        "error-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestApplyChangesInSubdirectory(t *testing.T) {
 		Name:        "subdir-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -649,7 +649,7 @@ func TestCompareDetectsDeletedFiles(t *testing.T) {
 		Name:        "deleted-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -705,7 +705,7 @@ func TestCompareDetectsRenamedFiles(t *testing.T) {
 		Name:        "rename-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}
@@ -762,7 +762,7 @@ func TestCompareCommittedDeletes(t *testing.T) {
 		Name:        "committed-delete-source",
 		IsNewBranch: true,
 	}
-	_, err := manager.CreateWorktree(ctx, req)
+	_, _, err := manager.CreateWorktree(ctx, req)
 	if err != nil {
 		t.Fatalf("failed to create worktree: %v", err)
 	}

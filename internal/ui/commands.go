@@ -316,7 +316,7 @@ func (m Model) createWorktree() tea.Cmd {
 
 		ctx := context.Background()
 		worktreeManager := core.NewWorktreeManager(m.gitRepo, m.configManager)
-		warning, err := worktreeManager.CreateWorktree(ctx, req)
+		_, warning, err := worktreeManager.CreateWorktree(ctx, req)
 		if err != nil {
 			logging.Error("Create worktree failed: %v", err)
 			return worktreeCreatedMsg{err: err}

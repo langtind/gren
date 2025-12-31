@@ -118,6 +118,7 @@ func (c *CLI) handleCreate(args []string) error {
 	baseBranch := fs.String("b", "", "Base branch to create from (defaults to recommended base branch)")
 	existing := fs.Bool("existing", false, "Use existing branch instead of creating new one")
 	worktreeDir := fs.String("dir", "", "Directory to create worktrees in")
+	execute := fs.String("x", "", "Command to run after creating worktree (e.g., -x claude)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren create -n <name> [options]\n")
@@ -128,6 +129,8 @@ func (c *CLI) handleCreate(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren create -n feature-branch\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n hotfix -b main\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n existing-feature --existing --branch feature-branch\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-auth -x claude              # Create and start Claude\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-ui -x \"npm run dev\"         # Create and start dev server\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -152,8 +155,8 @@ func (c *CLI) handleCreate(args []string) error {
 		}
 	}
 
-	logging.Info("CLI create: name=%s, branch=%s, base=%s, existing=%v, dir=%s",
-		*name, *branch, effectiveBaseBranch, *existing, *worktreeDir)
+	logging.Info("CLI create: name=%s, branch=%s, base=%s, existing=%v, dir=%s, execute=%s",
+		*name, *branch, effectiveBaseBranch, *existing, *worktreeDir, *execute)
 
 	req := core.CreateWorktreeRequest{
 		Name:        *name,
@@ -164,7 +167,7 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 
 	ctx := context.Background()
-	warning, err := c.worktreeManager.CreateWorktree(ctx, req)
+	worktreePath, warning, err := c.worktreeManager.CreateWorktree(ctx, req)
 	if err != nil {
 		logging.Error("CLI create failed: %v", err)
 		return err
@@ -173,7 +176,18 @@ func (c *CLI) handleCreate(args []string) error {
 	if warning != "" {
 		fmt.Printf("⚠ %s\n", warning)
 	}
-	logging.Info("CLI create succeeded: %s", *name)
+	logging.Info("CLI create succeeded: %s at %s", *name, worktreePath)
+
+	// Handle execute flag (-x)
+	if *execute != "" {
+		logging.Info("CLI create: writing execute directive for command: %s", *execute)
+		if err := directive.WriteCDAndRun(worktreePath, *execute); err != nil {
+			logging.Error("CLI create: failed to write execute directive: %v", err)
+			return fmt.Errorf("worktree created but failed to set up execute command: %w", err)
+		}
+		// Don't print anything - shell wrapper will execute the command
+	}
+
 	return nil
 }
 

@@ -20,7 +20,7 @@ func TestSubmoduleDetection(t *testing.T) {
 			Name:        "submodule-test",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}
@@ -86,7 +86,7 @@ func TestSubmoduleDetection(t *testing.T) {
 			Name:        "no-submodule-test",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}
@@ -112,7 +112,7 @@ func TestSubmoduleDetection(t *testing.T) {
 			Name:        "submodule-test",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}

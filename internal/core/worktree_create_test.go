@@ -28,7 +28,7 @@ func TestCreateWorktreeWithCustomDir(t *testing.T) {
 			WorktreeDir: customDir,
 		}
 
-		_, err = manager.CreateWorktree(ctx, req)
+		_, _, err = manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -60,7 +60,7 @@ func TestCreateWorktreeWithBaseBranch(t *testing.T) {
 			IsNewBranch: true,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -104,7 +104,7 @@ func TestCreateWorktreeWithGrenSymlink(t *testing.T) {
 			WorktreeDir: worktreeDir,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -156,7 +156,7 @@ echo "Hook executed" > "$1/.hook-executed"
 			IsNewBranch: true,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -199,7 +199,7 @@ echo "Hook executed" > "$1/.hook-executed"
 		}
 
 		// Should not fail even with missing hook
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() should not fail for missing hook: %v", err)
 		}
@@ -261,7 +261,7 @@ func TestCreateWorktreeWithRemoteBranch(t *testing.T) {
 			IsNewBranch: false,
 		}
 
-		_, err = manager.CreateWorktree(ctx, req)
+		_, _, err = manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Logf("CreateWorktree from remote branch failed (may be expected in CI): %v", err)
 			// This test may fail in some CI environments without proper git setup
@@ -334,7 +334,7 @@ func TestCreateWorktreeWithExistingBranchBothLocalAndRemote(t *testing.T) {
 			IsNewBranch: false, // This is the --existing flag
 		}
 
-		_, err = manager.CreateWorktree(ctx, req)
+		_, _, err = manager.CreateWorktree(ctx, req)
 		if err != nil {
 			// The bug causes this to fail with "already exists" because it uses -b flag
 			t.Fatalf("CreateWorktree() with --existing flag failed: %v", err)

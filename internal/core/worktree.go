@@ -80,13 +80,13 @@ func (wm *WorktreeManager) CheckPrerequisites() error {
 
 // CreateWorktree creates a new worktree with the given parameters
 // Returns a warning message (if any) and an error
-func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktreeRequest) (warning string, err error) {
+func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktreeRequest) (worktreePath string, warning string, err error) {
 	logging.Info("CreateWorktree called: name=%s, branch=%s, base=%s, isNew=%v", req.Name, req.Branch, req.BaseBranch, req.IsNewBranch)
 
 	// Check prerequisites
 	if err := wm.CheckPrerequisites(); err != nil {
 		logging.Error("Prerequisites check failed: %v", err)
-		return "", err
+		return "", "", err
 	}
 
 	// Fetch latest from origin to ensure we have up-to-date remote refs
@@ -96,7 +96,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	cfg, err := wm.configManager.Load()
 	if err != nil {
 		logging.Error("Failed to load configuration: %v", err)
-		return "", fmt.Errorf("failed to load configuration: %w", err)
+		return "", "", fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Determine worktree path
@@ -110,7 +110,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			repoInfo, err := wm.gitRepo.GetRepoInfo(ctx)
 			if err != nil {
 				logging.Error("Failed to get repo info: %v", err)
-				return "", fmt.Errorf("failed to get repo info: %w", err)
+				return "", "", fmt.Errorf("failed to get repo info: %w", err)
 			}
 			worktreeDir = fmt.Sprintf("../%s-worktrees", repoInfo.Name)
 			logging.Debug("Using default worktree_dir: %s", worktreeDir)
@@ -119,7 +119,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 
 	// Sanitize worktree name: replace / with - to avoid nested directories
 	worktreeName := strings.ReplaceAll(req.Name, "/", "-")
-	worktreePath := filepath.Join(worktreeDir, worktreeName)
+	worktreePath = filepath.Join(worktreeDir, worktreeName)
 	logging.Debug("Worktree path: %s", worktreePath)
 
 	// Create worktree directory if it doesn't exist
@@ -127,7 +127,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		logging.Debug("Creating worktree directory: %s", worktreeDir)
 		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
 			logging.Error("Failed to create worktree directory: %v", err)
-			return "", fmt.Errorf("failed to create worktree directory: %w", err)
+			return "", "", fmt.Errorf("failed to create worktree directory: %w", err)
 		}
 	}
 
@@ -148,7 +148,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		listOutput, _ := worktreeListCmd.Output()
 		if strings.Contains(string(listOutput), "["+branchName+"]") {
 			logging.Error("Branch already checked out in another worktree: %s", branchName)
-			return "", fmt.Errorf("branch '%s' is already checked out in another worktree", branchName)
+			return "", "", fmt.Errorf("branch '%s' is already checked out in another worktree", branchName)
 		}
 	}
 
@@ -194,7 +194,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			baseBranch, err = wm.gitRepo.GetRecommendedBaseBranch(ctx)
 			if err != nil {
 				logging.Error("Failed to get recommended base branch: %v", err)
-				return "", fmt.Errorf("failed to get recommended base branch: %w", err)
+				return "", "", fmt.Errorf("failed to get recommended base branch: %w", err)
 			}
 		}
 
@@ -214,7 +214,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	} else {
 		// User explicitly wanted existing branch but it doesn't exist
 		logging.Error("Branch not found locally or on remote: %s", branchName)
-		return "", fmt.Errorf("branch '%s' not found locally or on remote", branchName)
+		return "", "", fmt.Errorf("branch '%s' not found locally or on remote", branchName)
 	}
 
 	logging.Debug("Running: %s", gitCmd)
@@ -222,9 +222,9 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	if err != nil {
 		logging.Error("git worktree add failed: %v, output: %s", err, string(output))
 		if len(output) == 0 {
-			return "", fmt.Errorf("git worktree add failed: %w", err)
+			return "", "", fmt.Errorf("git worktree add failed: %w", err)
 		}
-		return "", fmt.Errorf("git worktree add failed: %s", string(output))
+		return "", "", fmt.Errorf("git worktree add failed: %s", string(output))
 	}
 
 	// Initialize submodules in the new worktree
@@ -248,7 +248,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		// Get repo root
 		repoRoot, err := wm.getRepoRoot()
 		if err != nil {
-			return "", fmt.Errorf("failed to get repo root: %w", err)
+			return "", "", fmt.Errorf("failed to get repo root: %w", err)
 		}
 
 		// Resolve hook path relative to repo root (not worktree - the hook creates the .gren symlink)
@@ -282,7 +282,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	}
 
 	logging.Info("Created worktree '%s' at %s", req.Name, worktreePath)
-	return warning, nil
+	return worktreePath, warning, nil
 }
 
 // ListWorktrees returns a list of all worktrees with full status information
