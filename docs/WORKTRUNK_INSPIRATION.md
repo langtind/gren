@@ -15,7 +15,7 @@
 | Spesiell Navigasjon (-) | ✅ Ferdig | `a0bb7a8` | - |
 | Statusline Command | ✅ Ferdig | `c4931d2` | - |
 | **Unified Merge Command** | ✅ Ferdig | `2d2e34d` | - |
-| **for-each Command** | ⏳ Pending | - | 🟡 MEDIUM |
+| **for-each Command** | ✅ Ferdig | `9be6f6e` | - |
 | **LLM Commit Messages** | ⏳ Pending | - | 🟡 MEDIUM |
 | **CI Status Integration** | ⏳ Pending | - | 🟡 MEDIUM |
 | **Progressive CLI Rendering** | ⏳ Pending | - | 🟢 LAV |
