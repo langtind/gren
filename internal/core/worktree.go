@@ -1492,3 +1492,202 @@ func expandTemplate(template string, ctx TemplateContext) string {
 	}
 	return result
 }
+
+type StepCommitOptions struct {
+	Message string
+	UseLLM  bool
+}
+
+type StepSquashOptions struct {
+	Target  string
+	Message string
+	UseLLM  bool
+}
+
+func (wm *WorktreeManager) StepCommit(opts StepCommitOptions) error {
+	logging.Info("StepCommit: committing staged changes")
+
+	addCmd := exec.Command("git", "add", "-A")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %s", string(output))
+	}
+
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("git status failed: %w", err)
+	}
+	if len(strings.TrimSpace(string(statusOutput))) == 0 {
+		return fmt.Errorf("nothing to commit")
+	}
+
+	message := opts.Message
+	if opts.UseLLM && message == "" {
+		cfg, _ := wm.configManager.Load()
+		if cfg != nil && cfg.CommitGenerator.Command != "" {
+			generated, err := wm.generateCommitMessage(cfg.CommitGenerator.Command, cfg.CommitGenerator.Args)
+			if err != nil {
+				logging.Warn("StepCommit: LLM generation failed: %v, using default message", err)
+			} else {
+				message = generated
+			}
+		}
+	}
+
+	if message == "" {
+		branch, _ := wm.getCurrentBranch()
+		message = fmt.Sprintf("WIP: changes on %s", branch)
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", message)
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) StepSquash(opts StepSquashOptions) error {
+	logging.Info("StepSquash: squashing commits to %s", opts.Target)
+
+	target := opts.Target
+	if target == "" {
+		var err error
+		target, err = wm.getDefaultBranch()
+		if err != nil {
+			return fmt.Errorf("could not determine target branch: %w", err)
+		}
+	}
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	count, err := wm.getCommitsAhead(currentBranch, target)
+	if err != nil {
+		return fmt.Errorf("failed to count commits: %w", err)
+	}
+
+	if count <= 1 {
+		return fmt.Errorf("nothing to squash (only %d commit ahead of %s)", count, target)
+	}
+
+	mergeBase := exec.Command("git", "merge-base", "HEAD", target)
+	baseOutput, err := mergeBase.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge base: %w", err)
+	}
+	base := strings.TrimSpace(string(baseOutput))
+
+	message := opts.Message
+	if opts.UseLLM && message == "" {
+		cfg, _ := wm.configManager.Load()
+		if cfg != nil && cfg.CommitGenerator.Command != "" {
+			generated, err := wm.generateSquashMessage(cfg.CommitGenerator.Command, cfg.CommitGenerator.Args, target)
+			if err != nil {
+				logging.Warn("StepSquash: LLM generation failed: %v, using default message", err)
+			} else {
+				message = generated
+			}
+		}
+	}
+
+	if message == "" {
+		message = fmt.Sprintf("Squashed %d commits from %s", count, currentBranch)
+	}
+
+	resetCmd := exec.Command("git", "reset", "--soft", base)
+	if output, err := resetCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset failed: %s", string(output))
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", message)
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) generateCommitMessage(command string, args []string) (string, error) {
+	diff, err := wm.getStagedDiff()
+	if err != nil {
+		return "", fmt.Errorf("failed to get diff: %w", err)
+	}
+
+	prompt := buildCommitPrompt(diff, "")
+
+	cmd := exec.Command(command, args...)
+	cmd.Stdin = strings.NewReader(prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("LLM command failed: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (wm *WorktreeManager) generateSquashMessage(command string, args []string, target string) (string, error) {
+	branch, _ := wm.getCurrentBranch()
+
+	diffCmd := exec.Command("git", "diff", fmt.Sprintf("%s...HEAD", target))
+	diffOutput, err := diffCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get diff: %w", err)
+	}
+
+	logCmd := exec.Command("git", "log", "--oneline", fmt.Sprintf("%s..HEAD", target))
+	logOutput, _ := logCmd.Output()
+
+	context := fmt.Sprintf("Branch: %s\nCommits being squashed:\n%s", branch, string(logOutput))
+	prompt := buildCommitPrompt(string(diffOutput), context)
+
+	cmd := exec.Command(command, args...)
+	cmd.Stdin = strings.NewReader(prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("LLM command failed: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (wm *WorktreeManager) getStagedDiff() (string, error) {
+	cmd := exec.Command("git", "diff", "--cached")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	if len(output) == 0 {
+		cmd = exec.Command("git", "diff")
+		output, err = cmd.Output()
+		if err != nil {
+			return "", err
+		}
+	}
+	return string(output), nil
+}
+
+func buildCommitPrompt(diff, context string) string {
+	var sb strings.Builder
+	sb.WriteString("Generate a concise git commit message for the following changes.\n")
+	sb.WriteString("Follow conventional commits format (feat:, fix:, docs:, etc.).\n")
+	sb.WriteString("Be specific but concise. One line only, no body.\n\n")
+
+	if context != "" {
+		sb.WriteString("Context:\n")
+		sb.WriteString(context)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("Diff:\n")
+	if len(diff) > 10000 {
+		sb.WriteString(diff[:10000])
+		sb.WriteString("\n... (truncated)")
+	} else {
+		sb.WriteString(diff)
+	}
+
+	return sb.String()
+}

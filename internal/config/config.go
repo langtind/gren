@@ -48,6 +48,12 @@ type Hooks struct {
 	PostMerge string `json:"post_merge,omitempty" toml:"post-merge,omitempty"`
 }
 
+// CommitGenerator configures external LLM command for commit message generation.
+type CommitGenerator struct {
+	Command string   `json:"command,omitempty" toml:"command,omitempty"`
+	Args    []string `json:"args,omitempty" toml:"args,omitempty"`
+}
+
 // Get returns the hook command for the given hook type.
 func (h *Hooks) Get(hookType HookType) string {
 	switch hookType {
@@ -73,10 +79,10 @@ type Config struct {
 	PackageManager string `json:"package_manager" toml:"package_manager"`
 	// PostCreateHook is deprecated - use Hooks.PostCreate instead
 	// Kept for backwards compatibility with old configs
-	PostCreateHook string `json:"post_create_hook,omitempty" toml:"post_create_hook,omitempty"`
-	Version        string `json:"version" toml:"version"`
-	// Hooks contains the lifecycle hooks configuration
-	Hooks Hooks `json:"hooks,omitempty" toml:"hooks,omitempty"`
+	PostCreateHook  string          `json:"post_create_hook,omitempty" toml:"post_create_hook,omitempty"`
+	Version         string          `json:"version" toml:"version"`
+	Hooks           Hooks           `json:"hooks,omitempty" toml:"hooks,omitempty"`
+	CommitGenerator CommitGenerator `json:"commit_generator,omitempty" toml:"commit-generation,omitempty"`
 }
 
 // Manager handles configuration operations.

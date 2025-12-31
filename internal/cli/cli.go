@@ -114,6 +114,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleMerge(args[2:])
 	case "for-each":
 		return c.handleForEach(args[2:])
+	case "step":
+		return c.handleStep(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -1427,5 +1429,107 @@ func (c *CLI) handleForEach(args []string) error {
 		return fmt.Errorf("%d worktree(s) failed", failCount)
 	}
 
+	return nil
+}
+
+func (c *CLI) handleStep(args []string) error {
+	if len(args) < 1 {
+		fmt.Println("Usage: gren step <subcommand>")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  commit     Stage and commit all changes")
+		fmt.Println("  squash     Squash commits since target branch")
+		fmt.Println("\nExamples:")
+		fmt.Println("  gren step commit")
+		fmt.Println("  gren step commit -m \"feat: add feature\"")
+		fmt.Println("  gren step commit --llm")
+		fmt.Println("  gren step squash")
+		fmt.Println("  gren step squash main")
+		fmt.Println("  gren step squash --llm")
+		return fmt.Errorf("no subcommand provided")
+	}
+
+	subcommand := args[0]
+	switch subcommand {
+	case "commit":
+		return c.handleStepCommit(args[1:])
+	case "squash":
+		return c.handleStepSquash(args[1:])
+	default:
+		return fmt.Errorf("unknown step subcommand: %s", subcommand)
+	}
+}
+
+func (c *CLI) handleStepCommit(args []string) error {
+	fs := flag.NewFlagSet("step commit", flag.ExitOnError)
+	message := fs.String("m", "", "Commit message")
+	useLLM := fs.Bool("llm", false, "Generate commit message using configured LLM")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren step commit [options]\n")
+		fmt.Fprintf(fs.Output(), "\nStage and commit all changes\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren step commit                     # Commit with default message\n")
+		fmt.Fprintf(fs.Output(), "  gren step commit -m \"feat: feature\"  # Commit with custom message\n")
+		fmt.Fprintf(fs.Output(), "  gren step commit --llm               # Use LLM to generate message\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := core.StepCommitOptions{
+		Message: *message,
+		UseLLM:  *useLLM,
+	}
+
+	if err := c.worktreeManager.StepCommit(opts); err != nil {
+		return err
+	}
+
+	fmt.Println("✅ Changes committed")
+	return nil
+}
+
+func (c *CLI) handleStepSquash(args []string) error {
+	fs := flag.NewFlagSet("step squash", flag.ExitOnError)
+	message := fs.String("m", "", "Squash commit message")
+	useLLM := fs.Bool("llm", false, "Generate commit message using configured LLM")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren step squash [target] [options]\n")
+		fmt.Fprintf(fs.Output(), "\nSquash commits since target branch into one commit\n\n")
+		fmt.Fprintf(fs.Output(), "Arguments:\n")
+		fmt.Fprintf(fs.Output(), "  target    Target branch (default: main/master)\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren step squash                       # Squash to default branch\n")
+		fmt.Fprintf(fs.Output(), "  gren step squash main                  # Squash to main\n")
+		fmt.Fprintf(fs.Output(), "  gren step squash -m \"feat: feature\"    # Custom message\n")
+		fmt.Fprintf(fs.Output(), "  gren step squash --llm                 # Use LLM for message\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	target := ""
+	if fs.NArg() > 0 {
+		target = fs.Arg(0)
+	}
+
+	opts := core.StepSquashOptions{
+		Target:  target,
+		Message: *message,
+		UseLLM:  *useLLM,
+	}
+
+	if err := c.worktreeManager.StepSquash(opts); err != nil {
+		return err
+	}
+
+	fmt.Println("✅ Commits squashed")
 	return nil
 }
