@@ -284,6 +284,115 @@ func TestSaveInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestHooksGet(t *testing.T) {
+	hooks := Hooks{
+		PostCreate: "npm install",
+		PreRemove:  "npm run cleanup",
+		PreMerge:   "npm test",
+		PostMerge:  "npm run deploy",
+	}
+
+	tests := []struct {
+		hookType HookType
+		want     string
+	}{
+		{HookPostCreate, "npm install"},
+		{HookPreRemove, "npm run cleanup"},
+		{HookPreMerge, "npm test"},
+		{HookPostMerge, "npm run deploy"},
+		{HookType("unknown"), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.hookType), func(t *testing.T) {
+			got := hooks.Get(tt.hookType)
+			if got != tt.want {
+				t.Errorf("Hooks.Get(%s) = %q, want %q", tt.hookType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigWithHooks(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-hooks-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
+
+	manager := NewManager()
+
+	config := &Config{
+		WorktreeDir:    "../worktrees",
+		PackageManager: "npm",
+		Version:        "1.0.0",
+		Hooks: Hooks{
+			PostCreate: "npm install",
+			PreRemove:  "npm run cleanup",
+			PreMerge:   "npm test",
+			PostMerge:  "npm run deploy",
+		},
+	}
+
+	if err := manager.Save(config); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	loaded, err := manager.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if loaded.Hooks.PostCreate != config.Hooks.PostCreate {
+		t.Errorf("Hooks.PostCreate = %q, want %q", loaded.Hooks.PostCreate, config.Hooks.PostCreate)
+	}
+	if loaded.Hooks.PreRemove != config.Hooks.PreRemove {
+		t.Errorf("Hooks.PreRemove = %q, want %q", loaded.Hooks.PreRemove, config.Hooks.PreRemove)
+	}
+	if loaded.Hooks.PreMerge != config.Hooks.PreMerge {
+		t.Errorf("Hooks.PreMerge = %q, want %q", loaded.Hooks.PreMerge, config.Hooks.PreMerge)
+	}
+	if loaded.Hooks.PostMerge != config.Hooks.PostMerge {
+		t.Errorf("Hooks.PostMerge = %q, want %q", loaded.Hooks.PostMerge, config.Hooks.PostMerge)
+	}
+}
+
+func TestLegacyPostCreateHookMigration(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-legacy-hook-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
+
+	os.MkdirAll(ConfigDir, 0755)
+	configPath := filepath.Join(ConfigDir, ConfigFileJSON)
+	legacyConfig := `{
+		"worktree_dir": "../worktrees",
+		"post_create_hook": ".gren/post-create.sh",
+		"version": "1.0.0"
+	}`
+	os.WriteFile(configPath, []byte(legacyConfig), 0644)
+
+	manager := NewManager()
+	loaded, err := manager.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if loaded.Hooks.PostCreate != ".gren/post-create.sh" {
+		t.Errorf("Hooks.PostCreate = %q, want %q (migrated from legacy PostCreateHook)",
+			loaded.Hooks.PostCreate, ".gren/post-create.sh")
+	}
+}
+
 func TestValidateConfig(t *testing.T) {
 	manager := NewManager()
 

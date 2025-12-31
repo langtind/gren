@@ -25,6 +25,45 @@ const (
 	DefaultHookFile = "post-create.sh"
 )
 
+// HookType represents the different lifecycle hooks available.
+type HookType string
+
+const (
+	HookPostCreate HookType = "post-create"
+	HookPreRemove  HookType = "pre-remove"
+	HookPreMerge   HookType = "pre-merge"
+	HookPostMerge  HookType = "post-merge"
+)
+
+// Hooks represents the lifecycle hooks configuration.
+// Each hook can be either a simple command string or a path to a script.
+type Hooks struct {
+	// PostCreate runs after worktree creation (blocking)
+	PostCreate string `json:"post_create,omitempty" toml:"post-create,omitempty"`
+	// PreRemove runs before worktree removal (blocking, fail-fast)
+	PreRemove string `json:"pre_remove,omitempty" toml:"pre-remove,omitempty"`
+	// PreMerge runs before merge operations (blocking, fail-fast)
+	PreMerge string `json:"pre_merge,omitempty" toml:"pre-merge,omitempty"`
+	// PostMerge runs after successful merge (blocking, best-effort)
+	PostMerge string `json:"post_merge,omitempty" toml:"post-merge,omitempty"`
+}
+
+// Get returns the hook command for the given hook type.
+func (h *Hooks) Get(hookType HookType) string {
+	switch hookType {
+	case HookPostCreate:
+		return h.PostCreate
+	case HookPreRemove:
+		return h.PreRemove
+	case HookPreMerge:
+		return h.PreMerge
+	case HookPostMerge:
+		return h.PostMerge
+	default:
+		return ""
+	}
+}
+
 // Config represents the gren configuration.
 type Config struct {
 	// MainWorktree is deprecated - main worktree is now detected dynamically
@@ -32,8 +71,12 @@ type Config struct {
 	MainWorktree   string `json:"main_worktree,omitempty" toml:"main_worktree,omitempty"`
 	WorktreeDir    string `json:"worktree_dir" toml:"worktree_dir"`
 	PackageManager string `json:"package_manager" toml:"package_manager"`
-	PostCreateHook string `json:"post_create_hook" toml:"post_create_hook"`
+	// PostCreateHook is deprecated - use Hooks.PostCreate instead
+	// Kept for backwards compatibility with old configs
+	PostCreateHook string `json:"post_create_hook,omitempty" toml:"post_create_hook,omitempty"`
 	Version        string `json:"version" toml:"version"`
+	// Hooks contains the lifecycle hooks configuration
+	Hooks Hooks `json:"hooks,omitempty" toml:"hooks,omitempty"`
 }
 
 // Manager handles configuration operations.
@@ -105,6 +148,10 @@ func (m *Manager) Load() (*Config, error) {
 
 	// Note: MainWorktree from old configs is ignored - now detected dynamically
 	_ = usedTOML // Can be used for logging/debugging
+
+	if config.PostCreateHook != "" && config.Hooks.PostCreate == "" {
+		config.Hooks.PostCreate = config.PostCreateHook
+	}
 
 	if err := m.validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)

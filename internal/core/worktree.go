@@ -235,51 +235,23 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		}
 	}
 
-	// Note: .gren/ configuration is tracked in git and automatically available in worktrees
-
-	// Run post-create hook if it exists and is configured
-	if cfg.PostCreateHook != "" {
-		branchName := req.Branch
-		if req.IsNewBranch && branchName == "" {
-			branchName = req.Name
-		}
-		baseBranch := req.BaseBranch
-
-		// Get repo root
-		repoRoot, err := wm.getRepoRoot()
-		if err != nil {
-			return "", "", fmt.Errorf("failed to get repo root: %w", err)
-		}
-
-		// Resolve hook path relative to repo root (not worktree - the hook creates the .gren symlink)
-		hookPath := cfg.PostCreateHook
-		fullHookPath := filepath.Join(repoRoot, hookPath)
-		logging.Debug("Post-create hook path: %s (full: %s)", hookPath, fullHookPath)
-
-		// Check if hook exists
-		if _, err := os.Stat(fullHookPath); err != nil {
-			logging.Error("Post-create hook not found: %s", fullHookPath)
-			logging.Warn("Post-create hook not found: %s", fullHookPath)
-		} else {
-			logging.Info("Running post-create hook: %s", fullHookPath)
-			// Convert worktreePath to absolute for the hook
-			absWorktreePath := worktreePath
-			if !filepath.IsAbs(worktreePath) {
-				absWorktreePath = filepath.Join(repoRoot, worktreePath)
-			}
-			hookCmd := exec.Command(fullHookPath, absWorktreePath, branchName, baseBranch, repoRoot)
-			hookCmd.Dir = absWorktreePath
-			// Capture output instead of printing to stdout/stderr
-			// This prevents TUI corruption when running in interactive mode
-			hookOutput, hookErr := hookCmd.CombinedOutput()
-			if hookErr != nil {
-				logging.Error("Post-create hook failed: %v, output: %s", hookErr, string(hookOutput))
-			} else {
-				logging.Info("Post-create hook completed successfully")
-				logging.Debug("Post-create hook output: %s", string(hookOutput))
-			}
-		}
+	hookBranchName := req.Branch
+	if req.IsNewBranch && hookBranchName == "" {
+		hookBranchName = req.Name
 	}
+	hookRepoRoot, _ := wm.getRepoRoot()
+	hookWorktreePath := worktreePath
+	if !filepath.IsAbs(worktreePath) {
+		hookWorktreePath = filepath.Join(hookRepoRoot, worktreePath)
+	}
+
+	hookCtx := HookContext{
+		WorktreePath: hookWorktreePath,
+		BranchName:   hookBranchName,
+		BaseBranch:   req.BaseBranch,
+		RepoRoot:     hookRepoRoot,
+	}
+	wm.RunHook(config.HookPostCreate, hookCtx)
 
 	logging.Info("Created worktree '%s' at %s", req.Name, worktreePath)
 	return worktreePath, warning, nil
@@ -846,7 +818,11 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		return fmt.Errorf("cannot delete current worktree")
 	}
 
-	// 1. Deinit submodules and track if worktree has submodules
+	hookResult := wm.RunPreRemoveHook(targetWorktree.Path, targetWorktree.Branch)
+	if hookResult.Ran && hookResult.Err != nil {
+		return fmt.Errorf("pre-remove hook failed: %w\nOutput: %s", hookResult.Err, hookResult.Output)
+	}
+
 	hasSubmodules := false
 	if _, err := os.Stat(filepath.Join(targetWorktree.Path, ".gitmodules")); err == nil {
 		hasSubmodules = true

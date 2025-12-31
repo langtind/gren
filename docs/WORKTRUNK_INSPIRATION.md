@@ -9,7 +9,7 @@
 | Forbedret Shell Integration | ✅ Ferdig | `8f22643` |
 | Execute Flag (-x) | ✅ Ferdig | `48ff616` |
 | TOML Config Support | ✅ Ferdig | `11828b0` |
-| Extended Hooks System | ⏳ Pending | - |
+| Extended Hooks System | ✅ Ferdig | TBD |
 | Claude Code Plugin | ⏳ Pending | - |
 | Branch-basert Adressering | ⏳ Pending | - |
 | Spesiell Navigasjon (-) | ⏳ Pending | - |
