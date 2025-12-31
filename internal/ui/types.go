@@ -24,6 +24,9 @@ const (
 	ConfigView
 	ToolsView
 	CompareView
+	MergeView
+	ForEachView
+	StepCommitView
 )
 
 // Worktree represents a git worktree
@@ -237,6 +240,59 @@ type CompareFileItem struct {
 	Selected    bool
 }
 
+type MergeStep int
+
+const (
+	MergeStepConfirm MergeStep = iota
+	MergeStepInProgress
+	MergeStepComplete
+)
+
+type MergeState struct {
+	currentStep    MergeStep
+	sourceWorktree *Worktree
+	targetBranch   string
+	squash         bool
+	remove         bool
+	rebase         bool
+	progressMsg    string
+	result         string
+	err            error
+}
+
+type ForEachState struct {
+	command      string
+	skipCurrent  bool
+	skipMain     bool
+	inProgress   bool
+	currentIndex int
+	results      []ForEachResult
+	inputMode    bool
+}
+
+type ForEachResult struct {
+	Worktree string
+	Output   string
+	Success  bool
+}
+
+type StepCommitStep int
+
+const (
+	StepCommitStepOptions StepCommitStep = iota
+	StepCommitStepMessage
+	StepCommitStepInProgress
+	StepCommitStepComplete
+)
+
+type StepCommitState struct {
+	currentStep StepCommitStep
+	useLLM      bool
+	message     string
+	result      string
+	err         error
+}
+
 // DeleteState holds the state for worktree deletion
 type DeleteState struct {
 	currentStep       DeleteStep
@@ -271,18 +327,21 @@ type Model struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
 	// State
-	repoInfo     *git.RepoInfo
-	config       *config.Config
-	worktrees    []Worktree
-	selected     int
-	err          error
-	initState    *InitState
-	createState  *CreateState
-	deleteState  *DeleteState
-	cleanupState *CleanupState
-	openInState  *OpenInState
-	configState  *ConfigState
-	compareState *CompareState
+	repoInfo        *git.RepoInfo
+	config          *config.Config
+	worktrees       []Worktree
+	selected        int
+	err             error
+	initState       *InitState
+	createState     *CreateState
+	deleteState     *DeleteState
+	cleanupState    *CleanupState
+	openInState     *OpenInState
+	configState     *ConfigState
+	compareState    *CompareState
+	mergeState      *MergeState
+	forEachState    *ForEachState
+	stepCommitState *StepCommitState
 
 	// Screen dimensions
 	width  int

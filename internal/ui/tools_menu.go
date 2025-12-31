@@ -19,15 +19,25 @@ type ToolAction struct {
 	IsSection   bool // If true, this is a section header, not an action
 }
 
-// getToolActions returns the list of available tool actions
-func getToolActions(hasPR bool) []ToolAction {
+func getToolActions(hasPR bool, hasSelectedWorktree bool) []ToolAction {
 	actions := []ToolAction{
 		{Key: "r", Name: "Refresh status", Description: "Re-check stale status (git + GitHub)"},
 		{Key: "c", Name: "Cleanup stale worktrees", Description: "Delete all stale worktrees"},
 		{Key: "x", Name: "Prune missing worktrees", Description: "Remove references to deleted worktree directories"},
 	}
 
-	// Add GitHub section if selected worktree has a PR
+	actions = append(actions,
+		ToolAction{IsSection: true, Name: "Workflow"},
+		ToolAction{Key: "s", Name: "Commit changes", Description: "Stage and commit with optional LLM message"},
+		ToolAction{Key: "f", Name: "Run in all worktrees", Description: "Execute command in every worktree"},
+	)
+
+	if hasSelectedWorktree {
+		actions = append(actions,
+			ToolAction{Key: "M", Name: "Merge to main", Description: "Squash, merge, and cleanup worktree"},
+		)
+	}
+
 	if hasPR {
 		actions = append(actions,
 			ToolAction{IsSection: true, Name: "GitHub"},
@@ -51,14 +61,14 @@ func (m Model) renderToolsMenu() string {
 	content.WriteString(titleStyle.Render("Tools"))
 	content.WriteString("\n\n")
 
-	// Check if selected worktree has a PR
 	hasPR := false
+	hasSelectedWorktree := false
 	if m.selected >= 0 && m.selected < len(m.worktrees) {
 		hasPR = m.worktrees[m.selected].PRNumber > 0
+		hasSelectedWorktree = !m.worktrees[m.selected].IsCurrent && !m.worktrees[m.selected].IsMain
 	}
 
-	// Actions
-	actions := getToolActions(hasPR)
+	actions := getToolActions(hasPR, hasSelectedWorktree)
 	keyStyle := lipgloss.NewStyle().Foreground(ColorSecondary).Bold(true)
 	nameStyle := lipgloss.NewStyle().Foreground(ColorText)
 	sectionStyle := lipgloss.NewStyle().Foreground(ColorTextMuted).Bold(true)
@@ -171,7 +181,6 @@ func (m Model) handleToolsKeys(keyMsg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, m.pruneWorktrees()
 
 	case "p":
-		// Open PR in browser
 		if m.selected >= 0 && m.selected < len(m.worktrees) {
 			wt := m.worktrees[m.selected]
 			if wt.PRNumber > 0 {
@@ -181,9 +190,60 @@ func (m Model) handleToolsKeys(keyMsg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case "s":
+		logging.Info("Tools menu: opening step commit")
+		m.stepCommitState = &StepCommitState{
+			currentStep: StepCommitStepOptions,
+			useLLM:      false,
+			message:     "",
+		}
+		m.currentView = StepCommitView
+		return m, nil
+
+	case "f":
+		logging.Info("Tools menu: opening for-each")
+		m.forEachState = &ForEachState{
+			command:     "",
+			skipCurrent: false,
+			skipMain:    true,
+			inProgress:  false,
+			inputMode:   true,
+			results:     []ForEachResult{},
+		}
+		m.currentView = ForEachView
+		return m, nil
+
+	case "M":
+		if m.selected >= 0 && m.selected < len(m.worktrees) {
+			wt := m.worktrees[m.selected]
+			if !wt.IsCurrent && !wt.IsMain {
+				logging.Info("Tools menu: opening merge for %s", wt.Branch)
+				m.mergeState = &MergeState{
+					currentStep:    MergeStepConfirm,
+					sourceWorktree: &wt,
+					targetBranch:   m.getDefaultBranch(),
+					squash:         true,
+					remove:         true,
+					rebase:         true,
+				}
+				m.currentView = MergeView
+				return m, nil
+			}
+		}
+		return m, nil
 	}
 
 	return m, nil
+}
+
+func (m Model) getDefaultBranch() string {
+	for _, wt := range m.worktrees {
+		if wt.Branch == "main" || wt.Branch == "master" {
+			return wt.Branch
+		}
+	}
+	return "main"
 }
 
 // renderCleanupConfirmation renders appropriate view based on cleanup state

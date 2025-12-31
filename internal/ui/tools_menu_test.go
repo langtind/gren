@@ -462,9 +462,8 @@ func TestRenderCleanupConfirmationWithSelection(t *testing.T) {
 
 func TestGetToolActions(t *testing.T) {
 	t.Run("without PR", func(t *testing.T) {
-		actions := getToolActions(false)
+		actions := getToolActions(false, false)
 
-		// Should have basic actions but not Open PR
 		hasRefresh := false
 		hasCleanup := false
 		hasOpenPR := false
@@ -493,7 +492,7 @@ func TestGetToolActions(t *testing.T) {
 	})
 
 	t.Run("with PR", func(t *testing.T) {
-		actions := getToolActions(true)
+		actions := getToolActions(true, false)
 
 		hasOpenPR := false
 		for _, a := range actions {
@@ -504,6 +503,21 @@ func TestGetToolActions(t *testing.T) {
 
 		if !hasOpenPR {
 			t.Error("Should have Open PR action when hasPR=true")
+		}
+	})
+
+	t.Run("with selected worktree", func(t *testing.T) {
+		actions := getToolActions(false, true)
+
+		hasMerge := false
+		for _, a := range actions {
+			if strings.Contains(a.Name, "Merge to main") {
+				hasMerge = true
+			}
+		}
+
+		if !hasMerge {
+			t.Error("Should have Merge to main action when hasSelectedWorktree=true")
 		}
 	})
 }

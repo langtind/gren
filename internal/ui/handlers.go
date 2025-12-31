@@ -948,6 +948,193 @@ func (m Model) handleConfigKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleMergeKeys handles keyboard input for the merge view
+func (m Model) handleMergeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mergeState == nil {
+		return m, nil
+	}
+
+	logging.Debug("MergeView key: %q, step: %d", msg.String(), m.mergeState.currentStep)
+
+	switch m.mergeState.currentStep {
+	case MergeStepConfirm:
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Back):
+			m.currentView = DashboardView
+			m.mergeState = nil
+			return m, nil
+		case key.Matches(msg, m.keys.Up), key.Matches(msg, m.keys.Down):
+			// Toggle options
+			switch msg.String() {
+			case "s", "S":
+				m.mergeState.squash = !m.mergeState.squash
+			case "r", "R":
+				m.mergeState.rebase = !m.mergeState.rebase
+			case "d", "D":
+				m.mergeState.remove = !m.mergeState.remove
+			}
+			return m, nil
+		case msg.String() == "s" || msg.String() == "S":
+			m.mergeState.squash = !m.mergeState.squash
+			return m, nil
+		case msg.String() == "r" || msg.String() == "R":
+			m.mergeState.rebase = !m.mergeState.rebase
+			return m, nil
+		case msg.String() == "d" || msg.String() == "D":
+			m.mergeState.remove = !m.mergeState.remove
+			return m, nil
+		case key.Matches(msg, m.keys.Enter):
+			m.mergeState.currentStep = MergeStepInProgress
+			return m, m.executeMerge()
+		}
+	case MergeStepInProgress:
+		// Only allow quit during merge
+		if key.Matches(msg, m.keys.Quit) {
+			return m, tea.Quit
+		}
+		return m, nil
+	case MergeStepComplete:
+		switch {
+		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):
+			m.currentView = DashboardView
+			m.mergeState = nil
+			return m, nil
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+// handleForEachKeys handles keyboard input for the for-each view
+func (m Model) handleForEachKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.forEachState == nil {
+		return m, nil
+	}
+
+	logging.Debug("ForEachView key: %q, inputMode: %v", msg.String(), m.forEachState.inputMode)
+
+	// If showing results (not in progress and has results), allow closing
+	if !m.forEachState.inProgress && len(m.forEachState.results) > 0 {
+		switch {
+		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):
+			m.currentView = DashboardView
+			m.forEachState = nil
+			return m, nil
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	// Command input mode
+	if m.forEachState.inputMode {
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Back):
+			m.currentView = DashboardView
+			m.forEachState = nil
+			return m, nil
+		case key.Matches(msg, m.keys.Enter):
+			if strings.TrimSpace(m.forEachState.command) != "" {
+				m.forEachState.inputMode = false
+				m.forEachState.inProgress = true
+				return m, m.executeForEach()
+			}
+			return m, nil
+		case msg.Type == tea.KeyBackspace:
+			if len(m.forEachState.command) > 0 {
+				m.forEachState.command = m.forEachState.command[:len(m.forEachState.command)-1]
+			}
+			return m, nil
+		case msg.Type == tea.KeyRunes:
+			m.forEachState.command += string(msg.Runes)
+			return m, nil
+		case msg.String() == "tab":
+			// Toggle options with tab
+			m.forEachState.skipMain = !m.forEachState.skipMain
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
+// handleStepCommitKeys handles keyboard input for the step commit view
+func (m Model) handleStepCommitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.stepCommitState == nil {
+		return m, nil
+	}
+
+	logging.Debug("StepCommitView key: %q, step: %d", msg.String(), m.stepCommitState.currentStep)
+
+	switch m.stepCommitState.currentStep {
+	case StepCommitStepOptions:
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Back):
+			m.currentView = DashboardView
+			m.stepCommitState = nil
+			return m, nil
+		case msg.String() == "l" || msg.String() == "L":
+			m.stepCommitState.useLLM = !m.stepCommitState.useLLM
+			return m, nil
+		case key.Matches(msg, m.keys.Enter):
+			if m.stepCommitState.useLLM {
+				// Go directly to execution with LLM
+				m.stepCommitState.currentStep = StepCommitStepInProgress
+				return m, m.executeStepCommit()
+			}
+			// Need to enter commit message
+			m.stepCommitState.currentStep = StepCommitStepMessage
+			return m, nil
+		}
+	case StepCommitStepMessage:
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Back):
+			m.stepCommitState.currentStep = StepCommitStepOptions
+			return m, nil
+		case key.Matches(msg, m.keys.Enter):
+			if strings.TrimSpace(m.stepCommitState.message) != "" {
+				m.stepCommitState.currentStep = StepCommitStepInProgress
+				return m, m.executeStepCommit()
+			}
+			return m, nil
+		case msg.Type == tea.KeyBackspace:
+			if len(m.stepCommitState.message) > 0 {
+				m.stepCommitState.message = m.stepCommitState.message[:len(m.stepCommitState.message)-1]
+			}
+			return m, nil
+		case msg.Type == tea.KeyRunes:
+			m.stepCommitState.message += string(msg.Runes)
+			return m, nil
+		}
+	case StepCommitStepInProgress:
+		if key.Matches(msg, m.keys.Quit) {
+			return m, tea.Quit
+		}
+		return m, nil
+	case StepCommitStepComplete:
+		switch {
+		case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Enter):
+			m.currentView = DashboardView
+			m.stepCommitState = nil
+			return m, nil
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
 // handleCompareKeys handles keyboard input for the compare view
 func (m Model) handleCompareKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.compareState == nil {

@@ -1368,7 +1368,125 @@ func (m Model) applyCompareChanges() tea.Cmd {
 	}
 }
 
-// loadCompareDiff loads diff content for a specific file using actual file comparison
+func (m Model) executeMerge() tea.Cmd {
+	if m.mergeState == nil || m.mergeState.sourceWorktree == nil {
+		return func() tea.Msg {
+			return mergeCompleteMsg{err: fmt.Errorf("merge state is nil")}
+		}
+	}
+
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	sourceBranch := m.mergeState.sourceWorktree.Branch
+	targetBranch := m.mergeState.targetBranch
+	squash := m.mergeState.squash
+	remove := m.mergeState.remove
+	rebase := m.mergeState.rebase
+
+	return func() tea.Msg {
+		logging.Info("executeMerge: merging %s to %s (squash=%v, remove=%v, rebase=%v)",
+			sourceBranch, targetBranch, squash, remove, rebase)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		ctx := context.Background()
+
+		opts := core.MergeOptions{
+			Target: targetBranch,
+			Squash: squash,
+			Remove: remove,
+			Verify: false,
+			Rebase: rebase,
+			Yes:    true,
+			Force:  false,
+		}
+
+		result, err := worktreeManager.Merge(ctx, opts)
+		if err != nil {
+			return mergeCompleteMsg{err: err}
+		}
+
+		var resultMsg string
+		if result.Skipped {
+			resultMsg = fmt.Sprintf("Skipped: %s", result.SkipReason)
+		} else {
+			resultMsg = fmt.Sprintf("Merged %s into %s", result.SourceBranch, result.TargetBranch)
+			if result.CommitsSquashed > 0 {
+				resultMsg += fmt.Sprintf(" (%d commits squashed)", result.CommitsSquashed)
+			}
+			if result.WorktreeRemoved {
+				resultMsg += ", worktree removed"
+			}
+		}
+
+		return mergeCompleteMsg{result: resultMsg}
+	}
+}
+
+func (m Model) executeForEach() tea.Cmd {
+	if m.forEachState == nil || strings.TrimSpace(m.forEachState.command) == "" {
+		return func() tea.Msg {
+			return forEachCompleteMsg{}
+		}
+	}
+
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	command := m.forEachState.command
+	skipMain := m.forEachState.skipMain
+
+	return func() tea.Msg {
+		logging.Info("executeForEach: running '%s' in all worktrees (skipMain=%v)", command, skipMain)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		ctx := context.Background()
+
+		opts := core.ForEachOptions{
+			Command:     strings.Fields(command),
+			SkipCurrent: false,
+			SkipMain:    skipMain,
+			Parallel:    false,
+		}
+
+		_, err := worktreeManager.ForEach(ctx, opts)
+		if err != nil {
+			logging.Error("executeForEach: failed: %v", err)
+		}
+
+		return forEachCompleteMsg{}
+	}
+}
+
+func (m Model) executeStepCommit() tea.Cmd {
+	if m.stepCommitState == nil {
+		return func() tea.Msg {
+			return stepCommitCompleteMsg{err: fmt.Errorf("step commit state is nil")}
+		}
+	}
+
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	useLLM := m.stepCommitState.useLLM
+	message := m.stepCommitState.message
+
+	return func() tea.Msg {
+		logging.Info("executeStepCommit: committing changes (useLLM=%v)", useLLM)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+
+		opts := core.StepCommitOptions{
+			Message: message,
+			UseLLM:  useLLM,
+		}
+
+		err := worktreeManager.StepCommit(opts)
+		if err != nil {
+			return stepCommitCompleteMsg{err: err}
+		}
+
+		return stepCommitCompleteMsg{result: "Changes committed successfully"}
+	}
+}
+
 func (m Model) loadCompareDiff(sourcePath string, filePath string) tea.Cmd {
 	return func() tea.Msg {
 		logging.Info("loadCompareDiff: loading diff for %s from %s", filePath, sourcePath)

@@ -322,14 +322,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case compareDiffLoadedMsg:
-		// Diff content loaded for compare view
 		if m.compareState != nil {
 			if msg.err != nil {
 				m.compareState.diffContent = fmt.Sprintf("Error loading diff: %v", msg.err)
 			} else {
 				m.compareState.diffContent = msg.content
-				m.compareState.diffScrollOffset = 0 // Reset scroll position
+				m.compareState.diffScrollOffset = 0
 			}
+		}
+		return m, nil
+
+	case mergeProgressMsg:
+		if m.mergeState != nil {
+			m.mergeState.progressMsg = msg.message
+		}
+		return m, nil
+
+	case mergeCompleteMsg:
+		if m.mergeState != nil {
+			m.mergeState.currentStep = MergeStepComplete
+			m.mergeState.result = msg.result
+			m.mergeState.err = msg.err
+			if msg.err == nil {
+				m.refreshWorktrees()
+			}
+		}
+		return m, nil
+
+	case forEachItemCompleteMsg:
+		if m.forEachState != nil {
+			m.forEachState.results = append(m.forEachState.results, ForEachResult{
+				Worktree: msg.worktree,
+				Output:   msg.output,
+				Success:  msg.success,
+			})
+			m.forEachState.currentIndex++
+		}
+		return m, nil
+
+	case forEachCompleteMsg:
+		if m.forEachState != nil {
+			m.forEachState.inProgress = false
+		}
+		return m, nil
+
+	case stepCommitCompleteMsg:
+		if m.stepCommitState != nil {
+			m.stepCommitState.currentStep = StepCommitStepComplete
+			m.stepCommitState.result = msg.result
+			m.stepCommitState.err = msg.err
 		}
 		return m, nil
 
@@ -504,6 +545,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.currentView == CompareView {
 			return m.handleCompareKeys(keyMsg)
+		}
+		if m.currentView == MergeView {
+			return m.handleMergeKeys(keyMsg)
+		}
+		if m.currentView == ForEachView {
+			return m.handleForEachKeys(keyMsg)
+		}
+		if m.currentView == StepCommitView {
+			return m.handleStepCommitKeys(keyMsg)
 		}
 
 		// Dashboard keys
@@ -684,6 +734,15 @@ func (m Model) View() string {
 		if m.helpVisible {
 			return m.renderCompareHelpOverlay(baseView)
 		}
+	case MergeView:
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderMergeView(), 60, ColorPrimary)
+	case ForEachView:
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderForEachView(), 60, ColorPrimary)
+	case StepCommitView:
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderStepCommitView(), 60, ColorPrimary)
 	default:
 		baseView = m.dashboardView()
 	}

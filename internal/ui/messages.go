@@ -139,3 +139,25 @@ type compareDiffLoadedMsg struct {
 	content string
 	err     error
 }
+
+type mergeProgressMsg struct {
+	message string
+}
+
+type mergeCompleteMsg struct {
+	result string
+	err    error
+}
+
+type forEachItemCompleteMsg struct {
+	worktree string
+	output   string
+	success  bool
+}
+
+type forEachCompleteMsg struct{}
+
+type stepCommitCompleteMsg struct {
+	result string
+	err    error
+}
