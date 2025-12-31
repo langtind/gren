@@ -60,6 +60,8 @@ type WorktreeInfo struct {
 	PRNumber int    // PR number, 0 if no PR
 	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
 	PRURL    string // Full URL to PR for "Open in browser"
+
+	Marker MarkerType
 }
 
 // CheckPrerequisites verifies that required tools are available
@@ -291,6 +293,8 @@ func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, e
 		wm.enrichStaleStatusCached(&worktrees[i], cache)
 	}
 
+	wm.enrichMarkers(ctx, worktrees)
+
 	return worktrees, nil
 }
 
@@ -328,11 +332,24 @@ func (wm *WorktreeManager) enrichWorktreeStatus(wt *WorktreeInfo) {
 		wt.Status = "clean"
 	}
 
-	// Get last commit time
 	wt.LastCommit = getLastCommitTime(wt.Path)
 }
 
-// getFileCounts returns staged, modified, and untracked file counts
+func (wm *WorktreeManager) enrichMarkers(ctx context.Context, worktrees []WorktreeInfo) {
+	mm := NewMarkerManager()
+	markers, err := mm.ListMarkers(ctx)
+	if err != nil {
+		logging.Warn("Failed to list markers: %v", err)
+		return
+	}
+
+	for i := range worktrees {
+		if marker, ok := markers[worktrees[i].Branch]; ok {
+			worktrees[i].Marker = marker
+		}
+	}
+}
+
 func getFileCounts(worktreePath string, isCurrent bool) (staged, modified, untracked int) {
 	var cmd *exec.Cmd
 	if isCurrent {

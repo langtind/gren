@@ -104,6 +104,10 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleShellInit(args[2:])
 	case "compare":
 		return c.handleCompare(args[2:])
+	case "marker":
+		return c.handleMarker(args[2:])
+	case "setup-claude-plugin":
+		return c.handleSetupClaudePlugin(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -887,15 +891,215 @@ func (c *CLI) showCompareWithDiff(sourceWorktree string, result *core.CompareRes
 	return nil
 }
 
-// validateFilePath checks if a file path is safe (no path traversal)
 func validateFilePath(path string) error {
-	// Check for path traversal attempts
 	if strings.Contains(path, "..") {
 		return fmt.Errorf("invalid path (contains '..'): %s", path)
 	}
-	// Check for absolute paths
 	if filepath.IsAbs(path) {
 		return fmt.Errorf("invalid path (absolute path not allowed): %s", path)
 	}
 	return nil
+}
+
+func (c *CLI) handleMarker(args []string) error {
+	if len(args) == 0 {
+		return c.handleMarkerList()
+	}
+
+	subcommand := args[0]
+	subargs := args[1:]
+
+	switch subcommand {
+	case "set":
+		return c.handleMarkerSet(subargs)
+	case "clear":
+		return c.handleMarkerClear(subargs)
+	case "get":
+		return c.handleMarkerGet(subargs)
+	case "list":
+		return c.handleMarkerList()
+	default:
+		return fmt.Errorf("unknown marker subcommand: %s (use: set, clear, get, list)", subcommand)
+	}
+}
+
+func (c *CLI) handleMarkerSet(args []string) error {
+	fs := flag.NewFlagSet("marker set", flag.ExitOnError)
+	branch := fs.String("branch", "", "Branch name (defaults to current branch)")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren marker set <type> [-branch <name>]\n")
+		fmt.Fprintf(fs.Output(), "\nSet a Claude activity marker for a branch\n\n")
+		fmt.Fprintf(fs.Output(), "Marker types:\n")
+		fmt.Fprintf(fs.Output(), "  working  🤖  Claude is actively working\n")
+		fmt.Fprintf(fs.Output(), "  waiting  💬  Claude is waiting for input\n")
+		fmt.Fprintf(fs.Output(), "  idle     💤  Claude session is idle\n")
+		fmt.Fprintf(fs.Output(), "\nOptions:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren marker set working                    # Set working marker on current branch\n")
+		fmt.Fprintf(fs.Output(), "  gren marker set waiting -branch feat-auth  # Set waiting marker on specific branch\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() == 0 {
+		fs.Usage()
+		return fmt.Errorf("marker type is required")
+	}
+
+	markerTypeStr := fs.Arg(0)
+	markerType, err := core.ParseMarkerType(markerTypeStr)
+	if err != nil {
+		return err
+	}
+
+	targetBranch := *branch
+	if targetBranch == "" {
+		ctx := context.Background()
+		currentBranch, err := c.gitRepo.GetCurrentBranch(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get current branch: %w", err)
+		}
+		targetBranch = currentBranch
+	}
+
+	ctx := context.Background()
+	mm := core.NewMarkerManager()
+	if err := mm.SetMarker(ctx, targetBranch, markerType); err != nil {
+		return err
+	}
+
+	logging.Info("CLI marker set: branch=%s, type=%s", targetBranch, markerType)
+	fmt.Printf("%s Marker set for %s\n", markerType, targetBranch)
+	return nil
+}
+
+func (c *CLI) handleMarkerClear(args []string) error {
+	fs := flag.NewFlagSet("marker clear", flag.ExitOnError)
+	branch := fs.String("branch", "", "Branch name (defaults to current branch)")
+	all := fs.Bool("all", false, "Clear all markers in the repository")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren marker clear [-branch <name>] [-all]\n")
+		fmt.Fprintf(fs.Output(), "\nClear Claude activity marker for a branch\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	mm := core.NewMarkerManager()
+
+	if *all {
+		if err := mm.ClearAllMarkers(ctx); err != nil {
+			return err
+		}
+		logging.Info("CLI marker clear: cleared all markers")
+		fmt.Println("Cleared all markers")
+		return nil
+	}
+
+	targetBranch := *branch
+	if targetBranch == "" {
+		currentBranch, err := c.gitRepo.GetCurrentBranch(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get current branch: %w", err)
+		}
+		targetBranch = currentBranch
+	}
+
+	if err := mm.ClearMarker(ctx, targetBranch); err != nil {
+		return err
+	}
+
+	logging.Info("CLI marker clear: branch=%s", targetBranch)
+	fmt.Printf("Cleared marker for %s\n", targetBranch)
+	return nil
+}
+
+func (c *CLI) handleMarkerGet(args []string) error {
+	fs := flag.NewFlagSet("marker get", flag.ExitOnError)
+	branch := fs.String("branch", "", "Branch name (defaults to current branch)")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren marker get [-branch <name>]\n")
+		fmt.Fprintf(fs.Output(), "\nGet Claude activity marker for a branch\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	targetBranch := *branch
+	ctx := context.Background()
+	if targetBranch == "" {
+		currentBranch, err := c.gitRepo.GetCurrentBranch(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get current branch: %w", err)
+		}
+		targetBranch = currentBranch
+	}
+
+	mm := core.NewMarkerManager()
+	marker, err := mm.GetMarker(ctx, targetBranch)
+	if err != nil {
+		return err
+	}
+
+	if marker == "" {
+		fmt.Printf("No marker set for %s\n", targetBranch)
+	} else {
+		fmt.Printf("%s %s\n", marker, targetBranch)
+	}
+	return nil
+}
+
+func (c *CLI) handleMarkerList() error {
+	ctx := context.Background()
+	mm := core.NewMarkerManager()
+
+	markers, err := mm.ListMarkers(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(markers) == 0 {
+		fmt.Println("No markers set")
+		return nil
+	}
+
+	fmt.Println("Branch markers:")
+	for branch, marker := range markers {
+		fmt.Printf("  %s %s\n", marker, branch)
+	}
+	return nil
+}
+
+func (c *CLI) handleSetupClaudePlugin(args []string) error {
+	fs := flag.NewFlagSet("setup-claude-plugin", flag.ExitOnError)
+	force := fs.Bool("f", false, "Overwrite existing files")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren setup-claude-plugin [-f]\n")
+		fmt.Fprintf(fs.Output(), "\nCreate .claude-plugin directory with hooks for Claude activity tracking\n\n")
+		fmt.Fprintf(fs.Output(), "This enables Claude to automatically set markers when working:\n")
+		fmt.Fprintf(fs.Output(), "  🤖 working - Claude is actively processing\n")
+		fmt.Fprintf(fs.Output(), "  💬 waiting - Claude is waiting for input\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	return core.SetupClaudePlugin(*force)
 }

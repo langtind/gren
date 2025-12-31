@@ -49,6 +49,8 @@ type Worktree struct {
 	PRNumber int    // PR number, 0 if no PR
 	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
 	PRURL    string // Full URL to PR for "Open in browser"
+
+	Marker string
 }
 
 // InitStep represents the current step in initialization

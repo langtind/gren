@@ -418,8 +418,10 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	statusWidth := width * 12 / 100
 	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
 
-	// Branch with current indicator
 	branch := wt.Branch
+	if wt.Marker != "" {
+		branch = branch + " " + wt.Marker
+	}
 	if wt.IsCurrent {
 		branch = "● " + branch
 	} else {
