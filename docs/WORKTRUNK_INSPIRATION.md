@@ -2,6 +2,27 @@
 
 > Analyse av [max-sixty/worktrunk](https://github.com/max-sixty/worktrunk) og hva vi kan adoptere i gren.
 
+## Implementasjonsstatus
+
+| Feature | Status | Commit |
+|---------|--------|--------|
+| Forbedret Shell Integration | ✅ Ferdig | `8f22643` |
+| Execute Flag (-x) | ✅ Ferdig | `48ff616` |
+| TOML Config Support | ✅ Ferdig | `11828b0` |
+| Extended Hooks System | ⏳ Pending | - |
+| Claude Code Plugin | ⏳ Pending | - |
+| Branch-basert Adressering | ⏳ Pending | - |
+| Spesiell Navigasjon (-) | ⏳ Pending | - |
+| for-each Command | ⏳ Pending | - |
+| LLM Commit Messages | ⏳ Pending | - |
+| CI Status Integration | ⏳ Pending | - |
+| Dev Server URL Column | ⏳ Pending | - |
+| Progressive CLI Rendering | ⏳ Pending | - |
+| Unified Merge Command | ⏳ Pending | - |
+| Statusline Command | ⏳ Pending | - |
+
+---
+
 ## TL;DR
 
 Worktrunk er en Rust-basert CLI for git worktree management, designet for parallelle AI-agenter. De har løst mange av de samme problemene som gren, men med noen elegante løsninger vi bør vurdere.
