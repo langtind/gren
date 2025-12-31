@@ -108,6 +108,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleMarker(args[2:])
 	case "setup-claude-plugin":
 		return c.handleSetupClaudePlugin(args[2:])
+	case "statusline":
+		return c.handleStatusline(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -1201,4 +1203,62 @@ func (c *CLI) handleSetupClaudePlugin(args []string) error {
 	}
 
 	return core.SetupClaudePlugin(*force)
+}
+
+func (c *CLI) handleStatusline(args []string) error {
+	fs := flag.NewFlagSet("statusline", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren statusline\n")
+		fmt.Fprintf(fs.Output(), "\nOutput a compact status for shell prompts\n\n")
+		fmt.Fprintf(fs.Output(), "Format: <branch> [+N] [~N] [?N] [↑N]\n")
+		fmt.Fprintf(fs.Output(), "  +N  = staged files\n")
+		fmt.Fprintf(fs.Output(), "  ~N  = modified files\n")
+		fmt.Fprintf(fs.Output(), "  ?N  = untracked files\n")
+		fmt.Fprintf(fs.Output(), "  ↑N  = unpushed commits\n\n")
+		fmt.Fprintf(fs.Output(), "Example shell integration:\n")
+		fmt.Fprintf(fs.Output(), "  PROMPT='$(gren statusline) %%~ $ '  # zsh\n")
+		fmt.Fprintf(fs.Output(), "  PS1='$(gren statusline) \\w $ '    # bash\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
+	if err != nil {
+		return nil
+	}
+
+	var current *core.WorktreeInfo
+	for i, wt := range worktrees {
+		if wt.IsCurrent {
+			current = &worktrees[i]
+			break
+		}
+	}
+
+	if current == nil {
+		return nil
+	}
+
+	var parts []string
+	parts = append(parts, current.Branch)
+
+	if current.StagedCount > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", current.StagedCount))
+	}
+	if current.ModifiedCount > 0 {
+		parts = append(parts, fmt.Sprintf("~%d", current.ModifiedCount))
+	}
+	if current.UntrackedCount > 0 {
+		parts = append(parts, fmt.Sprintf("?%d", current.UntrackedCount))
+	}
+	if current.UnpushedCount > 0 {
+		parts = append(parts, fmt.Sprintf("↑%d", current.UnpushedCount))
+	}
+
+	fmt.Println(strings.Join(parts, " "))
+	return nil
 }
