@@ -226,7 +226,7 @@ func TestHandleNavigateMissingName(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing worktree name")
 	}
-	if !strings.Contains(err.Error(), "worktree name is required") {
+	if !strings.Contains(err.Error(), "worktree identifier is required") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

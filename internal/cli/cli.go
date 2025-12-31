@@ -98,7 +98,7 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleCleanup(args[2:])
 	case "init":
 		return c.handleInit(args[2:])
-	case "navigate", "nav", "cd":
+	case "navigate", "nav", "cd", "switch":
 		return c.handleNavigate(args[2:])
 	case "shell-init":
 		return c.handleShellInit(args[2:])
@@ -517,17 +517,22 @@ func (c *CLI) handleInit(args []string) error {
 	return nil
 }
 
-// handleNavigate handles the navigate command
 func (c *CLI) handleNavigate(args []string) error {
 	fs := flag.NewFlagSet("navigate", flag.ExitOnError)
 
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: gren navigate [worktree-name]\n")
-		fmt.Fprintf(fs.Output(), "\nNavigate to a worktree directory by writing command to temp file\n\n")
+		fmt.Fprintf(fs.Output(), "Usage: gren switch <branch-or-name>\n")
+		fmt.Fprintf(fs.Output(), "\nNavigate to a worktree by branch name or worktree name\n\n")
+		fmt.Fprintf(fs.Output(), "Matching priority:\n")
+		fmt.Fprintf(fs.Output(), "  1. Exact worktree name match\n")
+		fmt.Fprintf(fs.Output(), "  2. Exact branch name match\n")
+		fmt.Fprintf(fs.Output(), "  3. Partial branch name match (e.g., 'auth' matches 'feature/auth')\n\n")
 		fmt.Fprintf(fs.Output(), "Examples:\n")
-		fmt.Fprintf(fs.Output(), "  gren navigate feature-branch\n")
-		fmt.Fprintf(fs.Output(), "  gren nav feature-branch\n")
-		fmt.Fprintf(fs.Output(), "  gren cd feature-branch\n")
+		fmt.Fprintf(fs.Output(), "  gren switch feat-auth           # Switch by worktree name\n")
+		fmt.Fprintf(fs.Output(), "  gren switch feature/auth        # Switch by branch name\n")
+		fmt.Fprintf(fs.Output(), "  gren switch auth                # Partial match\n")
+		fmt.Fprintf(fs.Output(), "  gren navigate feature-branch    # Alias\n")
+		fmt.Fprintf(fs.Output(), "  gren cd feature-branch          # Alias\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -535,15 +540,14 @@ func (c *CLI) handleNavigate(args []string) error {
 	}
 
 	if fs.NArg() == 0 {
-		logging.Error("CLI navigate: worktree name is required")
+		logging.Error("CLI navigate: worktree identifier is required")
 		fs.Usage()
-		return fmt.Errorf("worktree name is required")
+		return fmt.Errorf("worktree identifier is required")
 	}
 
-	worktreeName := fs.Arg(0)
-	logging.Info("CLI navigate: worktree=%s", worktreeName)
+	query := fs.Arg(0)
+	logging.Info("CLI navigate: query=%s", query)
 
-	// Get list of worktrees to find the path
 	ctx := context.Background()
 	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
 	if err != nil {
@@ -551,33 +555,60 @@ func (c *CLI) handleNavigate(args []string) error {
 		return fmt.Errorf("failed to list worktrees: %w", err)
 	}
 
-	// Find the worktree by name
-	var targetWorktree *core.WorktreeInfo
-	for _, wt := range worktrees {
-		if wt.Name == worktreeName {
-			targetWorktree = &wt
-			break
-		}
-	}
+	targetWorktree := findWorktreeByQuery(worktrees, query)
 
 	if targetWorktree == nil {
-		logging.Error("CLI navigate: worktree '%s' not found", worktreeName)
-		return fmt.Errorf("worktree '%s' not found", worktreeName)
+		logging.Error("CLI navigate: no worktree matching '%s'", query)
+		fmt.Printf("No worktree found matching '%s'\n\n", query)
+		fmt.Println("Available worktrees:")
+		for _, wt := range worktrees {
+			fmt.Printf("  %s (%s)\n", wt.Name, wt.Branch)
+		}
+		return fmt.Errorf("worktree '%s' not found", query)
 	}
 
-	// Write navigation command via directive package
 	if err := directive.WriteCD(targetWorktree.Path); err != nil {
 		logging.Error("CLI navigate: failed to write navigation directive: %v", err)
 		return fmt.Errorf("failed to write navigation command: %w", err)
 	}
 
 	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
-	if directive.IsShellIntegrationActive() {
-		// Shell wrapper will handle navigation, no message needed
-	} else {
+	if !directive.IsShellIntegrationActive() {
 		fmt.Printf("Navigation command written. Ensure shell integration is set up.\n")
 		fmt.Printf("Run: eval \"$(gren shell-init zsh)\"  # or bash/fish\n")
 	}
+	return nil
+}
+
+func findWorktreeByQuery(worktrees []core.WorktreeInfo, query string) *core.WorktreeInfo {
+	query = strings.ToLower(query)
+
+	for i, wt := range worktrees {
+		if strings.ToLower(wt.Name) == query {
+			return &worktrees[i]
+		}
+	}
+
+	for i, wt := range worktrees {
+		if strings.ToLower(wt.Branch) == query {
+			return &worktrees[i]
+		}
+	}
+
+	for i, wt := range worktrees {
+		branch := strings.ToLower(wt.Branch)
+		if strings.HasSuffix(branch, "/"+query) || strings.HasSuffix(branch, "-"+query) {
+			return &worktrees[i]
+		}
+	}
+
+	for i, wt := range worktrees {
+		branch := strings.ToLower(wt.Branch)
+		if strings.Contains(branch, query) {
+			return &worktrees[i]
+		}
+	}
+
 	return nil
 }
 
