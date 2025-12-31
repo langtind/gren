@@ -4,22 +4,22 @@
 
 ## Implementasjonsstatus
 
-| Feature | Status | Commit |
-|---------|--------|--------|
-| Forbedret Shell Integration | ✅ Ferdig | `8f22643` |
-| Execute Flag (-x) | ✅ Ferdig | `48ff616` |
-| TOML Config Support | ✅ Ferdig | `11828b0` |
-| Extended Hooks System | ✅ Ferdig | `a4d25d2` |
-| Claude Code Plugin | ✅ Ferdig | `e6b67b2` |
-| Branch-basert Adressering | ✅ Ferdig | `489008f` |
-| Spesiell Navigasjon (-) | ✅ Ferdig | `a0bb7a8` |
-| for-each Command | ⏳ Pending | - |
-| LLM Commit Messages | ⏳ Pending | - |
-| CI Status Integration | ⏳ Pending | - |
-| Dev Server URL Column | ⏳ Pending | - |
-| Progressive CLI Rendering | ⏳ Pending | - |
-| Unified Merge Command | ⏳ Pending | - |
-| Statusline Command | ✅ Ferdig | `c4931d2` |
+| Feature | Status | Commit | Prioritet |
+|---------|--------|--------|-----------|
+| Forbedret Shell Integration | ✅ Ferdig | `8f22643` | - |
+| Execute Flag (-x) | ✅ Ferdig | `48ff616` | - |
+| TOML Config Support | ✅ Ferdig | `11828b0` | - |
+| Extended Hooks System | ✅ Ferdig | `a4d25d2` | - |
+| Claude Code Plugin | ✅ Ferdig | `e6b67b2` | - |
+| Branch-basert Adressering | ✅ Ferdig | `489008f` | - |
+| Spesiell Navigasjon (-) | ✅ Ferdig | `a0bb7a8` | - |
+| Statusline Command | ✅ Ferdig | `c4931d2` | - |
+| **Unified Merge Command** | ⏳ Pending | - | 🔴 HØY |
+| **for-each Command** | ⏳ Pending | - | 🟡 MEDIUM |
+| **LLM Commit Messages** | ⏳ Pending | - | 🟡 MEDIUM |
+| **CI Status Integration** | ⏳ Pending | - | 🟡 MEDIUM |
+| **Progressive CLI Rendering** | ⏳ Pending | - | 🟢 LAV |
+| **Dev Server URL Column** | ⏳ Pending | - | 🟢 LAV |
 
 ---
 
@@ -27,359 +27,325 @@
 
 Worktrunk er en Rust-basert CLI for git worktree management, designet for parallelle AI-agenter. De har løst mange av de samme problemene som gren, men med noen elegante løsninger vi bør vurdere.
 
----
-
-## Funksjoner vi BØR adoptere
-
-### 1. Forbedret Shell Integration (Prioritet: HØY)
-
-**Nåværende gren-løsning:**
-```bash
-# Fast temp-fil, kun for navigasjon
-local TEMP_FILE="/tmp/gren_navigate"
-```
-
-**Worktrunk sin løsning (bedre):**
-```bash
-gren() {
-    local directive_file="$(mktemp)"
-    GREN_DIRECTIVE_FILE="$directive_file" command gren "$@" || exit_code=$?
-    if [[ -s "$directive_file" ]]; then
-        source "$directive_file"
-    fi
-    rm -f "$directive_file"
-}
-```
-
-**Hvorfor bedre:**
-- `mktemp` = unike filer, ingen race conditions
-- Env var = binæren vet hvor den skal skrive
-- Mer fleksibelt = kan skrive hvilke som helst shell-kommandoer
-- Støtter fremtidige features som automatisk cd etter create
-
-**Implementasjon:** Medium arbeid. Endre `shell-init` output og `navigate` kommando.
+**Forskjell mellom gren og worktrunk:** Gren har TUI i tillegg til CLI. Alle features må støtte begge interfaces.
 
 ---
 
-### 2. Execute Flag `-x` (Prioritet: HØY)
+## Gjenværende Features å Implementere
 
-Start en kommando etter worktree-operasjoner:
+### 1. Unified Merge Command (Prioritet: 🔴 HØY)
+
+**DEN VIKTIGSTE FEATUREN.** En kommando som gjør hele merge-workflowen:
 
 ```bash
-# Lag worktree OG start Claude
-gren create -n feat-auth -x claude
-
-# Switch og start dev server
-gren switch feat-ui -x "npm run dev"
-
-# Med trailing args (etter --)
-gren create -n feat -x claude -- "implement login"
+gren merge [target] [--squash] [--no-remove] [--no-verify]
 ```
 
-**Hvorfor:**
-- Perfekt for AI-agent workflows
-- Reduserer friction dramatisk
-- Enkel å implementere med den nye shell-integrasjonen
+**Pipeline (fra worktrunk):**
+1. **Stage** - Stage uncommitted changes
+2. **Squash** - Kombiner alle commits siden target til én (med LLM-generert melding)
+3. **Rebase** - Rebase onto target hvis behind
+4. **Pre-merge hooks** - Kjør tests, lint (fail-fast)
+5. **Merge** - Fast-forward merge til target branch
+6. **Pre-remove hooks** - Kjør cleanup hooks
+7. **Cleanup** - Slett worktree + branch
+8. **Post-merge hooks** - Kjør deploy, notifications
 
-**Implementasjon:** Lett arbeid. Legg til `-x` flag, skriv kommando til directive file.
+**Flags:**
+- `--no-squash` - Behold individuelle commits
+- `--no-remove` - Behold worktree etter merge
+- `--no-verify` - Skip hooks
+- `--no-rebase` - Skip rebase (fail hvis ikke allerede rebased)
+
+**TUI-integrasjon:**
+- Ny keybind `m` for merge current worktree
+- Modal confirmation med pipeline preview
+- Progress indicator under merge
+
+**Implementasjon:** Stort arbeid. Ny kommando + TUI view.
 
 ---
 
-### 3. Claude Code Plugin (Prioritet: HØY)
+### 2. for-each Command (Prioritet: 🟡 MEDIUM)
 
-Aktivitetstracking for parallelle Claude-sesjoner:
+Kjør kommando i ALLE worktrees:
+
+```bash
+gren for-each -- git status --short
+gren for-each -- npm install
+gren for-each -- "echo Branch: {{ branch }}"
+```
+
+**Template-variabler (fra worktrunk):**
+| Variable | Beskrivelse |
+|----------|-------------|
+| `{{ branch }}` | Branch-navn |
+| `{{ branch \| sanitize }}` | Branch-navn med `/` → `-` |
+| `{{ worktree }}` | Absolutt path til worktree |
+| `{{ worktree_name }}` | Worktree directory name |
+| `{{ repo }}` | Repository name |
+| `{{ repo_root }}` | Absolutt path til main repo |
+| `{{ commit }}` | Full HEAD commit SHA |
+| `{{ short_commit }}` | Short HEAD commit SHA |
+| `{{ default_branch }}` | Default branch (main/master) |
+
+**Behavior:**
+- Kjører sekvensielt i hver worktree
+- Fortsetter ved feil, viser summary til slutt
+- Real-time output
+
+**TUI-integrasjon:**
+- Keybind `F` for "for-each" med input prompt
+- Eller via tools menu (`t`)
+
+**Implementasjon:** Medium arbeid. Template-system + command runner.
+
+---
+
+### 3. LLM Commit Messages (Prioritet: 🟡 MEDIUM)
+
+Generer commit-meldinger med ekstern LLM-kommando:
+
+```bash
+# Standalone
+gren step commit              # Stage + commit med LLM-melding
+gren step squash [target]     # Squash med LLM-melding
+
+# Som del av merge
+gren merge                    # Bruker LLM for squash-commit
+```
+
+**Config (.gren/config.toml):**
+```toml
+[commit-generation]
+command = "llm"
+args = ["-m", "claude-haiku-4.5"]
+# Eller:
+# command = "aichat"
+# args = ["-m", "claude"]
+```
+
+**Hvordan det fungerer:**
+1. Generer diff
+2. Bygg prompt med diff + kontekst
+3. Pipe til ekstern LLM-kommando
+4. Bruk output som commit-melding
+
+**Viktig:** Vi bygger IKKE LLM inn i gren. Vi kaller et eksternt CLI-verktøy (`llm`, `aichat`, etc.).
+
+**Implementasjon:** Medium arbeid. Prompt-template + subprocess.
+
+---
+
+### 4. CI Status Integration (Prioritet: 🟡 MEDIUM)
+
+Vis CI/pipeline-status i list og TUI:
 
 ```
-# I gren list/TUI:
-  main       ✓   12m
-  feat-auth  🤖  +2   # Claude jobber her
-  feat-ui    💬  +5   # Venter på input
+Branch        Status   CI   Path
+main          ^        ●    ~/code/project
+feat-auth     ↑2       ●    ~/code/project.feat-auth
+feat-ui       !?       ⚠    ~/code/project.feat-ui
 ```
+
+**CI-indikatorer:**
+| Symbol | Farge | Betydning |
+|--------|-------|-----------|
+| `●` | Grønn | Alle checks passed |
+| `●` | Blå | Checks running |
+| `●` | Rød | Checks failed |
+| `●` | Gul | Merge conflicts |
+| `●` | Grå | No checks configured |
+| `⚠` | Gul | Fetch error |
 
 **Implementasjon:**
-1. `.claude-plugin/` directory med hooks
-2. Hooks setter markers via git config
-3. TUI/list leser markers og viser status
+- Bruk eksisterende `gh` CLI integrasjon
+- Cache resultater i git config med TTL (30-60 sek)
+- Async fetch - vis tabell først, fyll inn CI etterpå
 
-```json
-// .claude-plugin/hooks/hooks.json
-{
-  "hooks": {
-    "UserPromptSubmit": [{ "command": "gren marker set working" }],
-    "Notification": [{ "command": "gren marker set waiting" }],
-    "SessionEnd": [{ "command": "gren marker clear" }]
-  }
-}
-```
+**TUI-integrasjon:**
+- Ny kolonne i dashboard
+- Keybind for å åpne PR/pipeline i browser
 
-**Implementasjon:** Medium arbeid. Ny `gren marker` kommando + oppdater TUI.
+**Implementasjon:** Medium arbeid. Utvid eksisterende GitHub-integrasjon.
 
 ---
 
-### 4. Utvidet Hooks System (Prioritet: MEDIUM)
+### 5. Progressive CLI Rendering (Prioritet: 🟢 LAV)
 
-Worktrunk har 7 hook-typer. Gren har kun `post-create`.
+`gren list` viser lokale data instant, fyller inn remote-data progressivt:
 
-**Nye hooks å legge til:**
-| Hook | Når | Use Case |
-|------|-----|----------|
-| `post-start` | Etter switch (bakgrunn) | Dev servers, file watchers |
-| `post-switch` | Etter alle switches | IDE/terminal updates |
-| `pre-merge` | Før merge | Tests, lint |
-| `post-merge` | Etter merge | Cleanup, deploy |
-| `pre-remove` | Før sletting | Backup, verification |
+```bash
+$ gren list
+# Instant: branches, paths, local status
+# 100ms later: remote status, commits ahead/behind
+# 500ms later: CI status
+```
 
-**Config-format:**
+**Hvordan:**
+1. Detect om stdout er TTY
+2. Hvis TTY: progressive rendering
+3. Hvis pipe: buffer alt først
+
+**TUI:** Ikke nødvendig - TUI har allerede async loading.
+
+**Implementasjon:** Lett-medium arbeid. Kun for CLI `list` kommando.
+
+---
+
+### 6. Dev Server URL Column (Prioritet: 🟢 LAV)
+
+Vis dev server URLs i list, dimmet hvis port ikke lytter:
+
+```
+Branch        URL                        Path
+feat-auth     http://localhost:12472     ~/code/project.feat-auth
+feat-ui       http://localhost:13891     ~/code/project.feat-ui
+```
+
+**Config (.gren/config.toml):**
 ```toml
-# .gren/config.toml (eller .config/gren.toml)
-post-create = "bun install"
-
-[pre-merge]
-lint = "bun run lint"
-test = "bun test"
-
-[post-start]
-dev = { command = "bun run dev", background = true }
+[list]
+url = "http://localhost:{{ branch | hash_port }}"
 ```
 
-**Implementasjon:** Medium-stort arbeid. Utvide config-system, hook-runner.
+**Filters:**
+- `hash_port` - Hash string til port 10000-19999
+- `sanitize` - Erstatt `/` og `\` med `-`
+
+**Implementasjon:** Lett arbeid, men nisje use case.
 
 ---
 
-### 5. Unified Merge Command (Prioritet: MEDIUM)
+## Tidligere Implementerte Features
 
-En kommando som gjør hele merge-workflowen:
+### Forbedret Shell Integration ✅
+Mktemp + env var approach for shell directives.
 
-```bash
-gren merge [--squash] [--no-remove]
-```
+### Execute Flag (-x) ✅
+`gren create -n feat -x claude` starter Claude etter worktree-opprettelse.
 
-Gjør automatisk:
-1. Commit/squash endringer
-2. Rebase onto target
-3. Kjør pre-merge hooks (tests)
-4. Push til target branch
-5. Slett worktree + branch
-6. Switch til main
-7. Kjør post-merge hooks
+### TOML Config Support ✅
+Støtte for `.gren/config.toml` i tillegg til JSON.
 
-**Hvorfor:**
-- Eliminerer manuelt arbeid
-- Konsistent workflow
-- Hooks sikrer kvalitet
+### Extended Hooks System ✅
+`pre-remove` hook + backward compat for legacy `PostCreateHook`.
 
-**Implementasjon:** Stort arbeid. Ny kommando med mange steg.
+### Claude Code Plugin ✅
+`gren marker set/clear/get/list` + `gren setup-claude-plugin`.
 
----
+### Branch-basert Adressering ✅
+`gren switch feat-auth` med fuzzy matching.
 
-### 6. Branch-basert Adressering (Prioritet: MEDIUM)
+### Spesiell Navigasjon (-) ✅
+`gren switch -` for forrige worktree.
 
-Adresser worktrees via branch-navn, ikke path:
-
-```bash
-# I stedet for:
-gren switch /path/to/repo-worktrees/feat-auth
-
-# Bare:
-gren switch feat-auth
-```
-
-Med path-templates:
-```toml
-[worktree]
-path = "../{{ repo }}-worktrees/{{ branch | sanitize }}"
-```
-
-**Implementasjon:** Medium arbeid. Template-system + lookup-logikk.
-
----
-
-### 7. Spesiell Navigasjon (Prioritet: LAV)
-
-```bash
-gren switch -      # Forrige worktree (som cd -)
-gren switch @      # Current (noop, men nyttig i scripts)
-```
-
-**Implementasjon:** Lett arbeid. Track previous i git config eller env var.
-
----
-
-### 8. Status Line for Shell Prompts (Prioritet: LAV)
-
-```bash
-# I .zshrc
-PROMPT='$(gren statusline) %~ $ '
-
-# Output: feat-auth +2 ↑1
-```
-
-**Implementasjon:** Medium arbeid. Ny kommando med rask git-status.
-
----
-
-## Funksjoner vi IKKE bør adoptere
-
-### 1. LLM Commit Messages
-**Hvorfor ikke:**
-- Scope creep - gren er en worktree manager, ikke commit helper
-- Legger til kompleksitet og dependencies
-- Brukere kan bruke dedikerte verktøy (llm, aichat, etc.)
-- Claude Code genererer allerede commit messages
-
-### 2. CI Status Integration
-**Hvorfor ikke:**
-- Gren har allerede GitHub CLI integrasjon for PR-status
-- Legger til API-avhengigheter og kompleksitet
-- CI-status er tilgjengelig andre steder
-
-### 3. Progressive List Rendering
-**Hvorfor ikke:**
-- Gren er TUI-first, ikke CLI-first
-- TUI har allerede async loading
-- Ville kreve stor refaktorering
-
-### 4. for-each Command
-**Hvorfor ikke:**
-- Nisje use case
-- Enkelt å gjøre med shell-løkker
-- Lav verdi vs kompleksitet
-
-### 5. Dev Server URL Column
-**Hvorfor ikke:**
-- Veldig nisje
-- Krever template-system og health checks
-- Lav prioritet
+### Statusline Command ✅
+`gren statusline` for shell prompts.
 
 ---
 
 ## Implementasjonsplan
 
-### Fase 1: Fundament (1-2 uker arbeid)
-1. **Forbedret Shell Integration**
-   - Endre til env var + mktemp approach
-   - Oppdater alle shells (bash, zsh, fish)
-   - Bakoverkompatibilitet med eksisterende setup
+### Fase 5: Merge Workflow (Neste)
+1. **Unified Merge Command**
+   - Implementer full pipeline
+   - Integrer med eksisterende hooks
+   - TUI merge view
 
-2. **Execute Flag**
-   - Legg til `-x` på `create` og evt. `switch`
-   - Integrer med directive file system
+2. **LLM Commit Messages**
+   - Prompt-template system
+   - Ekstern kommando-integrasjon
+   - Integrer med merge
 
-### Fase 2: Claude Integration (1 uke arbeid)
-3. **Claude Code Plugin**
-   - Opprett `.claude-plugin/` struktur
-   - Implementer `gren marker` kommando
-   - Oppdater TUI til å vise markers
-   - Dokumenter oppsett
+### Fase 6: Multi-Worktree Operations
+3. **for-each Command**
+   - Template-variabler
+   - Parallel/sekvensiell execution
+   - Error handling + summary
 
-### Fase 3: Workflow (2-3 uker arbeid)
-4. **Utvidet Hooks System**
-   - Design config-format
-   - Implementer hook-runner med parallelitet
-   - Legg til nye hook-typer gradvis
+### Fase 7: Status & Monitoring
+4. **CI Status Integration**
+   - Utvid `gh` integrasjon
+   - Caching med TTL
+   - TUI + CLI display
 
-5. **Branch-basert Adressering**
-   - Template-system for paths
-   - Lookup-logikk
-   - Migrering av eksisterende worktrees
+5. **Progressive CLI Rendering**
+   - TTY detection
+   - Streaming output
+   - Graceful degradation
 
-### Fase 4: Polish (1 uke arbeid)
-6. **Spesiell Navigasjon**
-   - `-` for previous worktree
-
-7. **Merge Command** (valgfritt)
-   - Unified workflow
-   - Hook-integrasjon
+### Fase 8: Polish (Valgfritt)
+6. **Dev Server URL Column**
+   - Port hashing
+   - Health check
+   - Display i list/TUI
 
 ---
 
 ## Tekniske Notater
 
-### Shell Integration - Detaljert Design
+### Merge Command - Detaljert Design
 
-```bash
-# Ny zsh wrapper
-gren() {
-    # Skip wrapper i completion mode
-    if [[ -n "${COMPLETE:-}" ]]; then
-        command gren "$@"
-        return
-    fi
-
-    local directive_file exit_code=0
-    directive_file="$(mktemp)"
-
-    GREN_DIRECTIVE_FILE="$directive_file" command gren "$@" || exit_code=$?
-
-    if [[ -s "$directive_file" ]]; then
-        source "$directive_file"
-        if [[ $exit_code -eq 0 ]]; then
-            exit_code=$?
-        fi
-    fi
-
-    rm -f "$directive_file"
-    return "$exit_code"
-}
-```
-
-Go-kode for å skrive directives:
 ```go
-func WriteDirective(directive string) error {
-    file := os.Getenv("GREN_DIRECTIVE_FILE")
-    if file == "" {
-        return nil // Shell integration ikke aktiv
-    }
-    return os.WriteFile(file, []byte(directive+"\n"), 0644)
+type MergeOptions struct {
+    Target      string // Target branch (default: main)
+    Squash      bool   // Squash commits (default: true)
+    Remove      bool   // Remove worktree after (default: true)
+    Verify      bool   // Run hooks (default: true)
+    Rebase      bool   // Rebase onto target (default: true)
 }
 
-// Bruk:
-WriteDirective(fmt.Sprintf("cd %q", worktreePath))
-WriteDirective(fmt.Sprintf("exec %s", executeCommand))
+func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) error {
+    // 1. Stage uncommitted changes
+    // 2. Squash commits (if opts.Squash)
+    // 3. Rebase onto target (if opts.Rebase)
+    // 4. Run pre-merge hooks (if opts.Verify)
+    // 5. Fast-forward merge
+    // 6. Run pre-remove hooks (if opts.Verify && opts.Remove)
+    // 7. Remove worktree (if opts.Remove)
+    // 8. Switch to target
+    // 9. Run post-merge hooks (if opts.Verify)
+}
 ```
 
-### Claude Plugin - Detaljert Design
+### LLM Integration - Design
 
-Directory struktur:
-```
-.claude-plugin/
-├── plugin.json
-├── hooks/
-│   └── hooks.json
-└── skills/
-    └── gren/
-        └── SKILL.md
-```
+```go
+type CommitGenerator struct {
+    Command string   // e.g., "llm"
+    Args    []string // e.g., ["-m", "claude-haiku"]
+}
 
-Marker storage (git config):
-```bash
-# Set marker
-git config --local gren.marker.feat-auth "🤖"
-
-# Get marker
-git config --local gren.marker.feat-auth
-
-# Clear
-git config --local --unset gren.marker.feat-auth
+func (cg *CommitGenerator) Generate(diff string, context string) (string, error) {
+    prompt := buildPrompt(diff, context)
+    cmd := exec.Command(cg.Command, cg.Args...)
+    cmd.Stdin = strings.NewReader(prompt)
+    output, err := cmd.Output()
+    return strings.TrimSpace(string(output)), err
+}
 ```
 
----
+### for-each - Template System
 
-## Spørsmål å avklare
+```go
+type TemplateContext struct {
+    Branch        string
+    BranchSanitized string
+    Worktree      string
+    WorktreeName  string
+    Repo          string
+    RepoRoot      string
+    Commit        string
+    ShortCommit   string
+    DefaultBranch string
+}
 
-1. **Config-format:** Fortsette med JSON eller gå over til TOML?
-   - TOML er mer lesbart for hooks
-   - Worktrunk bruker TOML
-
-2. **Backward compatibility:** Hvordan håndtere eksisterende `.gren/` configs?
-   - Migreringsscript?
-   - Støtte begge formater?
-
-3. **Plugin publisering:** Skal claude-plugin være i gren-repo eller separat?
-   - I repo = enklere vedlikehold
-   - Separat = kan oppdateres uavhengig
-
-4. **Navnekonvensjoner:** Beholde `gren` eller alias som `gw` for CLI?
+func expandTemplate(template string, ctx TemplateContext) string {
+    // Simple {{ variable }} replacement
+    // Support for {{ variable | filter }}
+}
+```
 
 ---
 
@@ -387,5 +353,5 @@ git config --local --unset gren.marker.feat-auth
 
 - [Worktrunk GitHub](https://github.com/max-sixty/worktrunk)
 - [Worktrunk Docs](https://worktrunk.dev)
+- [Worktrunk CLI Source](https://github.com/max-sixty/worktrunk/blob/main/src/cli.rs)
 - [Claude Code Hooks](https://docs.anthropic.com/claude-code/hooks)
-- [Anthropic Blog: Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices)
