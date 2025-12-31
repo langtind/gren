@@ -12,7 +12,7 @@
 | Extended Hooks System | ✅ Ferdig | `a4d25d2` |
 | Claude Code Plugin | ✅ Ferdig | `e6b67b2` |
 | Branch-basert Adressering | ✅ Ferdig | `489008f` |
-| Spesiell Navigasjon (-) | ⏳ Pending | - |
+| Spesiell Navigasjon (-) | ✅ Ferdig | `a0bb7a8` |
 | for-each Command | ⏳ Pending | - |
 | LLM Commit Messages | ⏳ Pending | - |
 | CI Status Integration | ⏳ Pending | - |
