@@ -424,6 +424,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.initializeOpenInStateFromMsg(msg)
 		return m, nil
 
+	case navigateCompleteMsg:
+		if msg.err != nil {
+			m.err = fmt.Errorf("navigation failed: %w", msg.err)
+			return m, nil
+		}
+		// Set exit message to be printed after TUI closes
+		m.ExitMessage = fmt.Sprintf("✅ Navigating to %s\n📂 %s", msg.worktreeName, shortenPath(msg.worktreePath, 80))
+		return m, tea.Quit
+
 	case availableBranchesLoadedMsg:
 		if m.createState != nil {
 			if msg.err != nil {
@@ -592,7 +601,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
 				logging.Info("Dashboard: opening 'Open in...' menu for worktree: %s", selectedWorktree.Name)
 				m.currentView = OpenInView
-				return m, m.initializeOpenInState(selectedWorktree.Path)
+				return m, m.initializeOpenInState(selectedWorktree.Name, selectedWorktree.Path)
 			}
 			return m, nil
 
@@ -661,7 +670,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Navigate to selected worktree directory
 			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
 				logging.Info("Dashboard: navigating to worktree: %s (shortcut 'g')", selectedWorktree.Name)
-				return m, m.navigateToWorktree(selectedWorktree.Path)
+				return m, m.navigateToWorktree(selectedWorktree.Name, selectedWorktree.Path)
 			}
 			return m, nil
 		case key.Matches(keyMsg, m.keys.Tools):

@@ -196,6 +196,7 @@ const (
 
 // OpenInState holds the state for the "Open in..." view
 type OpenInState struct {
+	worktreeName  string             // Name of the selected worktree
 	worktreePath  string             // Path of the selected worktree
 	actions       []PostCreateAction // Available actions
 	selectedIndex int                // Currently selected action index
@@ -366,6 +367,9 @@ type Model struct {
 
 	// Compare loading spinner
 	compareSpinner spinner.Model
+
+	// Exit message to print after TUI closes
+	ExitMessage string
 }
 
 // KeyMap defines key bindings for the application

@@ -92,8 +92,14 @@ func main() {
 	)
 
 	// Run the program
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Print exit message if set (e.g., after navigation)
+	if model, ok := finalModel.(ui.Model); ok && model.ExitMessage != "" {
+		fmt.Println(model.ExitMessage)
 	}
 }

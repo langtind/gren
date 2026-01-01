@@ -519,12 +519,13 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 }
 
 // initializeOpenInState creates and initializes the "Open in..." state
-func (m Model) initializeOpenInState(worktreePath string) tea.Cmd {
+func (m Model) initializeOpenInState(worktreeName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Use the consolidated action generation logic
 		availableActions := m.getActionsForPath(worktreePath, "Back to dashboard")
 
 		return openInInitializedMsg{
+			worktreeName: worktreeName,
 			worktreePath: worktreePath,
 			actions:      availableActions,
 		}
@@ -1012,16 +1013,18 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 	}
 }
 
-// navigateToWorktree writes navigation command to directive file and quits TUI
-func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
+// navigateToWorktree writes navigation command to directive file and returns navigate message
+func (m Model) navigateToWorktree(worktreeName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Write navigation command via directive package
 		if err := directive.WriteCD(worktreePath); err != nil {
-			return fmt.Errorf("failed to write navigation command: %w", err)
+			return navigateCompleteMsg{err: err}
 		}
 
-		// Quit the TUI to allow wrapper script to execute the navigation
-		return tea.Quit()
+		return navigateCompleteMsg{
+			worktreeName: worktreeName,
+			worktreePath: worktreePath,
+		}
 	}
 }
 

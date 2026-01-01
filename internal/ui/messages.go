@@ -48,6 +48,7 @@ type worktreeDeletedMsg struct {
 }
 
 type openInInitializedMsg struct {
+	worktreeName string
 	worktreePath string
 	actions      []PostCreateAction
 }
@@ -165,4 +166,10 @@ type stepCommitCompleteMsg struct {
 type llmMessageGeneratedMsg struct {
 	message string
 	err     error
+}
+
+type navigateCompleteMsg struct {
+	worktreeName string
+	worktreePath string
+	err          error
 }

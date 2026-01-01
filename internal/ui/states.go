@@ -263,6 +263,7 @@ func (m *Model) setupDeleteStateForWorktree(worktree Worktree) {
 // initializeOpenInState initializes the OpenIn state with actions
 func (m *Model) initializeOpenInStateFromMsg(msg openInInitializedMsg) {
 	m.openInState = &OpenInState{
+		worktreeName:  msg.worktreeName,
 		worktreePath:  msg.worktreePath,
 		actions:       msg.actions,
 		selectedIndex: 0,

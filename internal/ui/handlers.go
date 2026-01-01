@@ -578,7 +578,7 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if action.Command == "navigate" {
 					worktreePath := m.getWorktreePath(m.createState.branchName)
 					logging.Info("CreateView: navigating to worktree: %s", worktreePath)
-					return m, m.navigateToWorktree(worktreePath)
+					return m, m.navigateToWorktree(m.createState.branchName, worktreePath)
 				}
 				// Handle claude specially - quit TUI and launch claude in the worktree
 				if action.Command == "claude" {
@@ -816,7 +816,7 @@ func (m Model) handleOpenInKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Handle navigate specially - it needs to quit TUI and write to temp file
 			if action.Command == "navigate" {
 				logging.Info("OpenInView: navigating to worktree: %s", m.openInState.worktreePath)
-				return m, m.navigateToWorktree(m.openInState.worktreePath)
+				return m, m.navigateToWorktree(m.openInState.worktreeName, m.openInState.worktreePath)
 			}
 			// Handle claude specially - quit TUI and launch claude in the worktree
 			if action.Command == "claude" {
