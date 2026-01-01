@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -1655,4 +1656,11 @@ func (m Model) loadCompareDiff(sourcePath string, filePath string) tea.Cmd {
 
 		return compareDiffLoadedMsg{content: content, err: nil}
 	}
+}
+
+// clearStatusAfter returns a command that clears the status message after a delay
+func clearStatusAfter(duration time.Duration) tea.Cmd {
+	return tea.Tick(duration, func(t time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
 }

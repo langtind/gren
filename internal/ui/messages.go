@@ -173,3 +173,5 @@ type navigateCompleteMsg struct {
 	worktreePath string
 	err          error
 }
+
+type clearStatusMsg struct{}

@@ -370,6 +370,9 @@ type Model struct {
 
 	// Exit message to print after TUI closes
 	ExitMessage string
+
+	// Temporary status message (toast-style notification)
+	statusMessage string
 }
 
 // KeyMap defines key bindings for the application

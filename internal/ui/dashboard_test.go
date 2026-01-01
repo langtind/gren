@@ -2,6 +2,11 @@ package ui
 
 import (
 	"testing"
+	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/langtind/gren/internal/git"
 )
 
 func TestGetSortedWorktrees(t *testing.T) {
@@ -104,4 +109,107 @@ func TestGetSelectedWorktreeFromSortedList(t *testing.T) {
 				tt.selected, got.Name, tt.wantName)
 		}
 	}
+}
+
+func TestCannotDeleteCurrentWorktree(t *testing.T) {
+	// Create a model with current worktree selected
+	model := Model{
+		currentView: DashboardView,
+		repoInfo: &git.RepoInfo{
+			IsGitRepo:     true,
+			IsInitialized: true,
+		},
+		worktrees: []Worktree{
+			{Name: "main", Path: "/path/main", IsCurrent: true, LastCommit: "1h ago"},
+			{Name: "feature", Path: "/path/feature", IsCurrent: false, LastCommit: "2h ago"},
+		},
+		selected: 0, // Current worktree is first in sorted order
+		keys:     DefaultKeyMap(),
+	}
+
+	// Simulate pressing 'd' to delete
+	deleteKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+
+	// Update the model
+	updatedModel, cmd := model.Update(deleteKey)
+	m := updatedModel.(Model)
+
+	// Should show status message instead of entering delete view
+	if m.statusMessage == "" {
+		t.Error("Expected status message to be set when trying to delete current worktree")
+	}
+	if m.statusMessage != "⚠️ Cannot delete current worktree" {
+		t.Errorf("Unexpected status message: %q", m.statusMessage)
+	}
+	if m.currentView != DashboardView {
+		t.Error("Should stay in dashboard view, not enter delete view")
+	}
+
+	// Should return a command to clear the status
+	if cmd == nil {
+		t.Error("Expected a command to clear status message after delay")
+	}
+}
+
+func TestDeleteNonCurrentWorktreeAllowed(t *testing.T) {
+	// Create a model with non-current worktree selected
+	model := Model{
+		currentView: DashboardView,
+		repoInfo: &git.RepoInfo{
+			IsGitRepo:     true,
+			IsInitialized: true,
+		},
+		worktrees: []Worktree{
+			{Name: "main", Path: "/path/main", IsCurrent: true, LastCommit: "1h ago"},
+			{Name: "feature", Path: "/path/feature", IsCurrent: false, LastCommit: "2h ago"},
+		},
+		selected: 1, // Feature worktree (not current)
+		keys:     DefaultKeyMap(),
+	}
+
+	// Simulate pressing 'd' to delete
+	deleteKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+
+	// Update the model
+	updatedModel, _ := model.Update(deleteKey)
+	m := updatedModel.(Model)
+
+	// Should enter delete view (not show status message)
+	if m.statusMessage != "" {
+		t.Errorf("Should not show status message for non-current worktree, got: %q", m.statusMessage)
+	}
+	if m.currentView != DeleteView {
+		t.Error("Should enter delete view for non-current worktree")
+	}
+}
+
+func TestClearStatusMessage(t *testing.T) {
+	model := Model{
+		statusMessage: "Test message",
+	}
+
+	// Send clearStatusMsg
+	updatedModel, _ := model.Update(clearStatusMsg{})
+	m := updatedModel.(Model)
+
+	if m.statusMessage != "" {
+		t.Errorf("Status message should be cleared, got: %q", m.statusMessage)
+	}
+}
+
+func TestClearStatusAfterCommand(t *testing.T) {
+	// Test that clearStatusAfter returns a command that sends clearStatusMsg
+	cmd := clearStatusAfter(1 * time.Millisecond)
+	if cmd == nil {
+		t.Fatal("clearStatusAfter should return a command")
+	}
+
+	// The command should be a tick that eventually returns clearStatusMsg
+	// We can't easily test the timing, but we can verify it's not nil
+}
+
+// Helper to check if key matches
+func init() {
+	// Suppress unused import error for key package
+	_ = key.NewBinding()
 }

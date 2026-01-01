@@ -49,11 +49,26 @@ func (m Model) dashboardView() string {
 			Render(spinnerText)
 	}
 
-	// Combine all parts
-	if githubStatus != "" {
-		return lipgloss.JoinVertical(lipgloss.Left, header, content, githubStatus, footer)
+	// Status message (toast notification)
+	var statusLine string
+	if m.statusMessage != "" {
+		statusLine = lipgloss.NewStyle().
+			Width(m.width).
+			Align(lipgloss.Center).
+			Padding(0, 0, 1, 0).
+			Render(WarningStyle.Render(m.statusMessage))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+
+	// Combine all parts
+	parts := []string{header, content}
+	if githubStatus != "" {
+		parts = append(parts, githubStatus)
+	}
+	if statusLine != "" {
+		parts = append(parts, statusLine)
+	}
+	parts = append(parts, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

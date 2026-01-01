@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -484,6 +485,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case clearStatusMsg:
+		m.statusMessage = ""
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmds []tea.Cmd
 
@@ -627,7 +632,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Don't allow deleting the current worktree
 				if selectedWorktree.IsCurrent {
 					logging.Debug("Dashboard: cannot delete current worktree: %s", selectedWorktree.Name)
-					return m, nil // Silently ignore - or could show error message
+					m.statusMessage = "⚠️ Cannot delete current worktree"
+					return m, clearStatusAfter(3 * time.Second)
 				}
 				logging.Info("Dashboard: entering DeleteView for worktree: %s (shortcut 'd')", selectedWorktree.Name)
 				m.currentView = DeleteView
