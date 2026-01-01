@@ -805,10 +805,6 @@ if command -v gren >/dev/null 2>&1 || [[ -n "${GREN_BIN:-}" ]]; then
             # Show new directory if we changed
             if [[ "$PWD" != "$OLDPWD" ]]; then
                 echo "📂 Now in: $(pwd)"
-                # Auto-allow direnv if available
-                if command -v direnv &> /dev/null && [[ -f ".envrc" ]]; then
-                    direnv allow 2>/dev/null
-                fi
             fi
         fi
 
@@ -851,10 +847,6 @@ if command -v gren >/dev/null 2>&1; or set -q GREN_BIN
             # Show new directory if we changed
             if test "$PWD" != "$old_pwd"
                 echo "📂 Now in: "(pwd)
-                # Auto-allow direnv if available
-                if command -v direnv >/dev/null 2>&1; and test -f ".envrc"
-                    direnv allow 2>/dev/null
-                end
             end
         end
 

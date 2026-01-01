@@ -425,12 +425,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case navigateCompleteMsg:
+		logging.Info("navigateCompleteMsg received: name=%s, path=%s, err=%v", msg.worktreeName, msg.worktreePath, msg.err)
 		if msg.err != nil {
 			m.err = fmt.Errorf("navigation failed: %w", msg.err)
 			return m, nil
 		}
-		// Set exit message to be printed after TUI closes
-		m.ExitMessage = fmt.Sprintf("✅ Navigating to %s\n📂 %s", msg.worktreeName, shortenPath(msg.worktreePath, 80))
+		// Set exit message - just show worktree name, shell wrapper shows path
+		m.ExitMessage = fmt.Sprintf("✅ Navigating to %s", msg.worktreeName)
+		logging.Info("navigateCompleteMsg: ExitMessage set, quitting")
 		return m, tea.Quit
 
 	case availableBranchesLoadedMsg:

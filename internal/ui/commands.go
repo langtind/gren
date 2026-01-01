@@ -1016,11 +1016,15 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 // navigateToWorktree writes navigation command to directive file and returns navigate message
 func (m Model) navigateToWorktree(worktreeName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
+		logging.Info("navigateToWorktree: writing directive for %s -> %s", worktreeName, worktreePath)
+
 		// Write navigation command via directive package
 		if err := directive.WriteCD(worktreePath); err != nil {
+			logging.Error("navigateToWorktree: failed to write directive: %v", err)
 			return navigateCompleteMsg{err: err}
 		}
 
+		logging.Info("navigateToWorktree: directive written successfully")
 		return navigateCompleteMsg{
 			worktreeName: worktreeName,
 			worktreePath: worktreePath,
