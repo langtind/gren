@@ -28,6 +28,18 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 		return result
 	}
 
+	// Change to repo root so all relative paths work correctly
+	originalDir, err := os.Getwd()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get current directory: %w", err)
+		return result
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		result.Error = fmt.Errorf("failed to change to repo root: %w", err)
+		return result
+	}
+	defer os.Chdir(originalDir)
+
 	// Create .gren directory
 	err = os.MkdirAll(".gren", 0755)
 	if err != nil {
