@@ -269,3 +269,93 @@ func TestMigrate_NoMigrationNeeded(t *testing.T) {
 		t.Error("Migrate() should return nil when no migration needed")
 	}
 }
+
+func TestGetMigrationMessage(t *testing.T) {
+	t.Run("no migration needed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, ".gren")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		manager := &Manager{configDir: configDir}
+
+		// Create config with current version
+		config := &Config{
+			WorktreeDir: "/tmp/worktrees",
+			Version:     CurrentConfigVersion,
+		}
+		if err := manager.Save(config); err != nil {
+			t.Fatal(err)
+		}
+
+		msg, err := manager.GetMigrationMessage()
+		if err != nil {
+			t.Fatalf("GetMigrationMessage() error = %v", err)
+		}
+		if msg != "" {
+			t.Errorf("GetMigrationMessage() = %q, want empty string", msg)
+		}
+	})
+
+	t.Run("version upgrade needed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, ".gren")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		manager := &Manager{configDir: configDir}
+
+		// Create config with old version
+		config := &Config{
+			WorktreeDir: "/tmp/worktrees",
+			Version:     "1.0.0",
+		}
+		if err := manager.Save(config); err != nil {
+			t.Fatal(err)
+		}
+
+		msg, err := manager.GetMigrationMessage()
+		if err != nil {
+			t.Fatalf("GetMigrationMessage() error = %v", err)
+		}
+		if msg == "" {
+			t.Error("GetMigrationMessage() should return message for old version")
+		}
+		if !contains(msg, "v1.0.0") || !contains(msg, CurrentConfigVersion) {
+			t.Errorf("GetMigrationMessage() = %q, should contain version info", msg)
+		}
+	})
+
+	t.Run("JSON to TOML migration", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, ".gren")
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		manager := &Manager{configDir: configDir}
+
+		// Create JSON config
+		config := Config{
+			WorktreeDir: "/tmp/worktrees",
+			Version:     CurrentConfigVersion,
+		}
+		data, _ := json.MarshalIndent(config, "", "  ")
+		if err := os.WriteFile(filepath.Join(configDir, ConfigFileJSON), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		msg, err := manager.GetMigrationMessage()
+		if err != nil {
+			t.Fatalf("GetMigrationMessage() error = %v", err)
+		}
+		if msg == "" {
+			t.Error("GetMigrationMessage() should return message for JSON format")
+		}
+		if !contains(msg, "JSON") || !contains(msg, "TOML") {
+			t.Errorf("GetMigrationMessage() = %q, should mention JSON → TOML", msg)
+		}
+	})
+}

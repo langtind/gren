@@ -279,6 +279,48 @@ func TestApprovalManagerListApproved(t *testing.T) {
 	}
 }
 
+func TestApprovalManagerGetUnapprovedCommands(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-approval-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	manager := &ApprovalManager{
+		approvedCommands: make(map[string]map[string]bool),
+		configPath:       filepath.Join(tempDir, "approved-commands.json"),
+	}
+
+	projectID := "/test/project"
+	commands := []string{"npm install", "npm test", "npm run build"}
+
+	// Initially all should be unapproved
+	unapproved := manager.GetUnapprovedCommands(projectID, commands)
+	if len(unapproved) != 3 {
+		t.Errorf("GetUnapprovedCommands() returned %d, want 3", len(unapproved))
+	}
+
+	// Approve some commands
+	manager.Approve(projectID, "npm install")
+	manager.Approve(projectID, "npm test")
+
+	// Now only one should be unapproved
+	unapproved = manager.GetUnapprovedCommands(projectID, commands)
+	if len(unapproved) != 1 {
+		t.Errorf("GetUnapprovedCommands() returned %d, want 1", len(unapproved))
+	}
+	if unapproved[0] != "npm run build" {
+		t.Errorf("GetUnapprovedCommands() = %v, want [npm run build]", unapproved)
+	}
+
+	// Approve all
+	manager.Approve(projectID, "npm run build")
+	unapproved = manager.GetUnapprovedCommands(projectID, commands)
+	if len(unapproved) != 0 {
+		t.Errorf("GetUnapprovedCommands() returned %d, want 0", len(unapproved))
+	}
+}
+
 func TestGetProjectID(t *testing.T) {
 	// GetProjectID uses cwd, so we test it returns something
 	id, err := GetProjectID()

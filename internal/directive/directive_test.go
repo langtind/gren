@@ -156,6 +156,63 @@ func TestLegacyFallback(t *testing.T) {
 	}
 }
 
+func TestWriteExec(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "directive-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+
+	os.Setenv(EnvDirectiveFile, tmpFile.Name())
+	defer os.Unsetenv(EnvDirectiveFile)
+
+	err = WriteExec("vim file.txt")
+	if err != nil {
+		t.Fatalf("WriteExec failed: %v", err)
+	}
+
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to read directive file: %v", err)
+	}
+
+	expected := "exec vim file.txt\n"
+	if string(content) != expected {
+		t.Errorf("unexpected content: %q, want %q", content, expected)
+	}
+}
+
+func TestWriteCDAndExec(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "directive-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+
+	os.Setenv(EnvDirectiveFile, tmpFile.Name())
+	defer os.Unsetenv(EnvDirectiveFile)
+
+	err = WriteCDAndExec("/path/to/dir", "npm start")
+	if err != nil {
+		t.Fatalf("WriteCDAndExec failed: %v", err)
+	}
+
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to read directive file: %v", err)
+	}
+
+	// Should contain both cd and the command
+	if !strings.Contains(string(content), `cd "/path/to/dir"`) {
+		t.Errorf("missing cd directive in: %q", content)
+	}
+	if !strings.Contains(string(content), "npm start") {
+		t.Errorf("missing command in: %q", content)
+	}
+}
+
 func TestClear(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "directive-test-*")
 	if err != nil {

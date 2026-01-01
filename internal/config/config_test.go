@@ -290,6 +290,8 @@ func TestHooksGet(t *testing.T) {
 		PreRemove:  "npm run cleanup",
 		PreMerge:   "npm test",
 		PostMerge:  "npm run deploy",
+		PostSwitch: "npm run dev",
+		PostStart:  "echo started",
 	}
 
 	tests := []struct {
@@ -300,6 +302,8 @@ func TestHooksGet(t *testing.T) {
 		{HookPreRemove, "npm run cleanup"},
 		{HookPreMerge, "npm test"},
 		{HookPostMerge, "npm run deploy"},
+		{HookPostSwitch, "npm run dev"},
+		{HookPostStart, "echo started"},
 		{HookType("unknown"), ""},
 	}
 
@@ -390,6 +394,227 @@ func TestLegacyPostCreateHookMigration(t *testing.T) {
 	if loaded.Hooks.PostCreate != ".gren/post-create.sh" {
 		t.Errorf("Hooks.PostCreate = %q, want %q (migrated from legacy PostCreateHook)",
 			loaded.Hooks.PostCreate, ".gren/post-create.sh")
+	}
+}
+
+func TestProjectNamedHooksGetNamedHooks(t *testing.T) {
+	pnh := ProjectNamedHooks{
+		PostCreate: []NamedHook{
+			{Name: "install", Command: "npm install"},
+		},
+		PreRemove: []NamedHook{
+			{Name: "cleanup", Command: "rm -rf node_modules"},
+		},
+		PreMerge: []NamedHook{
+			{Name: "test", Command: "npm test"},
+		},
+		PostMerge: []NamedHook{
+			{Name: "deploy", Command: "npm run deploy"},
+		},
+		PostSwitch: []NamedHook{
+			{Name: "start", Command: "npm start"},
+		},
+		PostStart: []NamedHook{
+			{Name: "log", Command: "echo started"},
+		},
+	}
+
+	tests := []struct {
+		hookType   HookType
+		wantLength int
+		wantName   string
+	}{
+		{HookPostCreate, 1, "install"},
+		{HookPreRemove, 1, "cleanup"},
+		{HookPreMerge, 1, "test"},
+		{HookPostMerge, 1, "deploy"},
+		{HookPostSwitch, 1, "start"},
+		{HookPostStart, 1, "log"},
+		{HookType("unknown"), 0, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.hookType), func(t *testing.T) {
+			hooks := pnh.GetNamedHooks(tt.hookType)
+			if len(hooks) != tt.wantLength {
+				t.Errorf("GetNamedHooks(%s) returned %d hooks, want %d", tt.hookType, len(hooks), tt.wantLength)
+			}
+			if tt.wantLength > 0 && hooks[0].Name != tt.wantName {
+				t.Errorf("GetNamedHooks(%s)[0].Name = %q, want %q", tt.hookType, hooks[0].Name, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestConfigGetAllHooks(t *testing.T) {
+	config := &Config{
+		WorktreeDir: "../worktrees",
+		Version:     "1.0.0",
+		Hooks: Hooks{
+			PostCreate: "npm install", // Simple hook
+		},
+		NamedHooks: ProjectNamedHooks{
+			PostCreate: []NamedHook{
+				{Name: "lint", Command: "npm run lint"},
+			},
+		},
+	}
+
+	t.Run("combines simple and named hooks", func(t *testing.T) {
+		hooks := config.GetAllHooks(HookPostCreate)
+		if len(hooks) != 2 {
+			t.Fatalf("GetAllHooks(HookPostCreate) returned %d hooks, want 2", len(hooks))
+		}
+		// First hook should be the simple hook converted to named
+		if hooks[0].Command != "npm install" {
+			t.Errorf("First hook command = %q, want %q", hooks[0].Command, "npm install")
+		}
+		// Second hook should be the named hook
+		if hooks[1].Name != "lint" {
+			t.Errorf("Second hook name = %q, want %q", hooks[1].Name, "lint")
+		}
+	})
+
+	t.Run("returns empty for no hooks", func(t *testing.T) {
+		hooks := config.GetAllHooks(HookPreRemove)
+		if len(hooks) != 0 {
+			t.Errorf("GetAllHooks(HookPreRemove) returned %d hooks, want 0", len(hooks))
+		}
+	})
+}
+
+func TestSaveJSON(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-savejson-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
+
+	manager := NewManager()
+
+	t.Run("save valid config as JSON", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir:    "../worktrees",
+			PackageManager: "npm",
+			Version:        "1.0.0",
+		}
+
+		if err := manager.SaveJSON(config); err != nil {
+			t.Fatalf("SaveJSON() error: %v", err)
+		}
+
+		// Verify JSON file exists
+		jsonPath := filepath.Join(ConfigDir, ConfigFileJSON)
+		if _, err := os.Stat(jsonPath); err != nil {
+			t.Fatalf("JSON config file not created: %v", err)
+		}
+
+		// Verify it can be loaded
+		loaded, err := manager.Load()
+		if err != nil {
+			t.Fatalf("Load() after SaveJSON() error: %v", err)
+		}
+		if loaded.WorktreeDir != config.WorktreeDir {
+			t.Errorf("WorktreeDir = %q, want %q", loaded.WorktreeDir, config.WorktreeDir)
+		}
+	})
+
+	t.Run("save nil config", func(t *testing.T) {
+		err := manager.SaveJSON(nil)
+		if err == nil {
+			t.Error("SaveJSON(nil) expected error, got nil")
+		}
+	})
+
+	t.Run("save invalid config", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir: "", // Invalid
+			Version:     "1.0.0",
+		}
+		err := manager.SaveJSON(config)
+		if err == nil {
+			t.Error("SaveJSON() expected error for invalid config, got nil")
+		}
+	})
+}
+
+func TestExistsTOMLAndJSON(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-exists-format-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
+
+	manager := NewManager()
+
+	t.Run("no config exists", func(t *testing.T) {
+		if manager.ExistsTOML() {
+			t.Error("ExistsTOML() = true, want false")
+		}
+		if manager.ExistsJSON() {
+			t.Error("ExistsJSON() = true, want false")
+		}
+	})
+
+	t.Run("only JSON exists", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir: "../worktrees",
+			Version:     "1.0.0",
+		}
+		manager.SaveJSON(config)
+
+		if manager.ExistsTOML() {
+			t.Error("ExistsTOML() = true, want false")
+		}
+		if !manager.ExistsJSON() {
+			t.Error("ExistsJSON() = false, want true")
+		}
+	})
+
+	t.Run("TOML replaces JSON after Save", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir: "../worktrees",
+			Version:     "1.0.0",
+		}
+		manager.Save(config) // Save as TOML, removes JSON
+
+		if !manager.ExistsTOML() {
+			t.Error("ExistsTOML() = false, want true")
+		}
+		if manager.ExistsJSON() {
+			t.Error("ExistsJSON() = true, want false (should be removed)")
+		}
+	})
+}
+
+func TestLoadInvalidTOML(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-invalid-toml-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
+
+	// Create .gren directory with invalid TOML
+	os.MkdirAll(ConfigDir, 0755)
+	configPath := filepath.Join(ConfigDir, ConfigFileTOML)
+	os.WriteFile(configPath, []byte("invalid = [[[toml"), 0644)
+
+	manager := NewManager()
+	_, err = manager.Load()
+	if err == nil {
+		t.Error("Load() expected error for invalid TOML, got nil")
 	}
 }
 

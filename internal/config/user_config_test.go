@@ -355,8 +355,20 @@ func TestUserConfigGetNamedHooks(t *testing.T) {
 			PostCreate: []NamedHook{
 				{Name: "install", Command: "npm install"},
 			},
+			PreRemove: []NamedHook{
+				{Name: "cleanup", Command: "rm -rf node_modules"},
+			},
 			PreMerge: []NamedHook{
 				{Name: "test", Command: "npm test"},
+			},
+			PostMerge: []NamedHook{
+				{Name: "deploy", Command: "npm run deploy"},
+			},
+			PostSwitch: []NamedHook{
+				{Name: "start", Command: "npm run dev"},
+			},
+			PostStart: []NamedHook{
+				{Name: "log", Command: "echo started"},
 			},
 		},
 	}
@@ -366,8 +378,11 @@ func TestUserConfigGetNamedHooks(t *testing.T) {
 		wantLen  int
 	}{
 		{HookPostCreate, 1},
+		{HookPreRemove, 1},
 		{HookPreMerge, 1},
-		{HookPostMerge, 0},
+		{HookPostMerge, 1},
+		{HookPostSwitch, 1},
+		{HookPostStart, 1},
 		{HookType("unknown"), 0},
 	}
 
