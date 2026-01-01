@@ -235,6 +235,19 @@ func (c *CLI) handleCreate(args []string) error {
 	} else {
 		// Print success output when not executing a command
 		output.WorktreeCreated(*name, branchName, worktreePath)
+
+		// Ask user if they want to navigate to the worktree
+		fmt.Print("\nNavigate to worktree? [Y/n]: ")
+		var response string
+		fmt.Scanln(&response)
+		response = strings.ToLower(strings.TrimSpace(response))
+
+		// Default is yes (empty, "y", or "yes")
+		if response == "" || response == "y" || response == "yes" {
+			if err := directive.WriteCD(worktreePath); err != nil {
+				logging.Error("Failed to set up navigation: %v", err)
+			}
+		}
 	}
 
 	return nil
