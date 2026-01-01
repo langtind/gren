@@ -120,6 +120,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleCompletion(args[2:])
 	case "__complete":
 		return c.handleCompletionQuery(args[2:])
+	case "config":
+		return c.handleConfig(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -849,6 +851,7 @@ func (c *CLI) ShowHelp() {
 	fmt.Println("  gren navigate <name>   Navigate to worktree (requires shell setup)")
 	fmt.Println("  gren shell-init <shell> Generate shell integration for navigation")
 	fmt.Println("  gren init              Initialize gren in repository")
+	fmt.Println("  gren config            Show/create configuration")
 	fmt.Println()
 	fmt.Println("Global Options:")
 	fmt.Println("  --help                 Show this help message")
@@ -1547,4 +1550,359 @@ func (c *CLI) handleStepSquash(args []string) error {
 
 	fmt.Println("✅ Commits squashed")
 	return nil
+}
+
+// Example user configuration file content
+const userConfigExample = `# gren global user configuration
+# See https://github.com/langtind/gren for documentation
+
+# Default settings for all projects
+[defaults]
+# Template for worktree directory path
+# Available variables: {{ repo }}, {{ branch }}, {{ branch | sanitize }}
+worktree-dir = "../{{ repo }}-worktrees"
+
+# Merge behavior defaults
+remove-after-merge = true
+squash-on-merge = true
+rebase-on-merge = true
+
+# LLM configuration for generating commit messages
+# Requires an LLM tool like 'claude' or 'llm' CLI
+[commit-generation]
+# Examples:
+#   command = "claude"
+#   args = ["-p", "Write a conventional commit message for this diff. Output only the commit message, no explanation."]
+#
+#   command = "llm"
+#   args = ["-m", "gpt-4", "Write a conventional commit message for this diff"]
+command = "claude"
+args = ["-p", "Write a conventional commit message for this diff. Output only the commit message, no explanation."]
+
+# Global hooks (run for all projects)
+[hooks]
+# post-create = "echo 'Worktree created!'"
+# post-switch = "direnv allow 2>/dev/null || true"
+
+# Named hooks with optional branch filtering
+# [[named-hooks.post-create]]
+# name = "install-deps"
+# command = "npm install"
+# branches = ["feature/*", "fix/*"]
+`
+
+// Example project configuration file content
+const projectConfigExample = `# gren project configuration
+# See https://github.com/langtind/gren for documentation
+
+version = "1.0.0"
+
+# Worktree directory (absolute or relative to repository root)
+worktree_dir = "../{{ repo }}-worktrees"
+
+# Package manager: auto, npm, yarn, pnpm, bun
+package_manager = "auto"
+
+# Lifecycle hooks
+[hooks]
+# Run after creating a worktree
+post-create = ".gren/post-create.sh"
+
+# Run before removing a worktree (fail-fast: non-zero exit stops deletion)
+# pre-remove = "echo 'About to remove worktree'"
+
+# Run before merge (fail-fast: non-zero exit stops merge)
+# pre-merge = "npm test"
+
+# Run after successful merge
+# post-merge = "echo 'Merge complete'"
+
+# Named hooks with more control
+# [[named-hooks.post-create]]
+# name = "install-deps"
+# command = "npm install"
+# branches = ["feature/*"]
+`
+
+func (c *CLI) handleConfig(args []string) error {
+	if len(args) == 0 {
+		return c.handleConfigShow(args)
+	}
+
+	subcommand := args[0]
+	subargs := args[1:]
+
+	switch subcommand {
+	case "create":
+		return c.handleConfigCreate(subargs)
+	case "show":
+		return c.handleConfigShow(subargs)
+	case "--help", "-h", "help":
+		c.showConfigHelp()
+		return nil
+	default:
+		return fmt.Errorf("unknown config subcommand: %s (use: create, show)", subcommand)
+	}
+}
+
+func (c *CLI) showConfigHelp() {
+	fmt.Println("Usage: gren config <subcommand>")
+	fmt.Println()
+	fmt.Println("Manage gren configuration")
+	fmt.Println()
+	fmt.Println("Subcommands:")
+	fmt.Println("  create   Create a configuration file with example values")
+	fmt.Println("  show     Show current configuration status (default)")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  gren config                  # Show current config")
+	fmt.Println("  gren config show             # Same as above")
+	fmt.Println("  gren config create           # Create user config")
+	fmt.Println("  gren config create --project # Create project config")
+	fmt.Println()
+	fmt.Println("Use 'gren config <subcommand> --help' for more information.")
+}
+
+func (c *CLI) handleConfigCreate(args []string) error {
+	fs := flag.NewFlagSet("config create", flag.ExitOnError)
+	project := fs.Bool("project", false, "Create project config instead of user config")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren config create [--project]\n")
+		fmt.Fprintf(fs.Output(), "\nCreate a configuration file with example values\n\n")
+		fmt.Fprintf(fs.Output(), "Without --project: Creates global user config at:\n")
+		fmt.Fprintf(fs.Output(), "  macOS:   ~/Library/Application Support/gren/config.toml\n")
+		fmt.Fprintf(fs.Output(), "  Linux:   ~/.config/gren/config.toml\n")
+		fmt.Fprintf(fs.Output(), "  Windows: %%APPDATA%%\\gren\\config.toml\n\n")
+		fmt.Fprintf(fs.Output(), "With --project: Creates project config at .gren/config.toml\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren config create            # Create user config\n")
+		fmt.Fprintf(fs.Output(), "  gren config create --project  # Create project config\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *project {
+		return c.createProjectConfig()
+	}
+	return c.createUserConfig()
+}
+
+func (c *CLI) createUserConfig() error {
+	ucm := config.NewUserConfigManager()
+	configPath := ucm.ConfigPath()
+
+	// Check if file already exists
+	if ucm.Exists() {
+		fmt.Printf("ℹ️  User config already exists: %s\n\n", configPath)
+		fmt.Println("💡 To view config, run: gren config show")
+		return nil
+	}
+
+	// Create parent directory
+	dir := filepath.Dir(configPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write the example config with values commented out
+	commentedConfig := commentOutConfig(userConfigExample)
+	if err := os.WriteFile(configPath, []byte(commentedConfig), 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	fmt.Printf("✅ Created user config: %s\n\n", configPath)
+	fmt.Println("💡 Edit this file to customize LLM settings and defaults")
+	return nil
+}
+
+func (c *CLI) createProjectConfig() error {
+	configPath := filepath.Join(config.ConfigDir, config.ConfigFileTOML)
+
+	// Check if file already exists
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Printf("ℹ️  Project config already exists: %s\n\n", configPath)
+		fmt.Println("💡 To view config, run: gren config show")
+		return nil
+	}
+
+	// Create .gren directory
+	if err := os.MkdirAll(config.ConfigDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write the example config with values commented out
+	commentedConfig := commentOutConfig(projectConfigExample)
+	if err := os.WriteFile(configPath, []byte(commentedConfig), 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	fmt.Printf("✅ Created project config: %s\n\n", configPath)
+	fmt.Println("💡 Edit this file to configure hooks for this repository")
+	return nil
+}
+
+// commentOutConfig comments out all non-comment, non-empty lines
+func commentOutConfig(content string) string {
+	lines := strings.Split(content, "\n")
+	result := make([]string, len(lines))
+
+	for i, line := range lines {
+		// Comment out non-empty lines that aren't already comments
+		if line != "" && !strings.HasPrefix(line, "#") {
+			result[i] = "# " + line
+		} else {
+			result[i] = line
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+func (c *CLI) handleConfigShow(args []string) error {
+	fs := flag.NewFlagSet("config show", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren config show\n")
+		fmt.Fprintf(fs.Output(), "\nShow current configuration status\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Show user config
+	c.showUserConfig()
+	fmt.Println()
+
+	// Show project config
+	c.showProjectConfig()
+	fmt.Println()
+
+	// Show shell integration status
+	c.showShellStatus()
+
+	return nil
+}
+
+func (c *CLI) showUserConfig() {
+	ucm := config.NewUserConfigManager()
+	configPath := ucm.ConfigPath()
+
+	fmt.Println("━━━ USER CONFIG ━━━")
+	fmt.Printf("📁 %s\n\n", configPath)
+
+	if !ucm.Exists() {
+		fmt.Println("ℹ️  Not found (using defaults)")
+		fmt.Println("💡 To create one, run: gren config create")
+		return
+	}
+
+	// Read and display the file
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		fmt.Printf("❌ Error reading config: %v\n", err)
+		return
+	}
+
+	if strings.TrimSpace(string(content)) == "" {
+		fmt.Println("ℹ️  Empty file (using defaults)")
+		return
+	}
+
+	// Show the config content
+	fmt.Println(string(content))
+
+	// Validate and show status
+	userConfig, err := ucm.Load()
+	if err != nil {
+		fmt.Printf("⚠️  Parse error: %v\n", err)
+		return
+	}
+
+	// Show LLM status
+	if userConfig.CommitGenerator.Command != "" {
+		fmt.Printf("✅ LLM configured: %s\n", userConfig.CommitGenerator.Command)
+	}
+}
+
+func (c *CLI) showProjectConfig() {
+	fmt.Println("━━━ PROJECT CONFIG ━━━")
+
+	// Check if we're in a git repo
+	ctx := context.Background()
+	_, err := c.gitRepo.GetRepoInfo(ctx)
+	if err != nil {
+		fmt.Println("ℹ️  Not in a git repository")
+		return
+	}
+
+	configPath := filepath.Join(config.ConfigDir, config.ConfigFileTOML)
+	jsonPath := filepath.Join(config.ConfigDir, config.ConfigFileJSON)
+
+	// Check which config exists
+	var usedPath string
+	if _, err := os.Stat(configPath); err == nil {
+		usedPath = configPath
+	} else if _, err := os.Stat(jsonPath); err == nil {
+		usedPath = jsonPath
+	}
+
+	if usedPath == "" {
+		fmt.Println("ℹ️  Not found")
+		fmt.Println("💡 To create one, run: gren config create --project")
+		fmt.Println("   Or use: gren init (interactive TUI setup)")
+		return
+	}
+
+	fmt.Printf("📁 %s\n\n", usedPath)
+
+	// Read and display the file
+	content, err := os.ReadFile(usedPath)
+	if err != nil {
+		fmt.Printf("❌ Error reading config: %v\n", err)
+		return
+	}
+
+	if strings.TrimSpace(string(content)) == "" {
+		fmt.Println("ℹ️  Empty file")
+		return
+	}
+
+	fmt.Println(string(content))
+
+	// Validate
+	cfg, err := c.configManager.Load()
+	if err != nil {
+		fmt.Printf("⚠️  Parse error: %v\n", err)
+		return
+	}
+
+	// Show key settings
+	fmt.Printf("📂 Worktree dir: %s\n", cfg.WorktreeDir)
+	if cfg.PackageManager != "" && cfg.PackageManager != "auto" {
+		fmt.Printf("📦 Package manager: %s\n", cfg.PackageManager)
+	}
+	if cfg.Hooks.PostCreate != "" {
+		fmt.Printf("🪝 Post-create hook: %s\n", cfg.Hooks.PostCreate)
+	}
+}
+
+func (c *CLI) showShellStatus() {
+	fmt.Println("━━━ SHELL INTEGRATION ━━━")
+
+	// Check if shell integration is active
+	if os.Getenv("GREN_DIRECTIVE_FILE") != "" {
+		fmt.Println("✅ Shell integration active")
+		return
+	}
+
+	fmt.Println("ℹ️  Shell integration not detected")
+	fmt.Println("💡 To enable navigation features, add to your shell config:")
+	fmt.Println("   eval \"$(gren shell-init zsh)\"   # for zsh")
+	fmt.Println("   eval \"$(gren shell-init bash)\"  # for bash")
 }
