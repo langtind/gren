@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/langtind/gren/internal/config"
@@ -357,5 +358,196 @@ func TestConfigGetAllHooksIncludesDisabled(t *testing.T) {
 	}
 	if !hooks[1].Disabled {
 		t.Error("Second hook should be disabled")
+	}
+}
+
+func TestNamedHookInteractive(t *testing.T) {
+	// Test that interactive field is properly supported
+	hook := config.NamedHook{
+		Name:        "interactive-hook",
+		Command:     "bash -i",
+		Interactive: true,
+	}
+
+	if !hook.Interactive {
+		t.Error("NamedHook.Interactive should be true")
+	}
+
+	// Test non-interactive hook (default)
+	nonInteractive := config.NamedHook{
+		Name:    "non-interactive",
+		Command: "npm install",
+	}
+
+	if nonInteractive.Interactive {
+		t.Error("NamedHook.Interactive should be false by default")
+	}
+}
+
+func TestHooksFailed(t *testing.T) {
+	tests := []struct {
+		name    string
+		results []HookResult
+		want    bool
+	}{
+		{
+			name:    "empty results",
+			results: nil,
+			want:    false,
+		},
+		{
+			name: "all success",
+			results: []HookResult{
+				{Ran: true, Err: nil},
+				{Ran: true, Err: nil},
+			},
+			want: false,
+		},
+		{
+			name: "one failure",
+			results: []HookResult{
+				{Ran: true, Err: nil},
+				{Ran: true, Err: fmt.Errorf("hook failed")},
+			},
+			want: true,
+		},
+		{
+			name: "all failures",
+			results: []HookResult{
+				{Ran: true, Err: fmt.Errorf("hook 1 failed")},
+				{Ran: true, Err: fmt.Errorf("hook 2 failed")},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := HooksFailed(tt.results)
+			if got != tt.want {
+				t.Errorf("HooksFailed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFirstFailedHook(t *testing.T) {
+	tests := []struct {
+		name        string
+		results     []HookResult
+		wantNil     bool
+		wantCommand string
+	}{
+		{
+			name:    "empty results",
+			results: nil,
+			wantNil: true,
+		},
+		{
+			name: "all success",
+			results: []HookResult{
+				{Ran: true, Command: "cmd1", Err: nil},
+				{Ran: true, Command: "cmd2", Err: nil},
+			},
+			wantNil: true,
+		},
+		{
+			name: "first fails",
+			results: []HookResult{
+				{Ran: true, Command: "cmd1", Err: fmt.Errorf("first failed")},
+				{Ran: true, Command: "cmd2", Err: nil},
+			},
+			wantNil:     false,
+			wantCommand: "cmd1",
+		},
+		{
+			name: "second fails",
+			results: []HookResult{
+				{Ran: true, Command: "cmd1", Err: nil},
+				{Ran: true, Command: "cmd2", Err: fmt.Errorf("second failed")},
+			},
+			wantNil:     false,
+			wantCommand: "cmd2",
+		},
+		{
+			name: "multiple failures returns first",
+			results: []HookResult{
+				{Ran: true, Command: "cmd1", Err: fmt.Errorf("first failed")},
+				{Ran: true, Command: "cmd2", Err: fmt.Errorf("second failed")},
+			},
+			wantNil:     false,
+			wantCommand: "cmd1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FirstFailedHook(tt.results)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("FirstFailedHook() = %v, want nil", got)
+				}
+			} else {
+				if got == nil {
+					t.Error("FirstFailedHook() = nil, want non-nil")
+				} else if got.Command != tt.wantCommand {
+					t.Errorf("FirstFailedHook().Command = %q, want %q", got.Command, tt.wantCommand)
+				}
+			}
+		})
+	}
+}
+
+func TestHookResult(t *testing.T) {
+	// Test HookResult struct fields
+	result := HookResult{
+		Ran:     true,
+		Output:  "hook output",
+		Err:     nil,
+		Command: "npm install",
+		Name:    "install",
+	}
+
+	if !result.Ran {
+		t.Error("HookResult.Ran should be true")
+	}
+	if result.Output != "hook output" {
+		t.Errorf("HookResult.Output = %q, want %q", result.Output, "hook output")
+	}
+	if result.Command != "npm install" {
+		t.Errorf("HookResult.Command = %q, want %q", result.Command, "npm install")
+	}
+	if result.Name != "install" {
+		t.Errorf("HookResult.Name = %q, want %q", result.Name, "install")
+	}
+}
+
+func TestHookContext(t *testing.T) {
+	ctx := HookContext{
+		WorktreePath: "/path/to/worktree",
+		BranchName:   "feature/test",
+		BaseBranch:   "main",
+		RepoRoot:     "/path/to/repo",
+		TargetBranch: "main",
+		ExecuteCmd:   "npm run dev",
+	}
+
+	if ctx.WorktreePath != "/path/to/worktree" {
+		t.Errorf("HookContext.WorktreePath = %q, want %q", ctx.WorktreePath, "/path/to/worktree")
+	}
+	if ctx.BranchName != "feature/test" {
+		t.Errorf("HookContext.BranchName = %q, want %q", ctx.BranchName, "feature/test")
+	}
+	if ctx.BaseBranch != "main" {
+		t.Errorf("HookContext.BaseBranch = %q, want %q", ctx.BaseBranch, "main")
+	}
+	if ctx.RepoRoot != "/path/to/repo" {
+		t.Errorf("HookContext.RepoRoot = %q, want %q", ctx.RepoRoot, "/path/to/repo")
+	}
+	if ctx.TargetBranch != "main" {
+		t.Errorf("HookContext.TargetBranch = %q, want %q", ctx.TargetBranch, "main")
+	}
+	if ctx.ExecuteCmd != "npm run dev" {
+		t.Errorf("HookContext.ExecuteCmd = %q, want %q", ctx.ExecuteCmd, "npm run dev")
 	}
 }

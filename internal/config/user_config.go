@@ -58,6 +58,8 @@ type NamedHook struct {
 	Branches []string `toml:"branches,omitempty"`
 	// Optional: skip this hook if set to true
 	Disabled bool `toml:"disabled,omitempty"`
+	// Optional: if true, hook runs with terminal access for user input
+	Interactive bool `toml:"interactive,omitempty"`
 }
 
 // UserConfigManager handles user-level configuration.

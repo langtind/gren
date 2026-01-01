@@ -329,21 +329,22 @@ type Model struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
 	// State
-	repoInfo        *git.RepoInfo
-	config          *config.Config
-	worktrees       []Worktree
-	selected        int
-	err             error
-	initState       *InitState
-	createState     *CreateState
-	deleteState     *DeleteState
-	cleanupState    *CleanupState
-	openInState     *OpenInState
-	configState     *ConfigState
-	compareState    *CompareState
-	mergeState      *MergeState
-	forEachState    *ForEachState
-	stepCommitState *StepCommitState
+	repoInfo          *git.RepoInfo
+	config            *config.Config
+	worktrees         []Worktree
+	selected          int
+	err               error
+	initState         *InitState
+	createState       *CreateState
+	deleteState       *DeleteState
+	cleanupState      *CleanupState
+	openInState       *OpenInState
+	configState       *ConfigState
+	compareState      *CompareState
+	mergeState        *MergeState
+	forEachState      *ForEachState
+	stepCommitState   *StepCommitState
+	hookApprovalState *HookApprovalState
 
 	// Screen dimensions
 	width  int
@@ -398,6 +399,18 @@ type KeyMap struct {
 // HelpState holds the state for the help overlay
 type HelpState struct {
 	visible bool
+}
+
+// HookApprovalState holds the state for the hook approval overlay
+type HookApprovalState struct {
+	visible        bool
+	hookType       string   // e.g., "post-create"
+	commands       []string // Commands that need approval
+	worktreePath   string   // Path to the worktree (for running hooks after approval)
+	branchName     string   // Branch name
+	baseBranch     string   // Base branch
+	selectedIndex  int      // 0=Approve, 1=Skip
+	hasInteractive bool     // True if any hook is interactive (needs terminal)
 }
 
 // DefaultKeyMap returns default key bindings

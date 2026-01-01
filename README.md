@@ -94,7 +94,7 @@ This enables:
    - `g` Navigate to worktree folder (requires shell integration)
    - `n` Create new worktree
    - `d` Delete worktree
-   - `t` Tools menu (cleanup stale, prune missing, refresh)
+   - `t` Tools menu (merge, for-each, step commit, cleanup, refresh)
    - `c` Configure gren
    - `i` Initialize gren configuration
    - `?` Show help overlay
@@ -339,9 +339,9 @@ npm install
 For security, gren requires explicit approval for hook commands. When a new hook is detected:
 
 1. You'll be prompted to approve the command
-2. Approved commands are stored in `~/.local/share/gren/approvals/<project>.json`
-3. Use `gren config --show-approvals` to view approved commands
-4. Use `gren config --revoke-approvals` to revoke all approvals
+2. Approved commands are stored in your user config directory
+3. Use `gren config approvals` to view approved commands
+4. Use `gren config approvals --revoke` to revoke all approvals
 
 This prevents malicious config files from executing arbitrary commands.
 
@@ -424,6 +424,8 @@ gren cleanup                  # Clean up stale worktrees
 ```bash
 gren init                     # Initialize gren in current repo
 gren config                   # Open configuration
+gren config approvals         # View approved hook commands
+gren help hooks               # Detailed hook documentation
 gren completion <shell>       # Output shell completion script
 gren shell-init <shell>       # Output shell integration script
 ```

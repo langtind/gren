@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -389,6 +390,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case hookExecutionCompleteMsg:
+		// Interactive hook execution completed (TUI was suspended for terminal access)
+		if msg.err != nil {
+			m.err = fmt.Errorf("hook execution failed: %w", msg.err)
+		}
+		// Refresh worktrees in case hooks made changes
+		m.refreshWorktrees()
+		return m, nil
+
 	case worktreeCreatedMsg:
 		if m.createState != nil {
 			if msg.err != nil {
@@ -402,6 +412,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createState.currentStep = CreateStepComplete
 				m.createState.createWarning = msg.warning // Store warning for display
 				m.initializeActionsList()
+
+				// Check for unapproved post-create hooks
+				worktreePath := m.getWorktreePath(m.createState.branchName)
+				m.showHookApproval(config.HookPostCreate, worktreePath, m.createState.branchName, m.createState.baseBranch)
 			}
 		}
 		return m, nil
@@ -550,6 +564,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// If help is visible, ignore other keys
 		if m.helpVisible {
 			return m, nil
+		}
+
+		// Handle hook approval modal
+		if m.hookApprovalState != nil && m.hookApprovalState.visible {
+			return m.handleHookApprovalKeys(keyMsg)
 		}
 
 		if m.currentView == InitView {
@@ -728,6 +747,10 @@ func (m Model) View() string {
 		}
 	case CreateView:
 		baseView = m.createView()
+		// Show hook approval overlay if visible
+		if m.hookApprovalState != nil && m.hookApprovalState.visible {
+			return m.renderHookApprovalOverlay(baseView)
+		}
 	case DeleteView:
 		// Delete steps are shown as modal overlays on dashboard
 		baseView = m.dashboardView()

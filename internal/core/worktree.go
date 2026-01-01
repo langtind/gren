@@ -291,23 +291,8 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		}
 	}
 
-	hookBranchName := req.Branch
-	if req.IsNewBranch && hookBranchName == "" {
-		hookBranchName = req.Name
-	}
-	hookRepoRoot, _ := wm.getRepoRoot()
-	hookWorktreePath := worktreePath
-	if !filepath.IsAbs(worktreePath) {
-		hookWorktreePath = filepath.Join(hookRepoRoot, worktreePath)
-	}
-
-	hookCtx := HookContext{
-		WorktreePath: hookWorktreePath,
-		BranchName:   hookBranchName,
-		BaseBranch:   req.BaseBranch,
-		RepoRoot:     hookRepoRoot,
-	}
-	wm.RunHook(config.HookPostCreate, hookCtx)
+	// Note: Post-create hook is now run by caller with approval checking
+	// See CLI handleCreate() and TUI create flow
 
 	logging.Info("Created worktree '%s' at %s", req.Name, worktreePath)
 	return worktreePath, warning, nil
@@ -889,10 +874,8 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		return fmt.Errorf("cannot delete current worktree")
 	}
 
-	hookResult := wm.RunPreRemoveHook(targetWorktree.Path, targetWorktree.Branch)
-	if hookResult.Ran && hookResult.Err != nil {
-		return fmt.Errorf("pre-remove hook failed: %w\nOutput: %s", hookResult.Err, hookResult.Output)
-	}
+	// Note: Pre-remove hooks are now run by the caller with approval checking.
+	// See CLI handleDelete() and TUI delete flow.
 
 	hasSubmodules := false
 	if _, err := os.Stat(filepath.Join(targetWorktree.Path, ".gitmodules")); err == nil {
@@ -1307,9 +1290,10 @@ func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*Merge
 	}
 
 	if opts.Verify {
-		hookResult := wm.RunPreMergeHook(currentPath, currentBranch, targetBranch)
-		if hookResult.Ran && hookResult.Err != nil {
-			return nil, fmt.Errorf("pre-merge hook failed: %s\n%s", hookResult.Err, hookResult.Output)
+		// Run pre-merge hooks with approval (autoYes=true since merge already confirmed)
+		results := wm.RunPreMergeHookWithApproval(currentPath, currentBranch, targetBranch, true)
+		if failed := FirstFailedHook(results); failed != nil {
+			return nil, fmt.Errorf("pre-merge hook failed: %s\n%s", failed.Err, failed.Output)
 		}
 	}
 
@@ -1319,7 +1303,8 @@ func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*Merge
 
 	if opts.Remove {
 		if opts.Verify {
-			wm.RunPreRemoveHook(currentPath, currentBranch)
+			// Run pre-remove hooks with approval (autoYes=true since remove already confirmed)
+			wm.RunPreRemoveHookWithApproval(currentPath, currentBranch, true)
 		}
 
 		repoRoot, _ := wm.getRepoRoot()
@@ -1335,7 +1320,8 @@ func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*Merge
 	}
 
 	if opts.Verify {
-		wm.RunPostMergeHook(currentPath, currentBranch, targetBranch)
+		// Run post-merge hooks with approval (autoYes=true)
+		wm.RunPostMergeHookWithApproval(currentPath, currentBranch, targetBranch, true)
 	}
 
 	return result, nil

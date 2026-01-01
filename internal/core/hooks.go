@@ -70,21 +70,22 @@ func NewHookRunner(configManager *config.Manager) *HookRunner {
 	}
 }
 
-// RunHook runs a single hook by type.
-func (wm *WorktreeManager) RunHook(hookType config.HookType, ctx HookContext) HookResult {
+// runHook runs a single simple hook by type (internal use only).
+// For hooks with approval checking, use RunHooksWithApproval instead.
+func (wm *WorktreeManager) runHook(hookType config.HookType, ctx HookContext) HookResult {
 	cfg, err := wm.configManager.Load()
 	if err != nil {
-		logging.Debug("RunHook: failed to load config: %v", err)
+		logging.Debug("runHook: failed to load config: %v", err)
 		return HookResult{Ran: false}
 	}
 
 	hookCmd := cfg.Hooks.Get(hookType)
 	if hookCmd == "" {
-		logging.Debug("RunHook: no %s hook configured", hookType)
+		logging.Debug("runHook: no %s hook configured", hookType)
 		return HookResult{Ran: false}
 	}
 
-	return wm.executeHook(hookType, hookCmd, ctx, "")
+	return wm.executeHook(hookType, hookCmd, ctx, "", false)
 }
 
 // RunHooksWithApproval runs all hooks of a type, with approval checking.
@@ -133,7 +134,7 @@ func (wm *WorktreeManager) RunHooksWithApproval(hookType config.HookType, ctx Ho
 		if hook.Disabled {
 			continue
 		}
-		result := wm.executeHook(hookType, hook.Command, ctx, hook.Name)
+		result := wm.executeHook(hookType, hook.Command, ctx, hook.Name, hook.Interactive)
 		results = append(results, result)
 
 		// For fail-fast hooks (pre-remove, pre-merge), stop on first failure
@@ -146,8 +147,9 @@ func (wm *WorktreeManager) RunHooksWithApproval(hookType config.HookType, ctx Ho
 }
 
 // executeHook runs a single hook command.
-func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string, ctx HookContext, hookName string) HookResult {
-	logging.Info("Running %s hook: %s", hookType, hookCmd)
+// If interactive is true, the hook runs with terminal access for user input.
+func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string, ctx HookContext, hookName string, interactive bool) HookResult {
+	logging.Info("Running %s hook: %s (interactive: %v)", hookType, hookCmd, interactive)
 
 	var cmd *exec.Cmd
 	var cmdDesc string
@@ -183,10 +185,19 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		"GREN_JSON_CONTEXT="+string(jsonData),
 	)
 
-	// Send JSON context to stdin
-	cmd.Stdin = strings.NewReader(string(jsonData))
+	var output []byte
+	if interactive {
+		// Interactive mode: connect to terminal for user input
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+	} else {
+		// Non-interactive mode: send JSON to stdin, capture output
+		cmd.Stdin = strings.NewReader(string(jsonData))
+		output, err = cmd.CombinedOutput()
+	}
 
-	output, err := cmd.CombinedOutput()
 	result := HookResult{
 		Ran:     true,
 		Output:  string(output),
@@ -269,29 +280,19 @@ func requestApproval(commands []string, projectID string, am *config.ApprovalMan
 	}
 }
 
-func (wm *WorktreeManager) RunPreRemoveHook(worktreePath, branchName string) HookResult {
+// RunPreRemoveHookWithApproval runs pre-remove hooks with approval checking.
+func (wm *WorktreeManager) RunPreRemoveHookWithApproval(worktreePath, branchName string, autoYes bool) []HookResult {
 	repoRoot, _ := wm.getRepoRoot()
 	ctx := HookContext{
 		WorktreePath: worktreePath,
 		BranchName:   branchName,
 		RepoRoot:     repoRoot,
 	}
-	return wm.RunHook(config.HookPreRemove, ctx)
+	return wm.RunHooksWithApproval(config.HookPreRemove, ctx, autoYes)
 }
 
-func (wm *WorktreeManager) RunPreMergeHook(worktreePath, branchName, targetBranch string) HookResult {
-	repoRoot, _ := wm.getRepoRoot()
-	ctx := HookContext{
-		WorktreePath: worktreePath,
-		BranchName:   branchName,
-		BaseBranch:   targetBranch,
-		TargetBranch: targetBranch,
-		RepoRoot:     repoRoot,
-	}
-	return wm.RunHook(config.HookPreMerge, ctx)
-}
-
-func (wm *WorktreeManager) RunPostMergeHook(worktreePath, branchName, targetBranch string) HookResult {
+// RunPreMergeHookWithApproval runs pre-merge hooks with approval checking.
+func (wm *WorktreeManager) RunPreMergeHookWithApproval(worktreePath, branchName, targetBranch string, autoYes bool) []HookResult {
 	repoRoot, _ := wm.getRepoRoot()
 	ctx := HookContext{
 		WorktreePath: worktreePath,
@@ -300,22 +301,35 @@ func (wm *WorktreeManager) RunPostMergeHook(worktreePath, branchName, targetBran
 		TargetBranch: targetBranch,
 		RepoRoot:     repoRoot,
 	}
-	return wm.RunHook(config.HookPostMerge, ctx)
+	return wm.RunHooksWithApproval(config.HookPreMerge, ctx, autoYes)
 }
 
-// RunPostSwitchHook runs the post-switch hook after navigating to a worktree.
-func (wm *WorktreeManager) RunPostSwitchHook(worktreePath, branchName string) HookResult {
+// RunPostMergeHookWithApproval runs post-merge hooks with approval checking.
+func (wm *WorktreeManager) RunPostMergeHookWithApproval(worktreePath, branchName, targetBranch string, autoYes bool) []HookResult {
+	repoRoot, _ := wm.getRepoRoot()
+	ctx := HookContext{
+		WorktreePath: worktreePath,
+		BranchName:   branchName,
+		BaseBranch:   targetBranch,
+		TargetBranch: targetBranch,
+		RepoRoot:     repoRoot,
+	}
+	return wm.RunHooksWithApproval(config.HookPostMerge, ctx, autoYes)
+}
+
+// RunPostSwitchHookWithApproval runs post-switch hooks with approval checking.
+func (wm *WorktreeManager) RunPostSwitchHookWithApproval(worktreePath, branchName string, autoYes bool) []HookResult {
 	repoRoot, _ := wm.getRepoRoot()
 	ctx := HookContext{
 		WorktreePath: worktreePath,
 		BranchName:   branchName,
 		RepoRoot:     repoRoot,
 	}
-	return wm.RunHook(config.HookPostSwitch, ctx)
+	return wm.RunHooksWithApproval(config.HookPostSwitch, ctx, autoYes)
 }
 
-// RunPostStartHook runs the post-start hook after starting an execute command.
-func (wm *WorktreeManager) RunPostStartHook(worktreePath, branchName, executeCmd string) HookResult {
+// RunPostStartHookWithApproval runs post-start hooks with approval checking.
+func (wm *WorktreeManager) RunPostStartHookWithApproval(worktreePath, branchName, executeCmd string, autoYes bool) []HookResult {
 	repoRoot, _ := wm.getRepoRoot()
 	ctx := HookContext{
 		WorktreePath: worktreePath,
@@ -323,7 +337,27 @@ func (wm *WorktreeManager) RunPostStartHook(worktreePath, branchName, executeCmd
 		RepoRoot:     repoRoot,
 		ExecuteCmd:   executeCmd,
 	}
-	return wm.RunHook(config.HookPostStart, ctx)
+	return wm.RunHooksWithApproval(config.HookPostStart, ctx, autoYes)
+}
+
+// HooksFailed checks if any hook in the results failed.
+func HooksFailed(results []HookResult) bool {
+	for _, r := range results {
+		if r.Err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// FirstFailedHook returns the first failed hook result, or nil if all succeeded.
+func FirstFailedHook(results []HookResult) *HookResult {
+	for _, r := range results {
+		if r.Err != nil {
+			return &r
+		}
+	}
+	return nil
 }
 
 func isExecutableScript(hookCmd, repoRoot string) bool {
@@ -345,4 +379,70 @@ func resolveHookPath(hookCmd, repoRoot string) string {
 		return hookCmd
 	}
 	return filepath.Join(repoRoot, hookCmd)
+}
+
+// GetUnapprovedHooks returns a list of hook commands that need approval for the given hook type.
+func (wm *WorktreeManager) GetUnapprovedHooks(hookType config.HookType) []string {
+	cfg, err := wm.configManager.Load()
+	if err != nil {
+		return nil
+	}
+
+	hooks := cfg.GetAllHooks(hookType)
+	if len(hooks) == 0 {
+		return nil
+	}
+
+	projectID, _ := config.GetProjectID()
+	am := config.NewApprovalManager()
+
+	var unapproved []string
+	for _, hook := range hooks {
+		if hook.Disabled {
+			continue
+		}
+		if !am.IsApproved(projectID, hook.Command) {
+			unapproved = append(unapproved, hook.Command)
+		}
+	}
+
+	return unapproved
+}
+
+// HasInteractiveHooks returns true if any hook of the given type is marked as interactive.
+func (wm *WorktreeManager) HasInteractiveHooks(hookType config.HookType) bool {
+	cfg, err := wm.configManager.Load()
+	if err != nil {
+		return false
+	}
+
+	hooks := cfg.GetAllHooks(hookType)
+	for _, hook := range hooks {
+		if !hook.Disabled && hook.Interactive {
+			return true
+		}
+	}
+
+	return false
+}
+
+// RunPostCreateHookWithApproval runs the post-create hook with approval checking.
+// Returns the hook results. If autoYes is true, hooks are auto-approved.
+func (wm *WorktreeManager) RunPostCreateHookWithApproval(worktreePath, branchName, baseBranch string, autoYes bool) []HookResult {
+	repoRoot, _ := wm.getRepoRoot()
+
+	// Ensure absolute path
+	absWorktreePath := worktreePath
+	if !filepath.IsAbs(worktreePath) {
+		absWorktreePath = filepath.Join(repoRoot, worktreePath)
+	}
+
+	ctx := HookContext{
+		WorktreePath: absWorktreePath,
+		BranchName:   branchName,
+		BaseBranch:   baseBranch,
+		RepoRoot:     repoRoot,
+	}
+
+	return wm.RunHooksWithApproval(config.HookPostCreate, ctx, autoYes)
 }

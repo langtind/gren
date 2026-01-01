@@ -131,6 +131,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleCompletionQuery(args[2:])
 	case "config":
 		return c.handleConfig(args[2:])
+	case "hook-run":
+		return c.handleHookRun(args[2:])
 	case "help":
 		if len(args) > 2 {
 			ShowCommandHelp(args[2])
@@ -212,6 +214,13 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 	logging.Info("CLI create succeeded: %s at %s", *name, worktreePath)
 
+	// Run post-create hook with approval checking
+	branchName := *branch
+	if branchName == "" {
+		branchName = *name
+	}
+	c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, false)
+
 	// Handle execute flag (-x)
 	if *execute != "" {
 		logging.Info("CLI create: writing execute directive for command: %s", *execute)
@@ -220,19 +229,11 @@ func (c *CLI) handleCreate(args []string) error {
 			return fmt.Errorf("worktree created but failed to set up execute command: %w", err)
 		}
 
-		// Run post-start hook
-		branchName := *branch
-		if branchName == "" {
-			branchName = *name
-		}
-		c.worktreeManager.RunPostStartHook(worktreePath, branchName, *execute)
+		// Run post-start hook with approval
+		c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, false)
 		// Don't print anything - shell wrapper will execute the command
 	} else {
 		// Print success output when not executing a command
-		branchName := *branch
-		if branchName == "" {
-			branchName = *name
-		}
 		output.WorktreeCreated(*name, branchName, worktreePath)
 	}
 
@@ -397,7 +398,30 @@ func (c *CLI) handleDelete(args []string) error {
 	}
 
 	ctx := context.Background()
-	err := c.worktreeManager.DeleteWorktree(ctx, worktreeName, false)
+
+	// Get worktree info for hook context
+	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list worktrees: %w", err)
+	}
+	var targetWorktree *core.WorktreeInfo
+	for _, wt := range worktrees {
+		if wt.Name == worktreeName || wt.Branch == worktreeName {
+			targetWorktree = &wt
+			break
+		}
+	}
+	if targetWorktree == nil {
+		return fmt.Errorf("worktree '%s' not found", worktreeName)
+	}
+
+	// Run pre-remove hooks with approval (interactive prompt)
+	results := c.worktreeManager.RunPreRemoveHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	if failed := core.FirstFailedHook(results); failed != nil {
+		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.Output)
+	}
+
+	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, false)
 	if err != nil {
 		logging.Error("CLI delete failed: %v", err)
 	} else {
@@ -673,8 +697,8 @@ func (c *CLI) handleNavigate(args []string) error {
 		return fmt.Errorf("failed to write navigation command: %w", err)
 	}
 
-	// Run post-switch hook
-	c.worktreeManager.RunPostSwitchHook(targetWorktree.Path, targetWorktree.Branch)
+	// Run post-switch hook with approval
+	c.worktreeManager.RunPostSwitchHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
 
 	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
 
@@ -2138,4 +2162,73 @@ func (c *CLI) showShellStatus() {
 	fmt.Println("💡 To enable navigation features, add to your shell config:")
 	fmt.Println("   eval \"$(gren shell-init zsh)\"   # for zsh")
 	fmt.Println("   eval \"$(gren shell-init bash)\"  # for bash")
+}
+
+// handleHookRun runs hooks with terminal access (used by TUI for interactive hooks).
+// This is an internal command called by the TUI when it suspends to run interactive hooks.
+func (c *CLI) handleHookRun(args []string) error {
+	fs := flag.NewFlagSet("hook-run", flag.ExitOnError)
+	hookType := fs.String("type", "", "Hook type (post-create, pre-remove, etc.)")
+	worktreePath := fs.String("path", "", "Path to the worktree")
+	branchName := fs.String("branch", "", "Branch name")
+	baseBranch := fs.String("base", "", "Base branch")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *hookType == "" {
+		return fmt.Errorf("hook type is required")
+	}
+
+	ht := config.HookType(*hookType)
+
+	switch ht {
+	case config.HookPostCreate:
+		results := c.worktreeManager.RunPostCreateHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		if core.HooksFailed(results) {
+			if failed := core.FirstFailedHook(results); failed != nil {
+				return fmt.Errorf("hook failed: %v", failed.Err)
+			}
+		}
+	case config.HookPreRemove:
+		results := c.worktreeManager.RunPreRemoveHookWithApproval(*worktreePath, *branchName, true)
+		if core.HooksFailed(results) {
+			if failed := core.FirstFailedHook(results); failed != nil {
+				return fmt.Errorf("hook failed: %v", failed.Err)
+			}
+		}
+	case config.HookPreMerge:
+		results := c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		if core.HooksFailed(results) {
+			if failed := core.FirstFailedHook(results); failed != nil {
+				return fmt.Errorf("hook failed: %v", failed.Err)
+			}
+		}
+	case config.HookPostMerge:
+		results := c.worktreeManager.RunPostMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		if core.HooksFailed(results) {
+			if failed := core.FirstFailedHook(results); failed != nil {
+				return fmt.Errorf("hook failed: %v", failed.Err)
+			}
+		}
+	case config.HookPostSwitch:
+		results := c.worktreeManager.RunPostSwitchHookWithApproval(*worktreePath, *branchName, true)
+		if core.HooksFailed(results) {
+			if failed := core.FirstFailedHook(results); failed != nil {
+				return fmt.Errorf("hook failed: %v", failed.Err)
+			}
+		}
+	case config.HookPostStart:
+		results := c.worktreeManager.RunPostStartHookWithApproval(*worktreePath, *branchName, "", true)
+		if core.HooksFailed(results) {
+			if failed := core.FirstFailedHook(results); failed != nil {
+				return fmt.Errorf("hook failed: %v", failed.Err)
+			}
+		}
+	default:
+		return fmt.Errorf("unknown hook type: %s", *hookType)
+	}
+
+	return nil
 }
