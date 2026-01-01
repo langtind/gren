@@ -250,8 +250,21 @@ func (m *Manager) Save(config *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Add a header comment
-	header := "# gren configuration\n# See https://github.com/langtind/gren for documentation\n\n"
+	// Add a header comment with hook examples
+	header := `# gren configuration
+# See https://github.com/langtind/gren for documentation
+#
+# Available hooks (uncomment to use):
+# [hooks]
+# post-create = ".gren/post-create.sh"  # After creating worktree
+# post-switch = "npm run dev"            # After switching worktree
+# pre-merge = "npm test"                 # Before merging (blocks on failure)
+# post-merge = "echo 'Merged!'"          # After successful merge
+# pre-remove = "npm run cleanup"         # Before deleting worktree
+#
+# For named hooks with branch filtering, see: gren help hooks
+
+`
 	data = append([]byte(header), data...)
 
 	if err := os.WriteFile(configPath, data, 0644); err != nil {

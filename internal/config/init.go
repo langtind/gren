@@ -47,9 +47,11 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 	manager := NewManager()
 	var config *Config
 	var existingConfig *Config
+	var wasJSON bool // Track if we're migrating from JSON
 
 	// Check if config already exists (migrate or preserve)
 	if manager.Exists() {
+		wasJSON = manager.ExistsJSON() && !manager.ExistsTOML()
 		existingConfig, err = manager.Load()
 		if err != nil {
 			// Config exists but failed to load - create new but warn
@@ -75,13 +77,16 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 		config, _ = detectProjectSettings(config, trackGrenInGit)
 	}
 
-	// Save configuration (this also handles JSON → TOML migration)
-	err = manager.Save(config)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to save configuration: %w", err)
-		return result
+	// Only save if new config or migrating from JSON
+	// Don't overwrite existing TOML configs (preserves user edits)
+	if existingConfig == nil || wasJSON {
+		err = manager.Save(config)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to save configuration: %w", err)
+			return result
+		}
+		result.ConfigCreated = true
 	}
-	result.ConfigCreated = true
 
 	// Create post-create hook script if it doesn't exist
 	hookPath := config.PostCreateHook
@@ -110,7 +115,11 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 
 	result.Success = true
 	if existingConfig != nil {
-		result.Message = fmt.Sprintf("Migrated gren config to TOML for project '%s'", projectName)
+		if wasJSON {
+			result.Message = fmt.Sprintf("Migrated config.json → config.toml for project '%s'", projectName)
+		} else {
+			result.Message = fmt.Sprintf("Project '%s' is already initialized", projectName)
+		}
 	} else {
 		result.Message = fmt.Sprintf("Initialized gren for project '%s'", projectName)
 	}
