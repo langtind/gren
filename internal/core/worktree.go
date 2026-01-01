@@ -1784,3 +1784,112 @@ func buildCommitPrompt(diff, context string) string {
 
 	return sb.String()
 }
+
+// StepPush fast-forwards the target branch to include current commits
+func (wm *WorktreeManager) StepPush(target string) error {
+	logging.Info("StepPush: pushing to local target branch %s", target)
+
+	if target == "" {
+		var err error
+		target, err = wm.getDefaultBranch()
+		if err != nil {
+			return fmt.Errorf("could not determine target branch: %w", err)
+		}
+	}
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	if currentBranch == target {
+		return fmt.Errorf("already on target branch %s", target)
+	}
+
+	// Check if current branch can be fast-forwarded into target
+	// This means target must be an ancestor of current HEAD
+	mergeBaseCmd := exec.Command("git", "merge-base", target, "HEAD")
+	mergeBaseOutput, err := mergeBaseCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge base: %w", err)
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOutput))
+
+	// Get the commit hash of target
+	targetCommitCmd := exec.Command("git", "rev-parse", target)
+	targetCommitOutput, err := targetCommitCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get target commit: %w", err)
+	}
+	targetCommit := strings.TrimSpace(string(targetCommitOutput))
+
+	// If merge base equals target commit, we can fast-forward
+	if mergeBase != targetCommit {
+		return fmt.Errorf("cannot fast-forward: %s has diverged from current branch. Rebase first with 'gren step rebase %s'", target, target)
+	}
+
+	// Update the target branch ref to point to current HEAD
+	updateRefCmd := exec.Command("git", "update-ref", "refs/heads/"+target, "HEAD")
+	if output, err := updateRefCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to update %s: %s", target, string(output))
+	}
+
+	logging.Info("StepPush: successfully updated %s to current HEAD", target)
+	return nil
+}
+
+// StepRebase rebases current branch onto target branch
+func (wm *WorktreeManager) StepRebase(target string) error {
+	logging.Info("StepRebase: rebasing onto %s", target)
+
+	if target == "" {
+		var err error
+		target, err = wm.getDefaultBranch()
+		if err != nil {
+			return fmt.Errorf("could not determine target branch: %w", err)
+		}
+	}
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	if currentBranch == target {
+		return fmt.Errorf("already on target branch %s", target)
+	}
+
+	// Check if rebase is needed
+	behindCount, err := wm.getCommitsBehind(currentBranch, target)
+	if err != nil {
+		return fmt.Errorf("failed to check if rebase needed: %w", err)
+	}
+
+	if behindCount == 0 {
+		logging.Info("StepRebase: already up to date with %s", target)
+		return nil
+	}
+
+	// Perform rebase
+	rebaseCmd := exec.Command("git", "rebase", target)
+	if output, err := rebaseCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("rebase failed: %s\nUse 'git rebase --abort' to cancel or resolve conflicts manually", string(output))
+	}
+
+	logging.Info("StepRebase: successfully rebased onto %s", target)
+	return nil
+}
+
+// getCommitsBehind returns how many commits the current branch is behind target
+func (wm *WorktreeManager) getCommitsBehind(current, target string) (int, error) {
+	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", current, target))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	countStr := strings.TrimSpace(string(output))
+	count := 0
+	fmt.Sscanf(countStr, "%d", &count)
+	return count, nil
+}

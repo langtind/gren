@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 
 	"github.com/langtind/gren/internal/config"
@@ -17,6 +16,7 @@ import (
 	"github.com/langtind/gren/internal/directive"
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
+	"github.com/langtind/gren/internal/output"
 )
 
 // spinner provides a simple CLI spinner
@@ -192,7 +192,7 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 
 	if warning != "" {
-		fmt.Printf("⚠ %s\n", warning)
+		output.Warning(warning)
 	}
 	logging.Info("CLI create succeeded: %s at %s", *name, worktreePath)
 
@@ -211,6 +211,13 @@ func (c *CLI) handleCreate(args []string) error {
 		}
 		c.worktreeManager.RunPostStartHook(worktreePath, branchName, *execute)
 		// Don't print anything - shell wrapper will execute the command
+	} else {
+		// Print success output when not executing a command
+		branchName := *branch
+		if branchName == "" {
+			branchName = *name
+		}
+		output.WorktreeCreated(*name, branchName, worktreePath)
 	}
 
 	return nil
@@ -265,19 +272,21 @@ func (c *CLI) handleList(args []string) error {
 	logging.Info("CLI list: found %d worktrees", len(worktrees))
 
 	if len(worktrees) == 0 {
-		fmt.Println("No worktrees found")
+		output.Info("No worktrees found")
 		return nil
 	}
 
+	// Get repo name for header
+	repoInfo, _ := c.gitRepo.GetRepoInfo(ctx)
+	repoName := ""
+	if repoInfo != nil {
+		repoName = repoInfo.Name
+	}
+
 	if *verbose {
-		// Verbose table output
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "BRANCH\tSTATUS\tSTALE\tPR\tPATH")
+		// Convert to output format
+		var items []output.WorktreeListItem
 		for _, wt := range worktrees {
-			current := ""
-			if wt.IsCurrent {
-				current = "*"
-			}
 			staleInfo := ""
 			if wt.BranchStatus == "stale" {
 				staleInfo = wt.StaleReason
@@ -286,22 +295,36 @@ func (c *CLI) handleList(args []string) error {
 			if wt.PRNumber > 0 {
 				prInfo = fmt.Sprintf("#%d %s", wt.PRNumber, wt.PRState)
 			}
-			fmt.Fprintf(w, "%s%s\t%s\t%s\t%s\t%s\n", current, wt.Branch, wt.Status, staleInfo, prInfo, wt.Path)
+			items = append(items, output.WorktreeListItem{
+				Name:      wt.Name,
+				Branch:    wt.Branch,
+				Path:      wt.Path,
+				IsCurrent: wt.IsCurrent,
+				IsMain:    wt.IsMain,
+				StaleInfo: staleInfo,
+				PRInfo:    prInfo,
+				CIStatus:  wt.CIStatus,
+				Status:    wt.Status,
+			})
 		}
-		w.Flush()
+		output.PrintWorktreeList(items, repoName)
 	} else {
-		// Simple list
+		// Simple list with styled output
+		var items []output.WorktreeListItem
 		for _, wt := range worktrees {
-			prefix := "  "
-			if wt.IsCurrent {
-				prefix = "* "
-			}
-			stale := ""
+			staleInfo := ""
 			if wt.BranchStatus == "stale" {
-				stale = " [stale: " + wt.StaleReason + "]"
+				staleInfo = wt.StaleReason
 			}
-			fmt.Printf("%s%s (%s)%s\n", prefix, wt.Name, wt.Branch, stale)
+			items = append(items, output.WorktreeListItem{
+				Name:      wt.Name,
+				Branch:    wt.Branch,
+				IsCurrent: wt.IsCurrent,
+				StaleInfo: staleInfo,
+				CIStatus:  wt.CIStatus,
+			})
 		}
+		output.PrintSimpleWorktreeList(items)
 	}
 
 	return nil
@@ -616,10 +639,11 @@ func (c *CLI) handleNavigate(args []string) error {
 
 	if targetWorktree == nil {
 		logging.Error("CLI navigate: no worktree matching '%s'", query)
-		fmt.Printf("No worktree found matching '%s'\n\n", query)
-		fmt.Println("Available worktrees:")
+		output.Errorf("No worktree found matching '%s'", query)
+		output.Blank()
+		output.Header("Available worktrees:")
 		for _, wt := range worktrees {
-			fmt.Printf("  %s (%s)\n", wt.Name, wt.Branch)
+			output.ListItem(wt.Name+" "+output.Dim("("+wt.Branch+")"), false)
 		}
 		return fmt.Errorf("worktree '%s' not found", query)
 	}
@@ -637,9 +661,15 @@ func (c *CLI) handleNavigate(args []string) error {
 	c.worktreeManager.RunPostSwitchHook(targetWorktree.Path, targetWorktree.Branch)
 
 	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
+
+	// Print styled output
+	output.Successf("Switching to %s", output.Bold(targetWorktree.Name))
+	output.KeyValue("Path", output.Path(targetWorktree.Path))
+
 	if !directive.IsShellIntegrationActive() {
-		fmt.Printf("Navigation command written. Ensure shell integration is set up.\n")
-		fmt.Printf("Run: eval \"$(gren shell-init zsh)\"  # or bash/fish\n")
+		output.Blank()
+		output.Hint("Shell integration not detected. Run:")
+		fmt.Printf("   eval \"$(gren shell-init zsh)\"  # or bash/fish\n")
 	}
 	return nil
 }
@@ -1489,13 +1519,16 @@ func (c *CLI) handleStep(args []string) error {
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  commit     Stage and commit all changes")
 		fmt.Println("  squash     Squash commits since target branch")
+		fmt.Println("  push       Push current branch to local target branch")
+		fmt.Println("  rebase     Rebase current branch onto target")
 		fmt.Println("\nExamples:")
 		fmt.Println("  gren step commit")
 		fmt.Println("  gren step commit -m \"feat: add feature\"")
 		fmt.Println("  gren step commit --llm")
 		fmt.Println("  gren step squash")
 		fmt.Println("  gren step squash main")
-		fmt.Println("  gren step squash --llm")
+		fmt.Println("  gren step push")
+		fmt.Println("  gren step rebase main")
 		fmt.Println("\nUse 'gren step <subcommand> --help' for more information.")
 	}
 
@@ -1510,11 +1543,15 @@ func (c *CLI) handleStep(args []string) error {
 		return c.handleStepCommit(args[1:])
 	case "squash":
 		return c.handleStepSquash(args[1:])
+	case "push":
+		return c.handleStepPush(args[1:])
+	case "rebase":
+		return c.handleStepRebase(args[1:])
 	case "--help", "-h", "help":
 		showStepHelp()
 		return nil
 	default:
-		return fmt.Errorf("unknown step subcommand: %s (use: commit, squash)", subcommand)
+		return fmt.Errorf("unknown step subcommand: %s (use: commit, squash, push, rebase)", subcommand)
 	}
 }
 
@@ -1547,7 +1584,7 @@ func (c *CLI) handleStepCommit(args []string) error {
 		return err
 	}
 
-	fmt.Println("✅ Changes committed")
+	output.Success("Changes committed")
 	return nil
 }
 
@@ -1589,7 +1626,70 @@ func (c *CLI) handleStepSquash(args []string) error {
 		return err
 	}
 
-	fmt.Println("✅ Commits squashed")
+	output.Success("Commits squashed")
+	return nil
+}
+
+func (c *CLI) handleStepPush(args []string) error {
+	fs := flag.NewFlagSet("step push", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren step push [target]\n")
+		fmt.Fprintf(fs.Output(), "\nPush current branch to local target branch (fast-forward)\n\n")
+		fmt.Fprintf(fs.Output(), "This command fast-forwards the target branch to include your current commits.\n")
+		fmt.Fprintf(fs.Output(), "Use this before switching to the target branch and pushing to remote.\n\n")
+		fmt.Fprintf(fs.Output(), "Arguments:\n")
+		fmt.Fprintf(fs.Output(), "  target    Target branch (default: main/master)\n\n")
+		fmt.Fprintf(fs.Output(), "Examples:\n")
+		fmt.Fprintf(fs.Output(), "  gren step push         # Push to default branch\n")
+		fmt.Fprintf(fs.Output(), "  gren step push main    # Push to main\n")
+		fmt.Fprintf(fs.Output(), "  gren step push develop # Push to develop\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	target := ""
+	if fs.NArg() > 0 {
+		target = fs.Arg(0)
+	}
+
+	if err := c.worktreeManager.StepPush(target); err != nil {
+		return err
+	}
+
+	output.Success("Pushed to local target branch")
+	return nil
+}
+
+func (c *CLI) handleStepRebase(args []string) error {
+	fs := flag.NewFlagSet("step rebase", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren step rebase [target]\n")
+		fmt.Fprintf(fs.Output(), "\nRebase current branch onto target branch\n\n")
+		fmt.Fprintf(fs.Output(), "Arguments:\n")
+		fmt.Fprintf(fs.Output(), "  target    Target branch (default: main/master)\n\n")
+		fmt.Fprintf(fs.Output(), "Examples:\n")
+		fmt.Fprintf(fs.Output(), "  gren step rebase         # Rebase onto default branch\n")
+		fmt.Fprintf(fs.Output(), "  gren step rebase main    # Rebase onto main\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	target := ""
+	if fs.NArg() > 0 {
+		target = fs.Arg(0)
+	}
+
+	if err := c.worktreeManager.StepRebase(target); err != nil {
+		return err
+	}
+
+	output.Success("Rebased onto target branch")
 	return nil
 }
 
