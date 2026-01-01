@@ -164,14 +164,30 @@ func (m Model) initializeConfigState() tea.Cmd {
 			})
 		}
 
-		// Check for post-create.sh
-		if _, err := os.Stat(".gren/post-create.sh"); err == nil {
-			files = append(files, ConfigFile{
-				Name:        "Post-create Hook",
-				Path:        ".gren/post-create.sh",
-				Icon:        "🪝",
-				Description: "Script that runs after creating worktrees",
-			})
+		// Check for hook scripts
+		hooks := []struct {
+			file string
+			name string
+			desc string
+		}{
+			{"post-create.sh", "post-create", "Runs after creating worktrees"},
+			{"pre-remove.sh", "pre-remove", "Runs before removing worktrees"},
+			{"pre-merge.sh", "pre-merge", "Runs before merge (tests, lint)"},
+			{"post-merge.sh", "post-merge", "Runs after successful merge"},
+			{"post-switch.sh", "post-switch", "Runs after switching worktrees"},
+			{"post-start.sh", "post-start", "Runs after -x command starts"},
+		}
+
+		for _, hook := range hooks {
+			path := ".gren/" + hook.file
+			if _, err := os.Stat(path); err == nil {
+				files = append(files, ConfigFile{
+					Name:        hook.name,
+					Path:        path,
+					Icon:        "🪝",
+					Description: hook.desc,
+				})
+			}
 		}
 
 		return configInitializedMsg{files: files}
