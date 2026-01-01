@@ -861,28 +861,6 @@ if command -v gren >/dev/null 2>&1; or set -q GREN_BIN
 end
 `
 
-// ShowHelp shows the general help message
-func (c *CLI) ShowHelp() {
-	fmt.Println("gren - Git Worktree Manager")
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  gren                    Start interactive TUI")
-	fmt.Println("  gren create -n <name>   Create new worktree")
-	fmt.Println("  gren list              List all worktrees")
-	fmt.Println("  gren delete <name>     Delete a worktree")
-	fmt.Println("  gren compare <name>    Compare changes from another worktree")
-	fmt.Println("  gren navigate <name>   Navigate to worktree (requires shell setup)")
-	fmt.Println("  gren shell-init <shell> Generate shell integration for navigation")
-	fmt.Println("  gren init              Initialize gren in repository")
-	fmt.Println("  gren config            Show/create configuration")
-	fmt.Println()
-	fmt.Println("Global Options:")
-	fmt.Println("  --help                 Show this help message")
-	fmt.Println("  --version              Show version information")
-	fmt.Println()
-	fmt.Println("Use 'gren <command> --help' for more information about a command.")
-}
-
 // handleCompare handles the compare command
 func (c *CLI) handleCompare(args []string) error {
 	fs := flag.NewFlagSet("compare", flag.ExitOnError)

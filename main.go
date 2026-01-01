@@ -76,7 +76,7 @@ func main() {
 	// Show help if requested or if no commands provided
 	if *showHelp {
 		cliHandler := cli.NewCLI(gitRepo, configManager)
-		cliHandler.ShowHelp()
+		cliHandler.ShowColoredHelp()
 		return
 	}
 

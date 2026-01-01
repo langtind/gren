@@ -457,7 +457,7 @@ func TestShowHelp(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	cli.ShowHelp()
+	cli.ShowColoredHelp()
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -1200,7 +1200,7 @@ func TestShowHelpIncludesCompare(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	cli.ShowHelp()
+	cli.ShowColoredHelp()
 
 	w.Close()
 	os.Stdout = oldStdout
