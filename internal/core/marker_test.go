@@ -84,9 +84,11 @@ func TestSanitizeBranchForConfig(t *testing.T) {
 		expected string
 	}{
 		{"main", "main"},
-		{"feature/auth", "feature_auth"},
-		{"feat/user/login", "feat_user_login"},
-		{"simple-branch", "simple-branch"},
+		{"feature/auth", "feature%2Fauth"},                 // URL encoding for slashes
+		{"feat/user/login", "feat%2Fuser%2Flogin"},         // Multiple slashes
+		{"simple-branch", "simple-branch"},                 // Hyphens unchanged
+		{"feat_underscore", "feat_underscore"},             // Underscores preserved
+		{"feat/with_underscore", "feat%2Fwith_underscore"}, // Mixed: slash encoded, underscore preserved
 	}
 
 	for _, tt := range tests {
@@ -105,9 +107,11 @@ func TestRestoreBranchFromConfig(t *testing.T) {
 		expected string
 	}{
 		{"main", "main"},
-		{"feature_auth", "feature/auth"},
-		{"feat_user_login", "feat/user/login"},
-		{"simple-branch", "simple-branch"},
+		{"feature%2Fauth", "feature/auth"},                 // URL decoding for slashes
+		{"feat%2Fuser%2Flogin", "feat/user/login"},         // Multiple slashes
+		{"simple-branch", "simple-branch"},                 // Hyphens unchanged
+		{"feat_underscore", "feat_underscore"},             // Underscores preserved (lossless)
+		{"feat%2Fwith_underscore", "feat/with_underscore"}, // Mixed: slash decoded, underscore preserved
 	}
 
 	for _, tt := range tests {
@@ -115,6 +119,30 @@ func TestRestoreBranchFromConfig(t *testing.T) {
 			got := restoreBranchFromConfig(tt.key)
 			if got != tt.expected {
 				t.Errorf("restoreBranchFromConfig(%q) = %q, want %q", tt.key, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBranchEncodingRoundTrip(t *testing.T) {
+	// Test that encode->decode is lossless for various branch names
+	branches := []string{
+		"main",
+		"feature/auth",
+		"feat/user/login",
+		"simple-branch",
+		"feat_underscore",
+		"feat/with_underscore",
+		"fix/bug_123",
+		"release/v1.0.0",
+	}
+
+	for _, branch := range branches {
+		t.Run(branch, func(t *testing.T) {
+			encoded := sanitizeBranchForConfig(branch)
+			decoded := restoreBranchFromConfig(encoded)
+			if decoded != branch {
+				t.Errorf("Round-trip failed: %q -> %q -> %q", branch, encoded, decoded)
 			}
 		})
 	}

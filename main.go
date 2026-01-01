@@ -13,6 +13,7 @@ import (
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
 	"github.com/langtind/gren/internal/ui"
+	"golang.org/x/term"
 )
 
 // Version information - will be injected at build time for GitHub releases
@@ -112,6 +113,11 @@ func main() {
 
 // checkAndPromptMigration checks if config needs migration and prompts the user.
 func checkAndPromptMigration(configManager *config.Manager) {
+	// Skip interactive prompt if not running in a terminal
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+
 	needsMigration, result, err := configManager.NeedsMigration()
 	if err != nil {
 		logging.Error("Failed to check migration status: %v", err)

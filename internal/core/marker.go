@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,11 +172,17 @@ func ParseMarkerType(s string) (MarkerType, error) {
 }
 
 func sanitizeBranchForConfig(branch string) string {
-	return strings.ReplaceAll(branch, "/", "_")
+	// Use URL encoding to safely encode branch names with special characters
+	// This ensures lossless round-tripping for branches with underscores
+	return url.PathEscape(branch)
 }
 
 func restoreBranchFromConfig(key string) string {
-	return strings.ReplaceAll(key, "_", "/")
+	unescaped, err := url.PathUnescape(key)
+	if err != nil {
+		return key // Fallback to original if unescape fails
+	}
+	return unescaped
 }
 
 func SetupClaudePlugin(force bool) error {

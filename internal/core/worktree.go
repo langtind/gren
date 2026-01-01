@@ -1315,7 +1315,9 @@ func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*Merge
 		}
 
 		if repoRoot != "" {
-			os.Chdir(repoRoot)
+			if err := os.Chdir(repoRoot); err != nil {
+				logging.Warn("Merge: failed to change to repo root: %v", err)
+			}
 		}
 	}
 

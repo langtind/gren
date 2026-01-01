@@ -11,11 +11,9 @@
 #
 # For named hooks with branch filtering, see: gren help hooks
 
-main_worktree = '/Users/arild/Developer/Private/gren'
-worktree_dir = '/Users/arild/Developer/Private/gren-worktrees'
+worktree_dir = '../gren-worktrees'
 package_manager = 'auto'
-post_create_hook = '.gren/post-create.sh'
-version = '1.0.0'
+version = '1.1.0'
 
 [hooks]
 post-create = '.gren/post-create.sh'

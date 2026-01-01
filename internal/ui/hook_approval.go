@@ -181,6 +181,24 @@ func (m Model) centerOverlay(baseView, modal string) string {
 	return strings.Join(result, "\n")
 }
 
+// runHookByType dispatches to the correct hook runner based on hook type
+func runHookByType(wm *core.WorktreeManager, hookType config.HookType, worktreePath, branchName, baseBranch string, autoYes bool) {
+	switch hookType {
+	case config.HookPostCreate:
+		wm.RunPostCreateHookWithApproval(worktreePath, branchName, baseBranch, autoYes)
+	case config.HookPreRemove:
+		wm.RunPreRemoveHookWithApproval(worktreePath, branchName, autoYes)
+	case config.HookPreMerge:
+		wm.RunPreMergeHookWithApproval(worktreePath, branchName, baseBranch, autoYes)
+	case config.HookPostMerge:
+		wm.RunPostMergeHookWithApproval(worktreePath, branchName, baseBranch, autoYes)
+	case config.HookPostSwitch:
+		wm.RunPostSwitchHookWithApproval(worktreePath, branchName, autoYes)
+	case config.HookPostStart:
+		wm.RunPostStartHookWithApproval(worktreePath, branchName, baseBranch, autoYes)
+	}
+}
+
 // showHookApproval shows the hook approval overlay for pending hooks
 func (m *Model) showHookApproval(hookType config.HookType, worktreePath, branchName, baseBranch string) {
 	wm := core.NewWorktreeManager(m.gitRepo, m.configManager)
@@ -190,7 +208,7 @@ func (m *Model) showHookApproval(hookType config.HookType, worktreePath, branchN
 	if len(unapproved) == 0 {
 		// All hooks already approved, run them directly
 		// Note: If interactive, we still need to suspend TUI - handled by caller
-		wm.RunPostCreateHookWithApproval(worktreePath, branchName, baseBranch, true)
+		runHookByType(wm, hookType, worktreePath, branchName, baseBranch, true)
 		return
 	}
 
@@ -239,12 +257,7 @@ func (m Model) approveAndRunHooks() (tea.Model, tea.Cmd) {
 
 	// For non-interactive hooks, run directly
 	wm := core.NewWorktreeManager(m.gitRepo, m.configManager)
-	wm.RunPostCreateHookWithApproval(
-		state.worktreePath,
-		state.branchName,
-		state.baseBranch,
-		true, // auto-approve
-	)
+	runHookByType(wm, config.HookType(state.hookType), state.worktreePath, state.branchName, state.baseBranch, true)
 
 	return m, nil
 }
