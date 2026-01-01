@@ -234,7 +234,7 @@ func TestCreateWorktree(t *testing.T) {
 			IsNewBranch: true,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -263,7 +263,7 @@ func TestCreateWorktree(t *testing.T) {
 			IsNewBranch: false,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -280,7 +280,7 @@ func TestCreateWorktree(t *testing.T) {
 			IsNewBranch: false,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err == nil {
 			t.Error("CreateWorktree() expected error for branch already checked out")
 		}
@@ -293,7 +293,7 @@ func TestCreateWorktree(t *testing.T) {
 			IsNewBranch: false,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err == nil {
 			t.Error("CreateWorktree() expected error for nonexistent branch")
 		}
@@ -305,7 +305,7 @@ func TestCreateWorktree(t *testing.T) {
 			IsNewBranch: true,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -337,7 +337,7 @@ func TestDeleteWorktree(t *testing.T) {
 			Name:        "to-delete",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}
@@ -390,7 +390,7 @@ func TestDeleteWorktree(t *testing.T) {
 			Name:        "force-delete-test",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}
@@ -515,7 +515,7 @@ func TestListWorktreesEdgeCases(t *testing.T) {
 			Name:        "prunable-test",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}
@@ -601,7 +601,7 @@ func TestDeleteWorktreeByPath(t *testing.T) {
 			Name:        "delete-by-path",
 			IsNewBranch: true,
 		}
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("failed to create worktree: %v", err)
 		}

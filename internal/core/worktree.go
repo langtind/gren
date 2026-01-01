@@ -60,6 +60,62 @@ type WorktreeInfo struct {
 	PRNumber int    // PR number, 0 if no PR
 	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
 	PRURL    string // Full URL to PR for "Open in browser"
+
+	// CI status fields (populated async via gh CLI)
+	CIStatus     string // "success", "failure", "pending", "error", "" if unknown
+	CIConclusion string // Detailed conclusion from GitHub Actions
+	ChecksURL    string // URL to checks page
+
+	Marker MarkerType
+}
+
+type MergeOptions struct {
+	Target string
+	Squash bool
+	Remove bool
+	Verify bool
+	Rebase bool
+	Yes    bool
+	Force  bool
+}
+
+type MergeResult struct {
+	SourceBranch    string
+	TargetBranch    string
+	CommitsSquashed int
+	WorktreeRemoved bool
+	WorktreePath    string
+	Skipped         bool
+	SkipReason      string
+}
+
+// ForEachOptions contains parameters for running a command in all worktrees
+type ForEachOptions struct {
+	Command     []string // Command and arguments to run
+	SkipCurrent bool     // Skip the current worktree
+	SkipMain    bool     // Skip the main worktree
+	Parallel    bool     // Run in parallel (default: sequential)
+}
+
+// ForEachResult contains the result of running a command in a worktree
+type ForEachResult struct {
+	Worktree *WorktreeInfo
+	Output   string
+	ExitCode int
+	Error    error
+}
+
+// TemplateContext holds variables for template expansion in for-each commands
+type TemplateContext struct {
+	Branch          string // Branch name
+	BranchSanitized string // Branch name with / → -
+	Worktree        string // Absolute path to worktree
+	WorktreeName    string // Worktree directory name
+	Repo            string // Repository name
+	RepoRoot        string // Absolute path to main repo
+	Commit          string // Full HEAD commit SHA
+	ShortCommit     string // Short HEAD commit SHA (7 chars)
+	DefaultBranch   string // Default branch (main/master)
 }
 
 // CheckPrerequisites verifies that required tools are available
@@ -80,13 +136,13 @@ func (wm *WorktreeManager) CheckPrerequisites() error {
 
 // CreateWorktree creates a new worktree with the given parameters
 // Returns a warning message (if any) and an error
-func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktreeRequest) (warning string, err error) {
+func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktreeRequest) (worktreePath string, warning string, err error) {
 	logging.Info("CreateWorktree called: name=%s, branch=%s, base=%s, isNew=%v", req.Name, req.Branch, req.BaseBranch, req.IsNewBranch)
 
 	// Check prerequisites
 	if err := wm.CheckPrerequisites(); err != nil {
 		logging.Error("Prerequisites check failed: %v", err)
-		return "", err
+		return "", "", err
 	}
 
 	// Fetch latest from origin to ensure we have up-to-date remote refs
@@ -96,7 +152,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	cfg, err := wm.configManager.Load()
 	if err != nil {
 		logging.Error("Failed to load configuration: %v", err)
-		return "", fmt.Errorf("failed to load configuration: %w", err)
+		return "", "", fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Determine worktree path
@@ -110,7 +166,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			repoInfo, err := wm.gitRepo.GetRepoInfo(ctx)
 			if err != nil {
 				logging.Error("Failed to get repo info: %v", err)
-				return "", fmt.Errorf("failed to get repo info: %w", err)
+				return "", "", fmt.Errorf("failed to get repo info: %w", err)
 			}
 			worktreeDir = fmt.Sprintf("../%s-worktrees", repoInfo.Name)
 			logging.Debug("Using default worktree_dir: %s", worktreeDir)
@@ -119,7 +175,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 
 	// Sanitize worktree name: replace / with - to avoid nested directories
 	worktreeName := strings.ReplaceAll(req.Name, "/", "-")
-	worktreePath := filepath.Join(worktreeDir, worktreeName)
+	worktreePath = filepath.Join(worktreeDir, worktreeName)
 	logging.Debug("Worktree path: %s", worktreePath)
 
 	// Create worktree directory if it doesn't exist
@@ -127,7 +183,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		logging.Debug("Creating worktree directory: %s", worktreeDir)
 		if err := os.MkdirAll(worktreeDir, 0755); err != nil {
 			logging.Error("Failed to create worktree directory: %v", err)
-			return "", fmt.Errorf("failed to create worktree directory: %w", err)
+			return "", "", fmt.Errorf("failed to create worktree directory: %w", err)
 		}
 	}
 
@@ -148,7 +204,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		listOutput, _ := worktreeListCmd.Output()
 		if strings.Contains(string(listOutput), "["+branchName+"]") {
 			logging.Error("Branch already checked out in another worktree: %s", branchName)
-			return "", fmt.Errorf("branch '%s' is already checked out in another worktree", branchName)
+			return "", "", fmt.Errorf("branch '%s' is already checked out in another worktree", branchName)
 		}
 	}
 
@@ -194,7 +250,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 			baseBranch, err = wm.gitRepo.GetRecommendedBaseBranch(ctx)
 			if err != nil {
 				logging.Error("Failed to get recommended base branch: %v", err)
-				return "", fmt.Errorf("failed to get recommended base branch: %w", err)
+				return "", "", fmt.Errorf("failed to get recommended base branch: %w", err)
 			}
 		}
 
@@ -214,7 +270,7 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	} else {
 		// User explicitly wanted existing branch but it doesn't exist
 		logging.Error("Branch not found locally or on remote: %s", branchName)
-		return "", fmt.Errorf("branch '%s' not found locally or on remote", branchName)
+		return "", "", fmt.Errorf("branch '%s' not found locally or on remote", branchName)
 	}
 
 	logging.Debug("Running: %s", gitCmd)
@@ -222,9 +278,9 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	if err != nil {
 		logging.Error("git worktree add failed: %v, output: %s", err, string(output))
 		if len(output) == 0 {
-			return "", fmt.Errorf("git worktree add failed: %w", err)
+			return "", "", fmt.Errorf("git worktree add failed: %w", err)
 		}
-		return "", fmt.Errorf("git worktree add failed: %s", string(output))
+		return "", "", fmt.Errorf("git worktree add failed: %s", string(output))
 	}
 
 	// Initialize submodules in the new worktree
@@ -235,54 +291,11 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		}
 	}
 
-	// Note: .gren/ configuration is tracked in git and automatically available in worktrees
-
-	// Run post-create hook if it exists and is configured
-	if cfg.PostCreateHook != "" {
-		branchName := req.Branch
-		if req.IsNewBranch && branchName == "" {
-			branchName = req.Name
-		}
-		baseBranch := req.BaseBranch
-
-		// Get repo root
-		repoRoot, err := wm.getRepoRoot()
-		if err != nil {
-			return "", fmt.Errorf("failed to get repo root: %w", err)
-		}
-
-		// Resolve hook path relative to repo root (not worktree - the hook creates the .gren symlink)
-		hookPath := cfg.PostCreateHook
-		fullHookPath := filepath.Join(repoRoot, hookPath)
-		logging.Debug("Post-create hook path: %s (full: %s)", hookPath, fullHookPath)
-
-		// Check if hook exists
-		if _, err := os.Stat(fullHookPath); err != nil {
-			logging.Error("Post-create hook not found: %s", fullHookPath)
-			logging.Warn("Post-create hook not found: %s", fullHookPath)
-		} else {
-			logging.Info("Running post-create hook: %s", fullHookPath)
-			// Convert worktreePath to absolute for the hook
-			absWorktreePath := worktreePath
-			if !filepath.IsAbs(worktreePath) {
-				absWorktreePath = filepath.Join(repoRoot, worktreePath)
-			}
-			hookCmd := exec.Command(fullHookPath, absWorktreePath, branchName, baseBranch, repoRoot)
-			hookCmd.Dir = absWorktreePath
-			// Capture output instead of printing to stdout/stderr
-			// This prevents TUI corruption when running in interactive mode
-			hookOutput, hookErr := hookCmd.CombinedOutput()
-			if hookErr != nil {
-				logging.Error("Post-create hook failed: %v, output: %s", hookErr, string(hookOutput))
-			} else {
-				logging.Info("Post-create hook completed successfully")
-				logging.Debug("Post-create hook output: %s", string(hookOutput))
-			}
-		}
-	}
+	// Note: Post-create hook is now run by caller with approval checking
+	// See CLI handleCreate() and TUI create flow
 
 	logging.Info("Created worktree '%s' at %s", req.Name, worktreePath)
-	return warning, nil
+	return worktreePath, warning, nil
 }
 
 // ListWorktrees returns a list of all worktrees with full status information
@@ -318,6 +331,8 @@ func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, e
 	for i := range worktrees {
 		wm.enrichStaleStatusCached(&worktrees[i], cache)
 	}
+
+	wm.enrichMarkers(ctx, worktrees)
 
 	return worktrees, nil
 }
@@ -356,11 +371,24 @@ func (wm *WorktreeManager) enrichWorktreeStatus(wt *WorktreeInfo) {
 		wt.Status = "clean"
 	}
 
-	// Get last commit time
 	wt.LastCommit = getLastCommitTime(wt.Path)
 }
 
-// getFileCounts returns staged, modified, and untracked file counts
+func (wm *WorktreeManager) enrichMarkers(ctx context.Context, worktrees []WorktreeInfo) {
+	mm := NewMarkerManager()
+	markers, err := mm.ListMarkers(ctx)
+	if err != nil {
+		logging.Warn("Failed to list markers: %v", err)
+		return
+	}
+
+	for i := range worktrees {
+		if marker, ok := markers[worktrees[i].Branch]; ok {
+			worktrees[i].Marker = marker
+		}
+	}
+}
+
 func getFileCounts(worktreePath string, isCurrent bool) (staged, modified, untracked int) {
 	var cmd *exec.Cmd
 	if isCurrent {
@@ -846,7 +874,9 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		return fmt.Errorf("cannot delete current worktree")
 	}
 
-	// 1. Deinit submodules and track if worktree has submodules
+	// Note: Pre-remove hooks are now run by the caller with approval checking.
+	// See CLI handleDelete() and TUI delete flow.
+
 	hasSubmodules := false
 	if _, err := os.Stat(filepath.Join(targetWorktree.Path, ".gitmodules")); err == nil {
 		hasSubmodules = true
@@ -1089,4 +1119,765 @@ func (wm *WorktreeManager) OpenPRInBrowser(branch string) error {
 	}
 
 	return nil
+}
+
+type CIInfo struct {
+	Status     string
+	Conclusion string
+	ChecksURL  string
+}
+
+func (wm *WorktreeManager) FetchCIStatus(branch string) *CIInfo {
+	logging.Debug("FetchCIStatus: checking CI for branch %q", branch)
+
+	cmd := exec.Command("gh", "pr", "checks", branch, "--json", "state,name,conclusion")
+	output, err := cmd.Output()
+	if err != nil {
+		logging.Debug("FetchCIStatus: no checks for branch %q: %v", branch, err)
+		return nil
+	}
+
+	var checks []struct {
+		State      string `json:"state"`
+		Name       string `json:"name"`
+		Conclusion string `json:"conclusion"`
+	}
+	if err := json.Unmarshal(output, &checks); err != nil {
+		logging.Debug("FetchCIStatus: failed to parse checks: %v", err)
+		return nil
+	}
+
+	if len(checks) == 0 {
+		return nil
+	}
+
+	info := &CIInfo{}
+	hasFailure := false
+	hasPending := false
+	allSuccess := true
+
+	for _, check := range checks {
+		switch check.State {
+		case "FAILURE", "ERROR":
+			hasFailure = true
+			allSuccess = false
+		case "PENDING", "QUEUED", "IN_PROGRESS":
+			hasPending = true
+			allSuccess = false
+		case "SUCCESS":
+		default:
+			allSuccess = false
+		}
+	}
+
+	if hasFailure {
+		info.Status = "failure"
+		info.Conclusion = "Some checks failed"
+	} else if hasPending {
+		info.Status = "pending"
+		info.Conclusion = "Checks in progress"
+	} else if allSuccess {
+		info.Status = "success"
+		info.Conclusion = "All checks passed"
+	} else {
+		info.Status = "unknown"
+	}
+
+	return info
+}
+
+func (wm *WorktreeManager) EnrichWithCIStatus(worktrees []WorktreeInfo) {
+	logging.Debug("EnrichWithCIStatus: enriching %d worktrees", len(worktrees))
+
+	for i := range worktrees {
+		wt := &worktrees[i]
+
+		if wt.IsMain || wt.Branch == "(detached)" || wt.Branch == "(bare)" {
+			continue
+		}
+
+		if wt.PRNumber == 0 {
+			continue
+		}
+
+		ci := wm.FetchCIStatus(wt.Branch)
+		if ci != nil {
+			wt.CIStatus = ci.Status
+			wt.CIConclusion = ci.Conclusion
+			wt.ChecksURL = ci.ChecksURL
+		}
+	}
+}
+
+func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*MergeResult, error) {
+	logging.Info("Merge: starting merge with opts=%+v", opts)
+
+	result := &MergeResult{}
+
+	currentPath, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+	result.WorktreePath = currentPath
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+	result.SourceBranch = currentBranch
+
+	targetBranch := opts.Target
+	if targetBranch == "" {
+		targetBranch, err = wm.getDefaultBranch()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine default branch: %w", err)
+		}
+	}
+	result.TargetBranch = targetBranch
+
+	if currentBranch == targetBranch {
+		result.Skipped = true
+		result.SkipReason = "already on target branch"
+		return result, nil
+	}
+
+	worktrees, err := wm.ListWorktrees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	var currentWorktree *WorktreeInfo
+	for i, wt := range worktrees {
+		if wt.IsCurrent {
+			currentWorktree = &worktrees[i]
+			break
+		}
+	}
+
+	if currentWorktree == nil {
+		return nil, fmt.Errorf("could not find current worktree")
+	}
+
+	if currentWorktree.IsMain {
+		result.Skipped = true
+		result.SkipReason = "cannot merge from main worktree"
+		return result, nil
+	}
+
+	hasChanges := currentWorktree.ModifiedCount > 0 || currentWorktree.UntrackedCount > 0 || currentWorktree.StagedCount > 0
+	if hasChanges && !opts.Force {
+		if err := wm.stageAndCommitChanges(currentBranch); err != nil {
+			return nil, fmt.Errorf("failed to commit changes: %w", err)
+		}
+	}
+
+	if opts.Squash {
+		count, err := wm.getCommitsAhead(currentBranch, targetBranch)
+		if err != nil {
+			logging.Warn("Merge: could not count commits ahead: %v", err)
+		} else if count > 1 {
+			if err := wm.squashCommits(targetBranch, count); err != nil {
+				return nil, fmt.Errorf("failed to squash commits: %w", err)
+			}
+			result.CommitsSquashed = count
+		}
+	}
+
+	if opts.Rebase {
+		if err := wm.rebaseOnto(targetBranch); err != nil {
+			return nil, fmt.Errorf("rebase failed: %w", err)
+		}
+	}
+
+	if opts.Verify {
+		// Run pre-merge hooks with approval (autoYes=true since merge already confirmed)
+		results := wm.RunPreMergeHookWithApproval(currentPath, currentBranch, targetBranch, true)
+		if failed := FirstFailedHook(results); failed != nil {
+			return nil, fmt.Errorf("pre-merge hook failed: %s\n%s", failed.Err, failed.Output)
+		}
+	}
+
+	if err := wm.fastForwardMerge(currentBranch, targetBranch); err != nil {
+		return nil, fmt.Errorf("merge failed: %w", err)
+	}
+
+	if opts.Remove {
+		if opts.Verify {
+			// Run pre-remove hooks with approval (autoYes=true since remove already confirmed)
+			wm.RunPreRemoveHookWithApproval(currentPath, currentBranch, true)
+		}
+
+		repoRoot, _ := wm.getRepoRoot()
+		if err := wm.DeleteWorktree(ctx, currentBranch, true); err != nil {
+			logging.Warn("Merge: failed to remove worktree: %v", err)
+		} else {
+			result.WorktreeRemoved = true
+		}
+
+		if repoRoot != "" {
+			if err := os.Chdir(repoRoot); err != nil {
+				logging.Warn("Merge: failed to change to repo root: %v", err)
+			}
+		}
+	}
+
+	if opts.Verify {
+		// Run post-merge hooks with approval (autoYes=true)
+		wm.RunPostMergeHookWithApproval(currentPath, currentBranch, targetBranch, true)
+	}
+
+	return result, nil
+}
+
+func (wm *WorktreeManager) getCurrentBranch() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (wm *WorktreeManager) getDefaultBranch() (string, error) {
+	for _, branch := range []string{"main", "master"} {
+		cmd := exec.Command("git", "rev-parse", "--verify", branch)
+		if err := cmd.Run(); err == nil {
+			return branch, nil
+		}
+	}
+
+	cmd := exec.Command("git", "symbolic-ref", "refs/remotes/origin/HEAD")
+	output, err := cmd.Output()
+	if err == nil {
+		ref := strings.TrimSpace(string(output))
+		if strings.HasPrefix(ref, "refs/remotes/origin/") {
+			return strings.TrimPrefix(ref, "refs/remotes/origin/"), nil
+		}
+	}
+
+	return "", fmt.Errorf("could not determine default branch")
+}
+
+func (wm *WorktreeManager) stageAndCommitChanges(branch string) error {
+	logging.Info("Merge: staging and committing changes")
+
+	addCmd := exec.Command("git", "add", "-A")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %s", string(output))
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("WIP: changes on %s", branch))
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		if !strings.Contains(string(output), "nothing to commit") {
+			return fmt.Errorf("git commit failed: %s", string(output))
+		}
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) getCommitsAhead(branch, target string) (int, error) {
+	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", target, branch))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	var count int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(output)), "%d", &count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+func (wm *WorktreeManager) squashCommits(target string, count int) error {
+	logging.Info("Merge: squashing %d commits", count)
+
+	mergeBase := exec.Command("git", "merge-base", "HEAD", target)
+	baseOutput, err := mergeBase.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge base: %w", err)
+	}
+	base := strings.TrimSpace(string(baseOutput))
+
+	resetCmd := exec.Command("git", "reset", "--soft", base)
+	if output, err := resetCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset failed: %s", string(output))
+	}
+
+	branch, _ := wm.getCurrentBranch()
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("Squashed commits from %s", branch))
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) rebaseOnto(target string) error {
+	logging.Info("Merge: rebasing onto %s", target)
+
+	cmd := exec.Command("git", "rebase", target)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		exec.Command("git", "rebase", "--abort").Run()
+		return fmt.Errorf("rebase failed (conflicts?): %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) fastForwardMerge(source, target string) error {
+	logging.Info("Merge: fast-forward merging %s into %s", source, target)
+
+	sourceRef := exec.Command("git", "rev-parse", source)
+	sourceOutput, err := sourceRef.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get source ref: %w", err)
+	}
+	sourceCommit := strings.TrimSpace(string(sourceOutput))
+
+	updateRef := exec.Command("git", "update-ref", fmt.Sprintf("refs/heads/%s", target), sourceCommit)
+	if output, err := updateRef.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to update target ref: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) ForEach(ctx context.Context, opts ForEachOptions) ([]ForEachResult, error) {
+	logging.Info("ForEach: running command in all worktrees: %v", opts.Command)
+
+	worktrees, err := wm.ListWorktrees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list worktrees: %w", err)
+	}
+
+	repoRoot, _ := wm.getRepoRoot()
+	repoName := filepath.Base(repoRoot)
+	defaultBranch, _ := wm.getDefaultBranch()
+
+	var results []ForEachResult
+
+	for _, wt := range worktrees {
+		if opts.SkipCurrent && wt.IsCurrent {
+			continue
+		}
+		if opts.SkipMain && wt.IsMain {
+			continue
+		}
+		if wt.Status == "missing" {
+			continue
+		}
+
+		tmplCtx := wm.buildTemplateContext(&wt, repoRoot, repoName, defaultBranch)
+		expandedCmd := wm.expandCommand(opts.Command, tmplCtx)
+
+		result := ForEachResult{Worktree: &wt}
+
+		var cmd *exec.Cmd
+		if len(expandedCmd) == 1 {
+			cmd = exec.CommandContext(ctx, "sh", "-c", expandedCmd[0])
+		} else {
+			cmd = exec.CommandContext(ctx, expandedCmd[0], expandedCmd[1:]...)
+		}
+		cmd.Dir = wt.Path
+
+		output, err := cmd.CombinedOutput()
+		result.Output = string(output)
+
+		if err != nil {
+			result.Error = err
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				result.ExitCode = exitErr.ExitCode()
+			} else {
+				result.ExitCode = 1
+			}
+		}
+
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+func (wm *WorktreeManager) buildTemplateContext(wt *WorktreeInfo, repoRoot, repoName, defaultBranch string) TemplateContext {
+	commit := wm.getCommitSHA(wt.Path)
+	shortCommit := commit
+	if len(commit) > 7 {
+		shortCommit = commit[:7]
+	}
+
+	return TemplateContext{
+		Branch:          wt.Branch,
+		BranchSanitized: sanitizeBranch(wt.Branch),
+		Worktree:        wt.Path,
+		WorktreeName:    wt.Name,
+		Repo:            repoName,
+		RepoRoot:        repoRoot,
+		Commit:          commit,
+		ShortCommit:     shortCommit,
+		DefaultBranch:   defaultBranch,
+	}
+}
+
+func (wm *WorktreeManager) getCommitSHA(worktreePath string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = worktreePath
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func sanitizeBranch(branch string) string {
+	result := strings.ReplaceAll(branch, "/", "-")
+	result = strings.ReplaceAll(result, "\\", "-")
+	return result
+}
+
+func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) []string {
+	expanded := make([]string, len(command))
+	for i, arg := range command {
+		expanded[i] = expandTemplate(arg, ctx)
+	}
+	return expanded
+}
+
+func expandTemplate(template string, ctx TemplateContext) string {
+	replacements := map[string]string{
+		"{{ branch }}":            ctx.Branch,
+		"{{branch}}":              ctx.Branch,
+		"{{ branch | sanitize }}": ctx.BranchSanitized,
+		"{{branch|sanitize}}":     ctx.BranchSanitized,
+		"{{ worktree }}":          ctx.Worktree,
+		"{{worktree}}":            ctx.Worktree,
+		"{{ worktree_name }}":     ctx.WorktreeName,
+		"{{worktree_name}}":       ctx.WorktreeName,
+		"{{ repo }}":              ctx.Repo,
+		"{{repo}}":                ctx.Repo,
+		"{{ repo_root }}":         ctx.RepoRoot,
+		"{{repo_root}}":           ctx.RepoRoot,
+		"{{ commit }}":            ctx.Commit,
+		"{{commit}}":              ctx.Commit,
+		"{{ short_commit }}":      ctx.ShortCommit,
+		"{{short_commit}}":        ctx.ShortCommit,
+		"{{ default_branch }}":    ctx.DefaultBranch,
+		"{{default_branch}}":      ctx.DefaultBranch,
+	}
+
+	result := template
+	for pattern, value := range replacements {
+		result = strings.ReplaceAll(result, pattern, value)
+	}
+	return result
+}
+
+type StepCommitOptions struct {
+	Message string
+	UseLLM  bool
+}
+
+type StepSquashOptions struct {
+	Target  string
+	Message string
+	UseLLM  bool
+}
+
+func (wm *WorktreeManager) StepCommit(opts StepCommitOptions) error {
+	logging.Info("StepCommit: committing staged changes")
+
+	addCmd := exec.Command("git", "add", "-A")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add failed: %s", string(output))
+	}
+
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOutput, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("git status failed: %w", err)
+	}
+	if len(strings.TrimSpace(string(statusOutput))) == 0 {
+		return fmt.Errorf("nothing to commit")
+	}
+
+	message := opts.Message
+	if opts.UseLLM && message == "" {
+		cfg, _ := wm.configManager.Load()
+		if cfg != nil && cfg.CommitGenerator.Command != "" {
+			generated, err := wm.generateCommitMessage(cfg.CommitGenerator.Command, cfg.CommitGenerator.Args)
+			if err != nil {
+				logging.Warn("StepCommit: LLM generation failed: %v, using default message", err)
+			} else {
+				message = generated
+			}
+		}
+	}
+
+	if message == "" {
+		branch, _ := wm.getCurrentBranch()
+		message = fmt.Sprintf("WIP: changes on %s", branch)
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", message)
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) StepSquash(opts StepSquashOptions) error {
+	logging.Info("StepSquash: squashing commits to %s", opts.Target)
+
+	target := opts.Target
+	if target == "" {
+		var err error
+		target, err = wm.getDefaultBranch()
+		if err != nil {
+			return fmt.Errorf("could not determine target branch: %w", err)
+		}
+	}
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	count, err := wm.getCommitsAhead(currentBranch, target)
+	if err != nil {
+		return fmt.Errorf("failed to count commits: %w", err)
+	}
+
+	if count <= 1 {
+		return fmt.Errorf("nothing to squash (only %d commit ahead of %s)", count, target)
+	}
+
+	mergeBase := exec.Command("git", "merge-base", "HEAD", target)
+	baseOutput, err := mergeBase.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge base: %w", err)
+	}
+	base := strings.TrimSpace(string(baseOutput))
+
+	message := opts.Message
+	if opts.UseLLM && message == "" {
+		cfg, _ := wm.configManager.Load()
+		if cfg != nil && cfg.CommitGenerator.Command != "" {
+			generated, err := wm.generateSquashMessage(cfg.CommitGenerator.Command, cfg.CommitGenerator.Args, target)
+			if err != nil {
+				logging.Warn("StepSquash: LLM generation failed: %v, using default message", err)
+			} else {
+				message = generated
+			}
+		}
+	}
+
+	if message == "" {
+		message = fmt.Sprintf("Squashed %d commits from %s", count, currentBranch)
+	}
+
+	resetCmd := exec.Command("git", "reset", "--soft", base)
+	if output, err := resetCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset failed: %s", string(output))
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", message)
+	if output, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit failed: %s", string(output))
+	}
+
+	return nil
+}
+
+func (wm *WorktreeManager) generateCommitMessage(command string, args []string) (string, error) {
+	diff, err := wm.getStagedDiff()
+	if err != nil {
+		return "", fmt.Errorf("failed to get diff: %w", err)
+	}
+
+	prompt := buildCommitPrompt(diff, "")
+
+	cmd := exec.Command(command, args...)
+	cmd.Stdin = strings.NewReader(prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("LLM command failed: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (wm *WorktreeManager) generateSquashMessage(command string, args []string, target string) (string, error) {
+	branch, _ := wm.getCurrentBranch()
+
+	diffCmd := exec.Command("git", "diff", fmt.Sprintf("%s...HEAD", target))
+	diffOutput, err := diffCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get diff: %w", err)
+	}
+
+	logCmd := exec.Command("git", "log", "--oneline", fmt.Sprintf("%s..HEAD", target))
+	logOutput, _ := logCmd.Output()
+
+	context := fmt.Sprintf("Branch: %s\nCommits being squashed:\n%s", branch, string(logOutput))
+	prompt := buildCommitPrompt(string(diffOutput), context)
+
+	cmd := exec.Command(command, args...)
+	cmd.Stdin = strings.NewReader(prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("LLM command failed: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+func (wm *WorktreeManager) getStagedDiff() (string, error) {
+	cmd := exec.Command("git", "diff", "--cached")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	if len(output) == 0 {
+		cmd = exec.Command("git", "diff")
+		output, err = cmd.Output()
+		if err != nil {
+			return "", err
+		}
+	}
+	return string(output), nil
+}
+
+func buildCommitPrompt(diff, context string) string {
+	var sb strings.Builder
+	sb.WriteString("Generate a concise git commit message for the following changes.\n")
+	sb.WriteString("Follow conventional commits format (feat:, fix:, docs:, etc.).\n")
+	sb.WriteString("Be specific but concise. One line only, no body.\n\n")
+
+	if context != "" {
+		sb.WriteString("Context:\n")
+		sb.WriteString(context)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("Diff:\n")
+	if len(diff) > 10000 {
+		sb.WriteString(diff[:10000])
+		sb.WriteString("\n... (truncated)")
+	} else {
+		sb.WriteString(diff)
+	}
+
+	return sb.String()
+}
+
+// StepPush fast-forwards the target branch to include current commits
+func (wm *WorktreeManager) StepPush(target string) error {
+	logging.Info("StepPush: pushing to local target branch %s", target)
+
+	if target == "" {
+		var err error
+		target, err = wm.getDefaultBranch()
+		if err != nil {
+			return fmt.Errorf("could not determine target branch: %w", err)
+		}
+	}
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	if currentBranch == target {
+		return fmt.Errorf("already on target branch %s", target)
+	}
+
+	// Check if current branch can be fast-forwarded into target
+	// This means target must be an ancestor of current HEAD
+	mergeBaseCmd := exec.Command("git", "merge-base", target, "HEAD")
+	mergeBaseOutput, err := mergeBaseCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge base: %w", err)
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOutput))
+
+	// Get the commit hash of target
+	targetCommitCmd := exec.Command("git", "rev-parse", target)
+	targetCommitOutput, err := targetCommitCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get target commit: %w", err)
+	}
+	targetCommit := strings.TrimSpace(string(targetCommitOutput))
+
+	// If merge base equals target commit, we can fast-forward
+	if mergeBase != targetCommit {
+		return fmt.Errorf("cannot fast-forward: %s has diverged from current branch. Rebase first with 'gren step rebase %s'", target, target)
+	}
+
+	// Update the target branch ref to point to current HEAD
+	updateRefCmd := exec.Command("git", "update-ref", "refs/heads/"+target, "HEAD")
+	if output, err := updateRefCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to update %s: %s", target, string(output))
+	}
+
+	logging.Info("StepPush: successfully updated %s to current HEAD", target)
+	return nil
+}
+
+// StepRebase rebases current branch onto target branch
+func (wm *WorktreeManager) StepRebase(target string) error {
+	logging.Info("StepRebase: rebasing onto %s", target)
+
+	if target == "" {
+		var err error
+		target, err = wm.getDefaultBranch()
+		if err != nil {
+			return fmt.Errorf("could not determine target branch: %w", err)
+		}
+	}
+
+	currentBranch, err := wm.getCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	if currentBranch == target {
+		return fmt.Errorf("already on target branch %s", target)
+	}
+
+	// Check if rebase is needed
+	behindCount, err := wm.getCommitsBehind(currentBranch, target)
+	if err != nil {
+		return fmt.Errorf("failed to check if rebase needed: %w", err)
+	}
+
+	if behindCount == 0 {
+		logging.Info("StepRebase: already up to date with %s", target)
+		return nil
+	}
+
+	// Perform rebase
+	rebaseCmd := exec.Command("git", "rebase", target)
+	if output, err := rebaseCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("rebase failed: %s\nUse 'git rebase --abort' to cancel or resolve conflicts manually", string(output))
+	}
+
+	logging.Info("StepRebase: successfully rebased onto %s", target)
+	return nil
+}
+
+// getCommitsBehind returns how many commits the current branch is behind target
+func (wm *WorktreeManager) getCommitsBehind(current, target string) (int, error) {
+	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", current, target))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	countStr := strings.TrimSpace(string(output))
+	count := 0
+	fmt.Sscanf(countStr, "%d", &count)
+	return count, nil
 }

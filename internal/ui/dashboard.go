@@ -49,11 +49,26 @@ func (m Model) dashboardView() string {
 			Render(spinnerText)
 	}
 
-	// Combine all parts
-	if githubStatus != "" {
-		return lipgloss.JoinVertical(lipgloss.Left, header, content, githubStatus, footer)
+	// Status message (toast notification)
+	var statusLine string
+	if m.statusMessage != "" {
+		statusLine = lipgloss.NewStyle().
+			Width(m.width).
+			Align(lipgloss.Center).
+			Padding(0, 0, 1, 0).
+			Render(WarningStyle.Render(m.statusMessage))
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+
+	// Combine all parts
+	parts := []string{header, content}
+	if githubStatus != "" {
+		parts = append(parts, githubStatus)
+	}
+	if statusLine != "" {
+		parts = append(parts, statusLine)
+	}
+	parts = append(parts, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -398,28 +413,33 @@ func commitTimeScore(timeStr string) int {
 
 func (m Model) renderTableHeader(width int) string {
 	// Column widths (proportional) - no NAME column, branch is the identifier
-	branchWidth := width * 35 / 100
+	branchWidth := width * 33 / 100
 	lastCommitWidth := width * 12 / 100
 	statusWidth := width * 12 / 100
-	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
+	ciWidth := width * 3 / 100
+	pathWidth := width - branchWidth - lastCommitWidth - statusWidth - ciWidth
 
 	branchCol := TableHeaderStyle.Width(branchWidth).Render("BRANCH")
 	lastCommitCol := TableHeaderStyle.Width(lastCommitWidth).Render("LAST COMMIT")
 	statusCol := TableHeaderStyle.Width(statusWidth).Render("STATUS")
+	ciCol := TableHeaderStyle.Width(ciWidth).Render("CI")
 	pathCol := TableHeaderStyle.Width(pathWidth).Render("PATH")
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, pathCol)
+	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, ciCol, pathCol)
 }
 
 func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	// Column widths (proportional) - must match header
-	branchWidth := width * 35 / 100
+	branchWidth := width * 33 / 100
 	lastCommitWidth := width * 12 / 100
 	statusWidth := width * 12 / 100
-	pathWidth := width - branchWidth - lastCommitWidth - statusWidth
+	ciWidth := width * 3 / 100
+	pathWidth := width - branchWidth - lastCommitWidth - statusWidth - ciWidth
 
-	// Branch with current indicator
 	branch := wt.Branch
+	if wt.Marker != "" {
+		branch = branch + " " + wt.Marker
+	}
 	if wt.IsCurrent {
 		branch = "● " + branch
 	} else {
@@ -468,9 +488,10 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	branchCol := rowStyle.Width(branchWidth).Render(branchStyle.Render(truncate(branch, branchWidth-2)))
 	lastCommitCol := rowStyle.Width(lastCommitWidth).Render(DashboardCommitStyle.Render(truncate(wt.LastCommit, lastCommitWidth-2)))
 	statusCol := rowStyle.Width(statusWidth).Render(status)
+	ciCol := rowStyle.Width(ciWidth).Render(CIStatusBadge(wt.CIStatus, bgColor))
 	pathCol := rowStyle.Width(pathWidth).Render(DashboardPathStyle.Render(pathText))
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, pathCol)
+	return lipgloss.JoinHorizontal(lipgloss.Top, branchCol, lastCommitCol, statusCol, ciCol, pathCol)
 }
 
 // shortenPath replaces home directory with ~ and truncates if needed

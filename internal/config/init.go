@@ -28,6 +28,18 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 		return result
 	}
 
+	// Change to repo root so all relative paths work correctly
+	originalDir, err := os.Getwd()
+	if err != nil {
+		result.Error = fmt.Errorf("failed to get current directory: %w", err)
+		return result
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		result.Error = fmt.Errorf("failed to change to repo root: %w", err)
+		return result
+	}
+	defer os.Chdir(originalDir)
+
 	// Create .gren directory
 	err = os.MkdirAll(".gren", 0755)
 	if err != nil {
@@ -44,28 +56,61 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 		}
 	}
 
-	// Create default configuration
-	config, err := NewDefaultConfig(projectName, repoRoot)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to create default config: %w", err)
-		return result
-	}
-
-	// Detect package manager and files to symlink (including .gren if gitignored)
-	config, detected := detectProjectSettings(config, trackGrenInGit)
-
-	// Save configuration
 	manager := NewManager()
-	err = manager.Save(config)
-	if err != nil {
-		result.Error = fmt.Errorf("failed to save configuration: %w", err)
-		return result
+	var config *Config
+	var existingConfig *Config
+	var wasJSON bool // Track if we're migrating from JSON
+
+	// Check if config already exists (migrate or preserve)
+	if manager.Exists() {
+		wasJSON = manager.ExistsJSON() && !manager.ExistsTOML()
+		existingConfig, err = manager.Load()
+		if err != nil {
+			// Config exists but failed to load - create new but warn
+			result.Message = fmt.Sprintf("Warning: existing config could not be loaded (%v), creating new", err)
+		}
 	}
-	result.ConfigCreated = true
+
+	if existingConfig != nil {
+		// Preserve existing configuration, just ensure it's in TOML format
+		config = existingConfig
+		// Update version if needed
+		if config.Version == "" {
+			config.Version = DefaultVersion
+		}
+	} else {
+		// Create default configuration for new projects
+		config, err = NewDefaultConfig(projectName, repoRoot)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to create default config: %w", err)
+			return result
+		}
+		// Detect package manager and files to symlink (including .gren if gitignored)
+		config, _ = detectProjectSettings(config, trackGrenInGit)
+	}
+
+	// Only save if new config or migrating from JSON
+	// Don't overwrite existing TOML configs (preserves user edits)
+	if existingConfig == nil || wasJSON {
+		err = manager.Save(config)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to save configuration: %w", err)
+			return result
+		}
+		result.ConfigCreated = true
+	}
 
 	// Create post-create hook script if it doesn't exist
 	hookPath := config.PostCreateHook
-	if !fileExists(hookPath) {
+	if hookPath == "" {
+		hookPath = config.Hooks.PostCreate
+	}
+	if hookPath != "" && !fileExists(hookPath) {
+		detected := DetectedFiles{} // Empty for existing configs
+		if existingConfig == nil {
+			// Only detect for new configs
+			_, detected = detectProjectSettings(config, trackGrenInGit)
+		}
 		err = createPostCreateHookWithSymlinks(hookPath, config, detected)
 		if err != nil {
 			result.Error = fmt.Errorf("failed to create post-create hook: %w", err)
@@ -81,7 +126,15 @@ func Initialize(projectName string, trackGrenInGit bool) InitResult {
 	}
 
 	result.Success = true
-	result.Message = fmt.Sprintf("Initialized gren for project '%s'", projectName)
+	if existingConfig != nil {
+		if wasJSON {
+			result.Message = fmt.Sprintf("Migrated config.json → config.toml for project '%s'", projectName)
+		} else {
+			result.Message = fmt.Sprintf("Project '%s' is already initialized", projectName)
+		}
+	} else {
+		result.Message = fmt.Sprintf("Initialized gren for project '%s'", projectName)
+	}
 
 	return result
 }
@@ -332,7 +385,7 @@ brew install langtind/tap/gren
 
 ## Files
 
-- ` + "`config.json`" + ` - Project configuration (worktree directory, hooks)
+- ` + "`config.toml`" + ` - Project configuration (worktree directory, hooks)
 - ` + "`post-create.sh`" + ` - Script that runs after creating new worktrees
 `
 	return os.WriteFile(readmePath, []byte(content), 0644)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
 	"github.com/langtind/gren/internal/ui"
+	"golang.org/x/term"
 )
 
 // Version information - will be injected at build time for GitHub releases
@@ -50,6 +52,11 @@ func main() {
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
 
+	// Check for config migration (only if we're in an initialized project)
+	if configManager.Exists() {
+		checkAndPromptMigration(configManager)
+	}
+
 	// Check if we have CLI commands (anything beyond flags)
 	args := os.Args
 	cliArgs := []string{}
@@ -76,7 +83,7 @@ func main() {
 	// Show help if requested or if no commands provided
 	if *showHelp {
 		cliHandler := cli.NewCLI(gitRepo, configManager)
-		cliHandler.ShowHelp()
+		cliHandler.ShowColoredHelp()
 		return
 	}
 
@@ -92,8 +99,64 @@ func main() {
 	)
 
 	// Run the program
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Print exit message if set (e.g., after navigation)
+	if model, ok := finalModel.(ui.Model); ok && model.ExitMessage != "" {
+		fmt.Println(model.ExitMessage)
+	}
+}
+
+// checkAndPromptMigration checks if config needs migration and prompts the user.
+func checkAndPromptMigration(configManager *config.Manager) {
+	// Skip interactive prompt if not running in a terminal
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+
+	needsMigration, result, err := configManager.NeedsMigration()
+	if err != nil {
+		logging.Error("Failed to check migration status: %v", err)
+		return
+	}
+
+	if !needsMigration {
+		return
+	}
+
+	// Build migration message
+	var changes []string
+	if result.WasJSON {
+		changes = append(changes, "JSON → TOML")
+	}
+	if result.OldVersion != config.CurrentConfigVersion {
+		changes = append(changes, fmt.Sprintf("v%s → v%s", result.OldVersion, config.CurrentConfigVersion))
+	}
+
+	fmt.Printf("⚙️  Config update available (%s)\n", strings.Join(changes, ", "))
+	fmt.Print("Update config? [Y/n]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	response, _ := reader.ReadString('\n')
+	response = strings.ToLower(strings.TrimSpace(response))
+
+	// Default is yes (empty, "y", or "yes")
+	if response == "" || response == "y" || response == "yes" {
+		migrationResult, err := configManager.Migrate()
+		if err != nil {
+			fmt.Printf("❌ Migration failed: %v\n", err)
+			logging.Error("Config migration failed: %v", err)
+			return
+		}
+
+		fmt.Print("✅ Config updated")
+		if len(migrationResult.FieldsMigrated) > 0 {
+			fmt.Printf(" (%s)", strings.Join(migrationResult.FieldsMigrated, ", "))
+		}
+		fmt.Println()
 	}
 }

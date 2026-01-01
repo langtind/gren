@@ -24,6 +24,9 @@ const (
 	ConfigView
 	ToolsView
 	CompareView
+	MergeView
+	ForEachView
+	StepCommitView
 )
 
 // Worktree represents a git worktree
@@ -49,6 +52,12 @@ type Worktree struct {
 	PRNumber int    // PR number, 0 if no PR
 	PRState  string // "OPEN", "MERGED", "CLOSED", "DRAFT", "" if unknown
 	PRURL    string // Full URL to PR for "Open in browser"
+
+	// CI status fields
+	CIStatus     string // "success", "failure", "pending", "" if unknown
+	CIConclusion string
+
+	Marker string
 }
 
 // InitStep represents the current step in initialization
@@ -187,6 +196,7 @@ const (
 
 // OpenInState holds the state for the "Open in..." view
 type OpenInState struct {
+	worktreeName  string             // Name of the selected worktree
 	worktreePath  string             // Path of the selected worktree
 	actions       []PostCreateAction // Available actions
 	selectedIndex int                // Currently selected action index
@@ -231,6 +241,60 @@ type CompareFileItem struct {
 	Selected    bool
 }
 
+type MergeStep int
+
+const (
+	MergeStepConfirm MergeStep = iota
+	MergeStepInProgress
+	MergeStepComplete
+)
+
+type MergeState struct {
+	currentStep    MergeStep
+	sourceWorktree *Worktree
+	targetBranch   string
+	squash         bool
+	remove         bool
+	rebase         bool
+	progressMsg    string
+	result         string
+	err            error
+}
+
+type ForEachState struct {
+	command      string
+	skipCurrent  bool
+	skipMain     bool
+	inProgress   bool
+	currentIndex int
+	results      []ForEachResult
+	inputMode    bool
+}
+
+type ForEachResult struct {
+	Worktree string
+	Output   string
+	Success  bool
+}
+
+type StepCommitStep int
+
+const (
+	StepCommitStepOptions    StepCommitStep = iota
+	StepCommitStepGenerating                // LLM is generating message
+	StepCommitStepMessage
+	StepCommitStepInProgress
+	StepCommitStepComplete
+)
+
+type StepCommitState struct {
+	currentStep StepCommitStep
+	useLLM      bool
+	message     string
+	result      string
+	err         error
+}
+
 // DeleteState holds the state for worktree deletion
 type DeleteState struct {
 	currentStep       DeleteStep
@@ -265,18 +329,22 @@ type Model struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
 	// State
-	repoInfo     *git.RepoInfo
-	config       *config.Config
-	worktrees    []Worktree
-	selected     int
-	err          error
-	initState    *InitState
-	createState  *CreateState
-	deleteState  *DeleteState
-	cleanupState *CleanupState
-	openInState  *OpenInState
-	configState  *ConfigState
-	compareState *CompareState
+	repoInfo          *git.RepoInfo
+	config            *config.Config
+	worktrees         []Worktree
+	selected          int
+	err               error
+	initState         *InitState
+	createState       *CreateState
+	deleteState       *DeleteState
+	cleanupState      *CleanupState
+	openInState       *OpenInState
+	configState       *ConfigState
+	compareState      *CompareState
+	mergeState        *MergeState
+	forEachState      *ForEachState
+	stepCommitState   *StepCommitState
+	hookApprovalState *HookApprovalState
 
 	// Screen dimensions
 	width  int
@@ -300,6 +368,12 @@ type Model struct {
 
 	// Compare loading spinner
 	compareSpinner spinner.Model
+
+	// Exit message to print after TUI closes
+	ExitMessage string
+
+	// Temporary status message (toast-style notification)
+	statusMessage string
 }
 
 // KeyMap defines key bindings for the application
@@ -325,6 +399,18 @@ type KeyMap struct {
 // HelpState holds the state for the help overlay
 type HelpState struct {
 	visible bool
+}
+
+// HookApprovalState holds the state for the hook approval overlay
+type HookApprovalState struct {
+	visible        bool
+	hookType       string   // e.g., "post-create"
+	commands       []string // Commands that need approval
+	worktreePath   string   // Path to the worktree (for running hooks after approval)
+	branchName     string   // Branch name
+	baseBranch     string   // Base branch
+	selectedIndex  int      // 0=Approve, 1=Skip
+	hasInteractive bool     // True if any hook is interactive (needs terminal)
 }
 
 // DefaultKeyMap returns default key bindings

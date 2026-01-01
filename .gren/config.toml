@@ -1,0 +1,19 @@
+# gren configuration
+# See https://github.com/langtind/gren for documentation
+#
+# Available hooks (uncomment to use):
+# [hooks]
+# post-create = ".gren/post-create.sh"  # After creating worktree
+# post-switch = "npm run dev"            # After switching worktree
+# pre-merge = "npm test"                 # Before merging (blocks on failure)
+# post-merge = "echo 'Merged!'"          # After successful merge
+# pre-remove = "npm run cleanup"         # Before deleting worktree
+#
+# For named hooks with branch filtering, see: gren help hooks
+
+worktree_dir = '../gren-worktrees'
+package_manager = 'auto'
+version = '1.1.0'
+
+[hooks]
+post-create = '.gren/post-create.sh'

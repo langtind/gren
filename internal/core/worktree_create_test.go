@@ -28,7 +28,7 @@ func TestCreateWorktreeWithCustomDir(t *testing.T) {
 			WorktreeDir: customDir,
 		}
 
-		_, err = manager.CreateWorktree(ctx, req)
+		_, _, err = manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -60,7 +60,7 @@ func TestCreateWorktreeWithBaseBranch(t *testing.T) {
 			IsNewBranch: true,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -104,7 +104,7 @@ func TestCreateWorktreeWithGrenSymlink(t *testing.T) {
 			WorktreeDir: worktreeDir,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
@@ -131,7 +131,7 @@ func TestCreateWorktreeWithPostCreateHook(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("runs post-create hook when configured", func(t *testing.T) {
+	t.Run("CreateWorktree does not run hook directly", func(t *testing.T) {
 		// Create a post-create hook script
 		hookScript := `#!/bin/sh
 echo "Hook executed" > "$1/.hook-executed"
@@ -156,29 +156,56 @@ echo "Hook executed" > "$1/.hook-executed"
 			IsNewBranch: true,
 		}
 
-		_, err := manager.CreateWorktree(ctx, req)
+		worktreePath, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() error: %v", err)
 		}
 
-		// Find the worktree path
-		worktrees, _ := manager.ListWorktrees(ctx)
-		var worktreePath string
-		for _, wt := range worktrees {
-			if wt.Name == "hook-test" {
-				worktreePath = wt.Path
-				break
-			}
+		// Hook should NOT be executed by CreateWorktree itself
+		// (Caller is responsible for running hooks with approval)
+		markerPath := filepath.Join(worktreePath, ".hook-executed")
+		if _, err := os.Stat(markerPath); err == nil {
+			t.Error("post-create hook was executed by CreateWorktree, but should be run by caller")
+		}
+	})
+
+	t.Run("RunPostCreateHookWithApproval runs hook when auto-approved", func(t *testing.T) {
+		// Create a post-create hook script
+		hookScript := `#!/bin/sh
+echo "Hook executed" > "$1/.hook-executed"
+`
+		hookPath := filepath.Join(dir, ".gren", "post-create.sh")
+		if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+			t.Fatalf("failed to create hook script: %v", err)
 		}
 
-		if worktreePath == "" {
-			t.Fatal("could not find worktree path")
+		// Update config to use the hook
+		configPath := filepath.Join(dir, ".gren", "config.json")
+		configContent := fmt.Sprintf(`{
+			"main_worktree": %q,
+			"worktree_dir": "../test-worktrees",
+			"post_create_hook": ".gren/post-create.sh",
+			"version": "1.0.0"
+		}`, dir)
+		os.WriteFile(configPath, []byte(configContent), 0644)
+
+		req := CreateWorktreeRequest{
+			Name:        "hook-test-approval",
+			IsNewBranch: true,
 		}
+
+		worktreePath, _, err := manager.CreateWorktree(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateWorktree() error: %v", err)
+		}
+
+		// Now explicitly run hook with auto-approve
+		manager.RunPostCreateHookWithApproval(worktreePath, "hook-test-approval", "", true)
 
 		// Check if hook created the marker file
 		markerPath := filepath.Join(worktreePath, ".hook-executed")
 		if _, err := os.Stat(markerPath); os.IsNotExist(err) {
-			t.Error("post-create hook was not executed (marker file not found)")
+			t.Error("post-create hook was not executed after RunPostCreateHookWithApproval")
 		}
 	})
 
@@ -199,7 +226,7 @@ echo "Hook executed" > "$1/.hook-executed"
 		}
 
 		// Should not fail even with missing hook
-		_, err := manager.CreateWorktree(ctx, req)
+		_, _, err := manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Fatalf("CreateWorktree() should not fail for missing hook: %v", err)
 		}
@@ -261,7 +288,7 @@ func TestCreateWorktreeWithRemoteBranch(t *testing.T) {
 			IsNewBranch: false,
 		}
 
-		_, err = manager.CreateWorktree(ctx, req)
+		_, _, err = manager.CreateWorktree(ctx, req)
 		if err != nil {
 			t.Logf("CreateWorktree from remote branch failed (may be expected in CI): %v", err)
 			// This test may fail in some CI environments without proper git setup
@@ -334,7 +361,7 @@ func TestCreateWorktreeWithExistingBranchBothLocalAndRemote(t *testing.T) {
 			IsNewBranch: false, // This is the --existing flag
 		}
 
-		_, err = manager.CreateWorktree(ctx, req)
+		_, _, err = manager.CreateWorktree(ctx, req)
 		if err != nil {
 			// The bug causes this to fail with "already exists" because it uses -b flag
 			t.Fatalf("CreateWorktree() with --existing flag failed: %v", err)

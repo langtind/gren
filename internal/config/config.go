@@ -6,28 +6,143 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 const (
 	// ConfigDir is the directory where gren configuration is stored.
 	ConfigDir = ".gren"
-	// ConfigFile is the main configuration file name.
-	ConfigFile = "config.json"
+	// ConfigFileTOML is the TOML configuration file name (preferred).
+	ConfigFileTOML = "config.toml"
+	// ConfigFileJSON is the legacy JSON configuration file name.
+	ConfigFileJSON = "config.json"
+	// ConfigFile is kept for backward compatibility, points to JSON.
+	ConfigFile = ConfigFileJSON
 	// DefaultVersion is the current configuration version.
 	DefaultVersion = "1.0.0"
 	// DefaultHookFile is the default post-create hook script.
 	DefaultHookFile = "post-create.sh"
 )
 
+// HookType represents the different lifecycle hooks available.
+type HookType string
+
+const (
+	HookPostCreate HookType = "post-create"
+	HookPreRemove  HookType = "pre-remove"
+	HookPreMerge   HookType = "pre-merge"
+	HookPostMerge  HookType = "post-merge"
+	HookPostSwitch HookType = "post-switch"
+	HookPostStart  HookType = "post-start"
+)
+
+// Hooks represents the lifecycle hooks configuration.
+// Each hook can be either a simple command string or a path to a script.
+type Hooks struct {
+	// PostCreate runs after worktree creation (blocking)
+	PostCreate string `json:"post_create,omitempty" toml:"post-create,omitempty"`
+	// PreRemove runs before worktree removal (blocking, fail-fast)
+	PreRemove string `json:"pre_remove,omitempty" toml:"pre-remove,omitempty"`
+	// PreMerge runs before merge operations (blocking, fail-fast)
+	PreMerge string `json:"pre_merge,omitempty" toml:"pre-merge,omitempty"`
+	// PostMerge runs after successful merge (blocking, best-effort)
+	PostMerge string `json:"post_merge,omitempty" toml:"post-merge,omitempty"`
+	// PostSwitch runs after switching to a worktree (blocking)
+	PostSwitch string `json:"post_switch,omitempty" toml:"post-switch,omitempty"`
+	// PostStart runs after starting a command with -x flag (blocking)
+	PostStart string `json:"post_start,omitempty" toml:"post-start,omitempty"`
+}
+
+// ProjectNamedHooks holds named hooks for project configuration.
+type ProjectNamedHooks struct {
+	PostCreate []NamedHook `toml:"post-create,omitempty"`
+	PreRemove  []NamedHook `toml:"pre-remove,omitempty"`
+	PreMerge   []NamedHook `toml:"pre-merge,omitempty"`
+	PostMerge  []NamedHook `toml:"post-merge,omitempty"`
+	PostSwitch []NamedHook `toml:"post-switch,omitempty"`
+	PostStart  []NamedHook `toml:"post-start,omitempty"`
+}
+
+// CommitGenerator configures external LLM command for commit message generation.
+type CommitGenerator struct {
+	Command string   `json:"command,omitempty" toml:"command,omitempty"`
+	Args    []string `json:"args,omitempty" toml:"args,omitempty"`
+}
+
+// Get returns the hook command for the given hook type.
+func (h *Hooks) Get(hookType HookType) string {
+	switch hookType {
+	case HookPostCreate:
+		return h.PostCreate
+	case HookPreRemove:
+		return h.PreRemove
+	case HookPreMerge:
+		return h.PreMerge
+	case HookPostMerge:
+		return h.PostMerge
+	case HookPostSwitch:
+		return h.PostSwitch
+	case HookPostStart:
+		return h.PostStart
+	default:
+		return ""
+	}
+}
+
+// GetNamedHooks returns the named hooks for a given hook type.
+func (pnh *ProjectNamedHooks) GetNamedHooks(hookType HookType) []NamedHook {
+	switch hookType {
+	case HookPostCreate:
+		return pnh.PostCreate
+	case HookPreRemove:
+		return pnh.PreRemove
+	case HookPreMerge:
+		return pnh.PreMerge
+	case HookPostMerge:
+		return pnh.PostMerge
+	case HookPostSwitch:
+		return pnh.PostSwitch
+	case HookPostStart:
+		return pnh.PostStart
+	default:
+		return nil
+	}
+}
+
 // Config represents the gren configuration.
 type Config struct {
 	// MainWorktree is deprecated - main worktree is now detected dynamically
 	// Kept for backwards compatibility with old configs, but not used or saved
-	MainWorktree   string `json:"main_worktree,omitempty"`
-	WorktreeDir    string `json:"worktree_dir"`
-	PackageManager string `json:"package_manager"`
-	PostCreateHook string `json:"post_create_hook"`
-	Version        string `json:"version"`
+	MainWorktree   string `json:"main_worktree,omitempty" toml:"main_worktree,omitempty"`
+	WorktreeDir    string `json:"worktree_dir" toml:"worktree_dir"`
+	PackageManager string `json:"package_manager" toml:"package_manager"`
+	// PostCreateHook is deprecated - use Hooks.PostCreate instead
+	// Kept for backwards compatibility with old configs
+	PostCreateHook  string            `json:"post_create_hook,omitempty" toml:"post_create_hook,omitempty"`
+	Version         string            `json:"version" toml:"version"`
+	Hooks           Hooks             `json:"hooks,omitempty" toml:"hooks,omitempty"`
+	NamedHooks      ProjectNamedHooks `json:"-" toml:"named-hooks,omitempty"`
+	CommitGenerator CommitGenerator   `json:"commit_generator,omitempty" toml:"commit-generation,omitempty"`
+}
+
+// GetAllHooks returns all hooks (simple + named) for a given hook type.
+func (c *Config) GetAllHooks(hookType HookType) []NamedHook {
+	var hooks []NamedHook
+
+	// Add simple hook as a named hook if set
+	simpleHook := c.Hooks.Get(hookType)
+	if simpleHook != "" {
+		hooks = append(hooks, NamedHook{
+			Name:    string(hookType) + "-default",
+			Command: simpleHook,
+		})
+	}
+
+	// Add named hooks
+	hooks = append(hooks, c.NamedHooks.GetNamedHooks(hookType)...)
+
+	return hooks
 }
 
 // Manager handles configuration operations.
@@ -65,23 +180,44 @@ func NewDefaultConfig(projectName, repoRoot string) (*Config, error) {
 }
 
 // Load reads the configuration from the config file.
+// Tries TOML first (config.toml), then falls back to JSON (config.json).
 func (m *Manager) Load() (*Config, error) {
-	configPath := filepath.Join(m.configDir, ConfigFile)
+	var config Config
+	var data []byte
+	var err error
+	var usedTOML bool
 
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("configuration not found: run 'gren init' first")
+	// Try TOML first (preferred format)
+	tomlPath := filepath.Join(m.configDir, ConfigFileTOML)
+	data, err = os.ReadFile(tomlPath)
+	if err == nil {
+		usedTOML = true
+		if err := toml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse TOML config file: %w", err)
 		}
+	} else if os.IsNotExist(err) {
+		// Fall back to JSON
+		jsonPath := filepath.Join(m.configDir, ConfigFileJSON)
+		data, err = os.ReadFile(jsonPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("configuration not found: run 'gren init' first")
+			}
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON config file: %w", err)
+		}
+	} else {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config Config
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-
 	// Note: MainWorktree from old configs is ignored - now detected dynamically
+	_ = usedTOML // Can be used for logging/debugging
+
+	if config.PostCreateHook != "" && config.Hooks.PostCreate == "" {
+		config.Hooks.PostCreate = config.PostCreateHook
+	}
 
 	if err := m.validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
@@ -90,7 +226,8 @@ func (m *Manager) Load() (*Config, error) {
 	return &config, nil
 }
 
-// Save writes the configuration to the config file.
+// Save writes the configuration to the config file in TOML format.
+// If a JSON config exists, it will be removed after successfully saving TOML.
 func (m *Manager) Save(config *Config) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
@@ -105,7 +242,60 @@ func (m *Manager) Save(config *Config) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	configPath := filepath.Join(m.configDir, ConfigFile)
+	// Save as TOML (preferred format)
+	configPath := filepath.Join(m.configDir, ConfigFileTOML)
+
+	data, err := toml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Add a header comment with hook examples
+	header := `# gren configuration
+# See https://github.com/langtind/gren for documentation
+#
+# Available hooks (uncomment to use):
+# [hooks]
+# post-create = ".gren/post-create.sh"  # After creating worktree
+# post-switch = "npm run dev"            # After switching worktree
+# pre-merge = "npm test"                 # Before merging (blocks on failure)
+# post-merge = "echo 'Merged!'"          # After successful merge
+# pre-remove = "npm run cleanup"         # Before deleting worktree
+#
+# For named hooks with branch filtering, see: gren help hooks
+
+`
+	data = append([]byte(header), data...)
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	// Remove legacy JSON config if it exists
+	jsonPath := filepath.Join(m.configDir, ConfigFileJSON)
+	if _, err := os.Stat(jsonPath); err == nil {
+		os.Remove(jsonPath) // Ignore errors - not critical
+	}
+
+	return nil
+}
+
+// SaveJSON writes the configuration to JSON format (for backward compatibility).
+func (m *Manager) SaveJSON(config *Config) error {
+	if config == nil {
+		return fmt.Errorf("config cannot be nil")
+	}
+
+	if err := m.validateConfig(config); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Ensure config directory exists
+	if err := os.MkdirAll(m.configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	configPath := filepath.Join(m.configDir, ConfigFileJSON)
 
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -119,10 +309,30 @@ func (m *Manager) Save(config *Config) error {
 	return nil
 }
 
-// Exists checks if the configuration file exists.
+// Exists checks if any configuration file exists (TOML or JSON).
 func (m *Manager) Exists() bool {
-	configPath := filepath.Join(m.configDir, ConfigFile)
-	_, err := os.Stat(configPath)
+	// Check TOML first (preferred)
+	tomlPath := filepath.Join(m.configDir, ConfigFileTOML)
+	if _, err := os.Stat(tomlPath); err == nil {
+		return true
+	}
+	// Fall back to JSON
+	jsonPath := filepath.Join(m.configDir, ConfigFileJSON)
+	_, err := os.Stat(jsonPath)
+	return err == nil
+}
+
+// ExistsTOML checks if TOML configuration exists.
+func (m *Manager) ExistsTOML() bool {
+	tomlPath := filepath.Join(m.configDir, ConfigFileTOML)
+	_, err := os.Stat(tomlPath)
+	return err == nil
+}
+
+// ExistsJSON checks if legacy JSON configuration exists.
+func (m *Manager) ExistsJSON() bool {
+	jsonPath := filepath.Join(m.configDir, ConfigFileJSON)
+	_, err := os.Stat(jsonPath)
 	return err == nil
 }
 

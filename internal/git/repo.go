@@ -176,6 +176,12 @@ func getCurrentDirectory() (string, error) {
 
 // isInitialized checks if gren has been initialized in this repo.
 func isInitialized() bool {
-	_, err := os.Stat(".gren")
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	repoRoot := strings.TrimSpace(string(output))
+	_, err = os.Stat(filepath.Join(repoRoot, ".gren"))
 	return err == nil
 }

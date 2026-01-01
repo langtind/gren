@@ -162,8 +162,9 @@ func TestHandleListInGitRepo(t *testing.T) {
 	}
 
 	// Should list at least one worktree (the main repo)
-	if !strings.Contains(output, "master") && !strings.Contains(output, "main") {
-		t.Errorf("expected output to contain branch name, got: %s", output)
+	// Simple list shows worktree names with ▸ prefix for current
+	if !strings.Contains(output, "▸") && !strings.Contains(output, "gren-cli-test") {
+		t.Errorf("expected output to contain worktree indicator or name, got: %s", output)
 	}
 }
 
@@ -197,9 +198,14 @@ func TestHandleListVerbose(t *testing.T) {
 		t.Fatalf("list -v command error: %v", err)
 	}
 
-	// Verbose output should have table headers
-	if !strings.Contains(output, "BRANCH") || !strings.Contains(output, "PATH") {
-		t.Errorf("verbose output should have headers, got: %s", output)
+	// Verbose output should have header and show paths
+	// Format: "🌳 Git Worktree Manager" header with worktree details including paths
+	if !strings.Contains(output, "Git Worktree Manager") {
+		t.Errorf("verbose output should have header, got: %s", output)
+	}
+	// Verbose mode shows paths (starting with /)
+	if !strings.Contains(output, "/") {
+		t.Errorf("verbose output should show paths, got: %s", output)
 	}
 }
 
@@ -226,7 +232,7 @@ func TestHandleNavigateMissingName(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing worktree name")
 	}
-	if !strings.Contains(err.Error(), "worktree name is required") {
+	if !strings.Contains(err.Error(), "worktree identifier is required") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -384,9 +390,9 @@ func TestHandleInit(t *testing.T) {
 		t.Error(".gren directory was not created")
 	}
 
-	// Verify config file was created
-	if _, err := os.Stat(".gren/config.json"); err != nil {
-		t.Error("config.json was not created")
+	// Verify config file was created (now saved as TOML)
+	if _, err := os.Stat(".gren/config.toml"); err != nil {
+		t.Error("config.toml was not created")
 	}
 }
 
@@ -457,7 +463,7 @@ func TestShowHelp(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	cli.ShowHelp()
+	cli.ShowColoredHelp()
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -651,6 +657,18 @@ func TestHandleNavigateSuccess(t *testing.T) {
 		t.Fatalf("create worktree failed: %v", err)
 	}
 
+	// Create a temp file for directive output (simulates shell integration)
+	directiveFile, err := os.CreateTemp("", "gren-directive-*")
+	if err != nil {
+		t.Fatalf("failed to create directive file: %v", err)
+	}
+	directiveFile.Close()
+	defer os.Remove(directiveFile.Name())
+
+	// Set GREN_DIRECTIVE_FILE to simulate shell integration
+	os.Setenv("GREN_DIRECTIVE_FILE", directiveFile.Name())
+	defer os.Unsetenv("GREN_DIRECTIVE_FILE")
+
 	// Capture stdout
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -669,15 +687,15 @@ func TestHandleNavigateSuccess(t *testing.T) {
 		t.Fatalf("navigate command failed: %v", err)
 	}
 
-	// Verify temp file was created
-	if _, err := os.Stat("/tmp/gren_navigate"); err != nil {
-		t.Error("navigation temp file was not created")
+	// Verify directive file was written
+	if info, err := os.Stat(directiveFile.Name()); err != nil || info.Size() == 0 {
+		t.Error("directive file was not written")
 	}
 
 	// Read and verify the content
-	content, _ := os.ReadFile("/tmp/gren_navigate")
+	content, _ := os.ReadFile(directiveFile.Name())
 	if !strings.Contains(string(content), "cd ") {
-		t.Errorf("navigation file should contain cd command, got: %s", content)
+		t.Errorf("directive file should contain cd command, got: %s", content)
 	}
 }
 
@@ -1188,7 +1206,7 @@ func TestShowHelpIncludesCompare(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	cli.ShowHelp()
+	cli.ShowColoredHelp()
 
 	w.Close()
 	os.Stdout = oldStdout

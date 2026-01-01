@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/core"
+	"github.com/langtind/gren/internal/directive"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -127,24 +129,66 @@ func (m Model) initializeConfigState() tea.Cmd {
 	return func() tea.Msg {
 		var files []ConfigFile
 
-		// Check for config.json
-		if _, err := os.Stat(".gren/config.json"); err == nil {
+		// Check for user config
+		ucm := config.NewUserConfigManager()
+		userConfigPath := ucm.ConfigPath()
+		if ucm.Exists() {
 			files = append(files, ConfigFile{
-				Name:        "config.json",
-				Path:        ".gren/config.json",
-				Icon:        "📄",
-				Description: "Main configuration file for gren settings",
+				Name:        "User Config",
+				Path:        userConfigPath,
+				Icon:        "👤",
+				Description: "Global settings: LLM, defaults, hooks",
+			})
+		} else {
+			files = append(files, ConfigFile{
+				Name:        "User Config (create)",
+				Path:        userConfigPath,
+				Icon:        "➕",
+				Description: "Run 'gren config create' to create",
 			})
 		}
 
-		// Check for post-create.sh
-		if _, err := os.Stat(".gren/post-create.sh"); err == nil {
+		// Check for project config (TOML first, then JSON)
+		if _, err := os.Stat(".gren/config.toml"); err == nil {
 			files = append(files, ConfigFile{
-				Name:        "post-create.sh",
-				Path:        ".gren/post-create.sh",
-				Icon:        "📜",
-				Description: "Script that runs after creating new worktrees",
+				Name:        "Project Config",
+				Path:        ".gren/config.toml",
+				Icon:        "📂",
+				Description: "Project-specific worktree settings",
 			})
+		} else if _, err := os.Stat(".gren/config.json"); err == nil {
+			files = append(files, ConfigFile{
+				Name:        "Project Config",
+				Path:        ".gren/config.json",
+				Icon:        "📂",
+				Description: "Project-specific worktree settings",
+			})
+		}
+
+		// Check for hook scripts
+		hooks := []struct {
+			file string
+			name string
+			desc string
+		}{
+			{"post-create.sh", "post-create", "Runs after creating worktrees"},
+			{"pre-remove.sh", "pre-remove", "Runs before removing worktrees"},
+			{"pre-merge.sh", "pre-merge", "Runs before merge (tests, lint)"},
+			{"post-merge.sh", "post-merge", "Runs after successful merge"},
+			{"post-switch.sh", "post-switch", "Runs after switching worktrees"},
+			{"post-start.sh", "post-start", "Runs after -x command starts"},
+		}
+
+		for _, hook := range hooks {
+			path := ".gren/" + hook.file
+			if _, err := os.Stat(path); err == nil {
+				files = append(files, ConfigFile{
+					Name:        hook.name,
+					Path:        path,
+					Icon:        "🪝",
+					Description: hook.desc,
+				})
+			}
 		}
 
 		return configInitializedMsg{files: files}
@@ -315,7 +359,7 @@ func (m Model) createWorktree() tea.Cmd {
 
 		ctx := context.Background()
 		worktreeManager := core.NewWorktreeManager(m.gitRepo, m.configManager)
-		warning, err := worktreeManager.CreateWorktree(ctx, req)
+		_, warning, err := worktreeManager.CreateWorktree(ctx, req)
 		if err != nil {
 			logging.Error("Create worktree failed: %v", err)
 			return worktreeCreatedMsg{err: err}
@@ -476,12 +520,13 @@ func (m Model) deleteSelectedWorktrees() tea.Cmd {
 }
 
 // initializeOpenInState creates and initializes the "Open in..." state
-func (m Model) initializeOpenInState(worktreePath string) tea.Cmd {
+func (m Model) initializeOpenInState(worktreeName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Use the consolidated action generation logic
 		availableActions := m.getActionsForPath(worktreePath, "Back to dashboard")
 
 		return openInInitializedMsg{
+			worktreeName: worktreeName,
 			worktreePath: worktreePath,
 			actions:      availableActions,
 		}
@@ -969,34 +1014,34 @@ func (m Model) deleteNextWorktree(index int) tea.Cmd {
 	}
 }
 
-// navigateToWorktree writes navigation command to temp file and quits TUI
-func (m Model) navigateToWorktree(worktreePath string) tea.Cmd {
+// navigateToWorktree writes navigation command to directive file and returns navigate message
+func (m Model) navigateToWorktree(worktreeName, worktreePath string) tea.Cmd {
 	return func() tea.Msg {
-		// Write navigation command to temp file
-		tempFile := "/tmp/gren_navigate"
-		command := fmt.Sprintf("cd \"%s\"", worktreePath)
+		logging.Info("navigateToWorktree: writing directive for %s -> %s", worktreeName, worktreePath)
 
-		if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
-			return fmt.Errorf("failed to write navigation command: %w", err)
+		// Write navigation command via directive package
+		if err := directive.WriteCD(worktreePath); err != nil {
+			logging.Error("navigateToWorktree: failed to write directive: %v", err)
+			return navigateCompleteMsg{err: err}
 		}
 
-		// Quit the TUI to allow wrapper script to execute the navigation
-		return tea.Quit()
+		logging.Info("navigateToWorktree: directive written successfully")
+		return navigateCompleteMsg{
+			worktreeName: worktreeName,
+			worktreePath: worktreePath,
+		}
 	}
 }
 
-// launchClaudeInWorktree writes cd + claude command to temp file and quits TUI
+// launchClaudeInWorktree writes cd + claude command to directive file and quits TUI
 // This allows Claude Code to start in the worktree directory after gren exits
 func (m Model) launchClaudeInWorktree(worktreePath string) tea.Cmd {
 	return func() tea.Msg {
-		// Write cd + claude command to temp file (same mechanism as navigate)
-		tempFile := "/tmp/gren_navigate"
-		command := fmt.Sprintf("cd \"%s\" && claude", worktreePath)
+		// Write cd + claude command via directive package
+		logging.Info("launchClaudeInWorktree: writing directive for path %s", worktreePath)
 
-		logging.Info("launchClaudeInWorktree: writing command to %s", tempFile)
-
-		if err := os.WriteFile(tempFile, []byte(command), 0644); err != nil {
-			logging.Error("launchClaudeInWorktree: failed to write command: %v", err)
+		if err := directive.WriteCDAndRun(worktreePath, "claude"); err != nil {
+			logging.Error("launchClaudeInWorktree: failed to write directive: %v", err)
 			return fmt.Errorf("failed to write claude command: %w", err)
 		}
 
@@ -1163,6 +1208,7 @@ func (m Model) refreshAllStatus() tea.Cmd {
 		if ghStatus == core.GitHubAvailable {
 			logging.Info("refreshAllStatus: GitHub CLI available, fetching PR status")
 			worktreeManager.EnrichWithGitHubStatus(worktrees)
+			worktreeManager.EnrichWithCIStatus(worktrees)
 		} else {
 			logging.Debug("refreshAllStatus: GitHub CLI not available, skipping PR status")
 		}
@@ -1226,6 +1272,7 @@ func (m Model) startGitHubCheck() tea.Cmd {
 
 		// Enrich with GitHub status
 		worktreeManager.EnrichWithGitHubStatus(coreWorktrees)
+		worktreeManager.EnrichWithCIStatus(coreWorktrees)
 
 		// Convert back to UI worktrees
 		uiWorktrees := make([]Worktree, len(coreWorktrees))
@@ -1371,7 +1418,178 @@ func (m Model) applyCompareChanges() tea.Cmd {
 	}
 }
 
-// loadCompareDiff loads diff content for a specific file using actual file comparison
+func (m Model) executeMerge() tea.Cmd {
+	if m.mergeState == nil || m.mergeState.sourceWorktree == nil {
+		return func() tea.Msg {
+			return mergeCompleteMsg{err: fmt.Errorf("merge state is nil")}
+		}
+	}
+
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	sourceBranch := m.mergeState.sourceWorktree.Branch
+	targetBranch := m.mergeState.targetBranch
+	squash := m.mergeState.squash
+	remove := m.mergeState.remove
+	rebase := m.mergeState.rebase
+
+	return func() tea.Msg {
+		logging.Info("executeMerge: merging %s to %s (squash=%v, remove=%v, rebase=%v)",
+			sourceBranch, targetBranch, squash, remove, rebase)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		ctx := context.Background()
+
+		opts := core.MergeOptions{
+			Target: targetBranch,
+			Squash: squash,
+			Remove: remove,
+			Verify: false,
+			Rebase: rebase,
+			Yes:    true,
+			Force:  false,
+		}
+
+		result, err := worktreeManager.Merge(ctx, opts)
+		if err != nil {
+			return mergeCompleteMsg{err: err}
+		}
+
+		var resultMsg string
+		if result.Skipped {
+			resultMsg = fmt.Sprintf("Skipped: %s", result.SkipReason)
+		} else {
+			resultMsg = fmt.Sprintf("Merged %s into %s", result.SourceBranch, result.TargetBranch)
+			if result.CommitsSquashed > 0 {
+				resultMsg += fmt.Sprintf(" (%d commits squashed)", result.CommitsSquashed)
+			}
+			if result.WorktreeRemoved {
+				resultMsg += ", worktree removed"
+			}
+		}
+
+		return mergeCompleteMsg{result: resultMsg}
+	}
+}
+
+func (m Model) executeForEach() tea.Cmd {
+	if m.forEachState == nil || strings.TrimSpace(m.forEachState.command) == "" {
+		return func() tea.Msg {
+			return forEachCompleteMsg{}
+		}
+	}
+
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	command := m.forEachState.command
+	skipMain := m.forEachState.skipMain
+
+	return func() tea.Msg {
+		logging.Info("executeForEach: running '%s' in all worktrees (skipMain=%v)", command, skipMain)
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+		ctx := context.Background()
+
+		opts := core.ForEachOptions{
+			Command:     strings.Fields(command),
+			SkipCurrent: false,
+			SkipMain:    skipMain,
+			Parallel:    false,
+		}
+
+		_, err := worktreeManager.ForEach(ctx, opts)
+		if err != nil {
+			logging.Error("executeForEach: failed: %v", err)
+		}
+
+		return forEachCompleteMsg{}
+	}
+}
+
+func (m Model) generateLLMMessage() tea.Cmd {
+	if m.stepCommitState == nil {
+		return func() tea.Msg {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("step commit state is nil")}
+		}
+	}
+
+	configManager := m.configManager
+
+	return func() tea.Msg {
+		logging.Info("generateLLMMessage: generating commit message with LLM")
+
+		// Load config to get LLM settings
+		cfg, err := configManager.Load()
+		if err != nil {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("failed to load config: %w", err)}
+		}
+
+		// Check if LLM is configured
+		if cfg.CommitGenerator.Command == "" {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("LLM not configured. Set [commit-generation] command in config")}
+		}
+
+		// Get the staged diff
+		diff, err := exec.Command("git", "diff", "--cached").Output()
+		if err != nil {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("failed to get staged diff: %w", err)}
+		}
+
+		if len(diff) == 0 {
+			// Try unstaged diff if nothing staged
+			diff, err = exec.Command("git", "diff").Output()
+			if err != nil {
+				return llmMessageGeneratedMsg{err: fmt.Errorf("failed to get diff: %w", err)}
+			}
+		}
+
+		if len(diff) == 0 {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("no changes to commit")}
+		}
+
+		// Create LLM generator
+		generator := core.NewLLMGenerator(cfg)
+
+		// Generate the commit message
+		message, err := generator.GenerateCommitMessage(string(diff), "")
+		if err != nil {
+			return llmMessageGeneratedMsg{err: err}
+		}
+
+		return llmMessageGeneratedMsg{message: message}
+	}
+}
+
+func (m Model) executeStepCommit() tea.Cmd {
+	if m.stepCommitState == nil {
+		return func() tea.Msg {
+			return stepCommitCompleteMsg{err: fmt.Errorf("step commit state is nil")}
+		}
+	}
+
+	gitRepo := m.gitRepo
+	configManager := m.configManager
+	message := m.stepCommitState.message
+
+	return func() tea.Msg {
+		logging.Info("executeStepCommit: committing changes")
+
+		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+
+		opts := core.StepCommitOptions{
+			Message: message,
+			UseLLM:  false, // Message is already set, no need for LLM
+		}
+
+		err := worktreeManager.StepCommit(opts)
+		if err != nil {
+			return stepCommitCompleteMsg{err: err}
+		}
+
+		return stepCommitCompleteMsg{result: "Changes committed successfully"}
+	}
+}
+
 func (m Model) loadCompareDiff(sourcePath string, filePath string) tea.Cmd {
 	return func() tea.Msg {
 		logging.Info("loadCompareDiff: loading diff for %s from %s", filePath, sourcePath)
@@ -1438,4 +1656,11 @@ func (m Model) loadCompareDiff(sourcePath string, filePath string) tea.Cmd {
 
 		return compareDiffLoadedMsg{content: content, err: nil}
 	}
+}
+
+// clearStatusAfter returns a command that clears the status message after a delay
+func clearStatusAfter(duration time.Duration) tea.Cmd {
+	return tea.Tick(duration, func(t time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
 }

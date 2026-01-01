@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/langtind/gren/internal/config"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -322,15 +324,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case compareDiffLoadedMsg:
-		// Diff content loaded for compare view
 		if m.compareState != nil {
 			if msg.err != nil {
 				m.compareState.diffContent = fmt.Sprintf("Error loading diff: %v", msg.err)
 			} else {
 				m.compareState.diffContent = msg.content
-				m.compareState.diffScrollOffset = 0 // Reset scroll position
+				m.compareState.diffScrollOffset = 0
 			}
 		}
+		return m, nil
+
+	case mergeProgressMsg:
+		if m.mergeState != nil {
+			m.mergeState.progressMsg = msg.message
+		}
+		return m, nil
+
+	case mergeCompleteMsg:
+		if m.mergeState != nil {
+			m.mergeState.currentStep = MergeStepComplete
+			m.mergeState.result = msg.result
+			m.mergeState.err = msg.err
+			if msg.err == nil {
+				m.refreshWorktrees()
+			}
+		}
+		return m, nil
+
+	case forEachItemCompleteMsg:
+		if m.forEachState != nil {
+			m.forEachState.results = append(m.forEachState.results, ForEachResult{
+				Worktree: msg.worktree,
+				Output:   msg.output,
+				Success:  msg.success,
+			})
+			m.forEachState.currentIndex++
+		}
+		return m, nil
+
+	case forEachCompleteMsg:
+		if m.forEachState != nil {
+			m.forEachState.inProgress = false
+		}
+		return m, nil
+
+	case llmMessageGeneratedMsg:
+		if m.stepCommitState != nil {
+			if msg.err != nil {
+				// Show error and go back to options
+				m.stepCommitState.currentStep = StepCommitStepComplete
+				m.stepCommitState.err = msg.err
+			} else {
+				// Show generated message for review/edit
+				m.stepCommitState.message = msg.message
+				m.stepCommitState.currentStep = StepCommitStepMessage
+			}
+		}
+		return m, nil
+
+	case stepCommitCompleteMsg:
+		if m.stepCommitState != nil {
+			m.stepCommitState.currentStep = StepCommitStepComplete
+			m.stepCommitState.result = msg.result
+			m.stepCommitState.err = msg.err
+		}
+		return m, nil
+
+	case hookExecutionCompleteMsg:
+		// Interactive hook execution completed (TUI was suspended for terminal access)
+		if msg.err != nil {
+			m.err = fmt.Errorf("hook execution failed: %w", msg.err)
+		}
+		// Refresh worktrees in case hooks made changes
+		m.refreshWorktrees()
 		return m, nil
 
 	case worktreeCreatedMsg:
@@ -346,6 +412,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createState.currentStep = CreateStepComplete
 				m.createState.createWarning = msg.warning // Store warning for display
 				m.initializeActionsList()
+
+				// Check for unapproved post-create hooks
+				worktreePath := m.getWorktreePath(m.createState.branchName)
+				m.showHookApproval(config.HookPostCreate, worktreePath, m.createState.branchName, m.createState.baseBranch)
 			}
 		}
 		return m, nil
@@ -368,6 +438,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openInInitializedMsg:
 		m.initializeOpenInStateFromMsg(msg)
 		return m, nil
+
+	case navigateCompleteMsg:
+		logging.Info("navigateCompleteMsg received: name=%s, path=%s, err=%v", msg.worktreeName, msg.worktreePath, msg.err)
+		if msg.err != nil {
+			m.err = fmt.Errorf("navigation failed: %w", msg.err)
+			return m, nil
+		}
+		// Set exit message - just show worktree name, shell wrapper shows path
+		m.ExitMessage = fmt.Sprintf("✅ Navigating to %s", msg.worktreeName)
+		logging.Info("navigateCompleteMsg: ExitMessage set, quitting")
+		return m, tea.Quit
 
 	case availableBranchesLoadedMsg:
 		if m.createState != nil {
@@ -416,6 +497,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.initState.currentStep = InitStepAIResult
 			m.initState.selected = 0
 		}
+		return m, nil
+
+	case clearStatusMsg:
+		m.statusMessage = ""
 		return m, nil
 
 	case spinner.TickMsg:
@@ -481,6 +566,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle hook approval modal
+		if m.hookApprovalState != nil && m.hookApprovalState.visible {
+			return m.handleHookApprovalKeys(keyMsg)
+		}
+
 		if m.currentView == InitView {
 			return m.handleInitKeys(keyMsg)
 		}
@@ -505,6 +595,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentView == CompareView {
 			return m.handleCompareKeys(keyMsg)
 		}
+		if m.currentView == MergeView {
+			return m.handleMergeKeys(keyMsg)
+		}
+		if m.currentView == ForEachView {
+			return m.handleForEachKeys(keyMsg)
+		}
+		if m.currentView == StepCommitView {
+			return m.handleStepCommitKeys(keyMsg)
+		}
 
 		// Dashboard keys
 		logging.Debug("Dashboard key: %q", keyMsg.String())
@@ -528,7 +627,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
 				logging.Info("Dashboard: opening 'Open in...' menu for worktree: %s", selectedWorktree.Name)
 				m.currentView = OpenInView
-				return m, m.initializeOpenInState(selectedWorktree.Path)
+				return m, m.initializeOpenInState(selectedWorktree.Name, selectedWorktree.Path)
 			}
 			return m, nil
 
@@ -552,7 +651,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Don't allow deleting the current worktree
 				if selectedWorktree.IsCurrent {
 					logging.Debug("Dashboard: cannot delete current worktree: %s", selectedWorktree.Name)
-					return m, nil // Silently ignore - or could show error message
+					m.statusMessage = "⚠️ Cannot delete current worktree"
+					return m, clearStatusAfter(3 * time.Second)
 				}
 				logging.Info("Dashboard: entering DeleteView for worktree: %s (shortcut 'd')", selectedWorktree.Name)
 				m.currentView = DeleteView
@@ -597,7 +697,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Navigate to selected worktree directory
 			if selectedWorktree := m.getSelectedWorktree(); selectedWorktree != nil {
 				logging.Info("Dashboard: navigating to worktree: %s (shortcut 'g')", selectedWorktree.Name)
-				return m, m.navigateToWorktree(selectedWorktree.Path)
+				return m, m.navigateToWorktree(selectedWorktree.Name, selectedWorktree.Path)
 			}
 			return m, nil
 		case key.Matches(keyMsg, m.keys.Tools):
@@ -647,6 +747,10 @@ func (m Model) View() string {
 		}
 	case CreateView:
 		baseView = m.createView()
+		// Show hook approval overlay if visible
+		if m.hookApprovalState != nil && m.hookApprovalState.visible {
+			return m.renderHookApprovalOverlay(baseView)
+		}
 	case DeleteView:
 		// Delete steps are shown as modal overlays on dashboard
 		baseView = m.dashboardView()
@@ -684,6 +788,15 @@ func (m Model) View() string {
 		if m.helpVisible {
 			return m.renderCompareHelpOverlay(baseView)
 		}
+	case MergeView:
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderMergeView(), 60, ColorPrimary)
+	case ForEachView:
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderForEachView(), 60, ColorPrimary)
+	case StepCommitView:
+		baseView = m.dashboardView()
+		return m.renderWithModalWidth(baseView, m.renderStepCommitView(), 60, ColorPrimary)
 	default:
 		baseView = m.dashboardView()
 	}

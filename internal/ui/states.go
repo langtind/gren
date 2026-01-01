@@ -109,6 +109,9 @@ func convertCoreWorktreeToUI(wt core.WorktreeInfo) Worktree {
 		PRNumber:       wt.PRNumber,
 		PRState:        wt.PRState,
 		PRURL:          wt.PRURL,
+		CIStatus:       wt.CIStatus,
+		CIConclusion:   wt.CIConclusion,
+		Marker:         string(wt.Marker),
 	}
 }
 
@@ -260,6 +263,7 @@ func (m *Model) setupDeleteStateForWorktree(worktree Worktree) {
 // initializeOpenInState initializes the OpenIn state with actions
 func (m *Model) initializeOpenInStateFromMsg(msg openInInitializedMsg) {
 	m.openInState = &OpenInState{
+		worktreeName:  msg.worktreeName,
 		worktreePath:  msg.worktreePath,
 		actions:       msg.actions,
 		selectedIndex: 0,

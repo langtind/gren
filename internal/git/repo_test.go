@@ -227,7 +227,7 @@ func TestLocalRepository_GetRepoInfo(t *testing.T) {
 }
 
 func TestIsInitialized(t *testing.T) {
-	t.Run("not initialized", func(t *testing.T) {
+	t.Run("not initialized - no git repo", func(t *testing.T) {
 		dir, err := os.MkdirTemp("", "no-gren-*")
 		if err != nil {
 			t.Fatalf("failed to create temp dir: %v", err)
@@ -237,6 +237,26 @@ func TestIsInitialized(t *testing.T) {
 		originalDir, _ := os.Getwd()
 		defer os.Chdir(originalDir)
 		os.Chdir(dir)
+
+		// Not a git repo, so isInitialized should return false
+		if isInitialized() {
+			t.Error("isInitialized() = true, want false")
+		}
+	})
+
+	t.Run("not initialized - git repo without .gren", func(t *testing.T) {
+		dir, err := os.MkdirTemp("", "git-no-gren-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(dir)
+
+		originalDir, _ := os.Getwd()
+		defer os.Chdir(originalDir)
+		os.Chdir(dir)
+
+		// Initialize git repo
+		exec.Command("git", "init").Run()
 
 		if isInitialized() {
 			t.Error("isInitialized() = true, want false")
@@ -254,11 +274,38 @@ func TestIsInitialized(t *testing.T) {
 		defer os.Chdir(originalDir)
 		os.Chdir(dir)
 
-		// Create .gren directory
+		// Initialize git repo and create .gren directory
+		exec.Command("git", "init").Run()
 		os.Mkdir(".gren", 0755)
 
 		if !isInitialized() {
 			t.Error("isInitialized() = false, want true")
+		}
+	})
+
+	t.Run("initialized - check from subdirectory", func(t *testing.T) {
+		dir, err := os.MkdirTemp("", "gren-subdir-*")
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
+		defer os.RemoveAll(dir)
+
+		originalDir, _ := os.Getwd()
+		defer os.Chdir(originalDir)
+
+		// Initialize git repo and create .gren directory at repo root
+		os.Chdir(dir)
+		exec.Command("git", "init").Run()
+		os.Mkdir(".gren", 0755)
+
+		// Create and change to subdirectory
+		subdir := filepath.Join(dir, "subdir")
+		os.Mkdir(subdir, 0755)
+		os.Chdir(subdir)
+
+		// Should still detect initialization from subdirectory
+		if !isInitialized() {
+			t.Error("isInitialized() = false from subdirectory, want true")
 		}
 	})
 }

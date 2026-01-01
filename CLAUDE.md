@@ -102,13 +102,24 @@ When creating new worktrees, a README.md file is automatically generated in the 
 
 ## Configuration System
 
-Projects can be initialized with `gren init` which creates:
-- `.gren/config.json` - Project configuration with worktree directory and post-create hooks
-- `.gren/post-create.sh` - Executable hook script with smart dependency installation
+Gren uses a two-level TOML configuration system:
 
-The config includes:
-- Auto-detected package manager and post-create commands
-- Configurable worktree directory location
+### User Configuration (Global)
+Located at:
+- **macOS**: `~/Library/Application Support/gren/config.toml`
+- **Linux**: `~/.config/gren/config.toml` (or `$XDG_CONFIG_HOME/gren/config.toml`)
+- **Windows**: `%APPDATA%\gren\config.toml`
+
+Managed by `internal/config/user_config.go`:
+- `UserConfigManager` - Load/save global config
+- `MergeConfigs()` - Merge user and project configs (project takes precedence)
+
+### Project Configuration
+Created via `gren init` in `.gren/config.toml`:
+- Worktree directory location
+- Post-create hooks and commands
+- LLM commit generation settings
+- Named hooks with branch filtering
 
 ### Post-Create Hook Features
 The generated post-create script includes:
@@ -116,6 +127,113 @@ The generated post-create script includes:
 - Symlinking Claude configuration (if gitignored)
 - Smart package manager detection and dependency installation
 - Direnv integration if `.envrc` exists
+
+## Hook System
+
+### Hook Types
+All hook types defined in `internal/config/hooks.go`:
+- `post-create` - After worktree creation
+- `pre-remove` - Before worktree deletion
+- `pre-merge` - Before merging
+- `post-merge` - After successful merge
+- `post-switch` - After switching worktrees
+- `post-start` - After `-x` command execution
+
+### Named Hooks
+Defined in `internal/config/user_config.go`:
+```go
+type NamedHook struct {
+    Name     string   `toml:"name"`
+    Command  string   `toml:"command"`
+    Branches []string `toml:"branches,omitempty"`  // Glob patterns
+    Disabled bool     `toml:"disabled,omitempty"`
+}
+```
+
+### Hook JSON Context
+Hooks receive context via `GREN_CONTEXT` env var and stdin. Structure in `internal/core/hooks.go`:
+```go
+type HookJSONContext struct {
+    HookType      string `json:"hook_type"`
+    Branch        string `json:"branch"`
+    Worktree      string `json:"worktree"`
+    WorktreeName  string `json:"worktree_name"`
+    Repo          string `json:"repo"`
+    RepoRoot      string `json:"repo_root"`
+    Commit        string `json:"commit"`
+    ShortCommit   string `json:"short_commit"`
+    DefaultBranch string `json:"default_branch"`
+    TargetBranch  string `json:"target_branch,omitempty"`
+    BaseBranch    string `json:"base_branch,omitempty"`
+    ExecuteCmd    string `json:"execute_cmd,omitempty"`
+}
+```
+
+### Hook Approval System
+Security feature in `internal/config/approval.go`:
+- `ApprovalManager` - Manages approved hook commands per project
+- Approvals stored in `~/.local/share/gren/approvals/<project-id>.json`
+- Commands must be approved before execution
+- `GetProjectID()` creates unique project identifier from git remote
+
+## CI Provider Abstraction
+
+### Provider Interface
+Defined in `internal/git/provider.go`:
+```go
+type CIProvider interface {
+    Name() string
+    GetPRInfo(branch string) (*PRInfo, error)
+    GetCIStatus(branch string) (*CIInfo, error)
+}
+```
+
+### Implementations
+- `GitHubProvider` - Uses `gh` CLI for GitHub repos
+- `GitLabProvider` - Uses `glab` CLI for GitLab repos
+- `DetectProvider(remoteURL)` auto-detects from remote URL
+
+### Status Normalization
+GitLab states are normalized to GitHub-style states for consistent UI display.
+
+## LLM Commit Generation
+
+### Core Components
+Located in `internal/core/llm.go`:
+- `LLMGenerator` - Generates commit messages via external LLM tools
+- `FilterLockFiles()` - Removes lock file diffs (package-lock.json, etc.)
+- `TruncateDiff()` - Truncates large diffs to fit context limits
+- `CleanCommitMessage()` - Strips markdown/quotes from LLM output
+- `ExpandPromptTemplate()` - Processes `{{ diff }}`, `{{ branch }}`, `{{ repo }}` placeholders
+- `ValidateConventionalCommit()` - Validates conventional commit format
+
+### Configuration
+```toml
+[commit-generation]
+command = "llm"
+args = ["-m", "claude-sonnet"]
+template = "Write commit message for:\n\n{{ diff }}"
+```
+
+## Shell Completions
+
+### Completion Scripts
+Located in `internal/cli/completion.go`:
+- `bashCompletionScript` - Bash completion with COMPREPLY/compgen
+- `zshCompletionScript` - Zsh completion with #compdef and _arguments
+- `fishCompletionScript` - Fish completion with complete -c
+
+Features:
+- All commands and subcommands
+- Command-specific flags
+- Dynamic worktree name completion
+- Dynamic branch name completion
+
+### Colored CLI Help
+Located in `internal/cli/help.go`:
+- ANSI color output for command help
+- Terminal detection for color support
+- Helper functions: `colorize()`, `bold()`, `dim()`, `cyan()`, etc.
 
 ## TUI Features
 
@@ -253,11 +371,24 @@ tail -100 ~/Library/Logs/gren/gren.log  # macOS
 
 The actual project structure:
 - `main.go` - Entry point with CLI/TUI routing
-- `internal/core/` - Shared business logic (WorktreeManager)
+- `internal/core/` - Shared business logic:
+  - `worktree.go` - WorktreeManager for CRUD operations
+  - `hooks.go` - Hook execution with JSON context
+  - `llm.go` - LLM-based commit message generation
 - `internal/ui/` - TUI implementation (Bubble Tea components)
-- `internal/cli/` - CLI command handlers
-- `internal/git/` - Git operations and repository interface
-- `internal/config/` - Configuration management and initialization
+- `internal/cli/` - CLI command handlers:
+  - `cli.go` - Main command routing
+  - `help.go` - Colored help output
+  - `completion.go` - Shell completion scripts
+- `internal/git/` - Git operations:
+  - `repository.go` - Repository interface
+  - `branches.go` - Branch operations
+  - `provider.go` - CI provider abstraction (GitHub/GitLab)
+- `internal/config/` - Configuration management:
+  - `config.go` - Project config
+  - `user_config.go` - Global user config
+  - `hooks.go` - Hook type definitions
+  - `approval.go` - Hook approval security system
 - `.github/workflows/` - CI/CD automation
 
 ## Common Tasks

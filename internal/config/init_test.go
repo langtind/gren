@@ -197,9 +197,9 @@ func TestInitialize(t *testing.T) {
 			t.Errorf(".gren directory not created: %v", err)
 		}
 
-		// Verify config file exists
-		if _, err := os.Stat(filepath.Join(".gren", "config.json")); err != nil {
-			t.Errorf("config.json not created: %v", err)
+		// Verify config file exists (now saved as TOML)
+		if _, err := os.Stat(filepath.Join(".gren", "config.toml")); err != nil {
+			t.Errorf("config.toml not created: %v", err)
 		}
 
 		// Verify hook file exists
@@ -375,8 +375,8 @@ func TestCreateGrenReadme(t *testing.T) {
 		if !contains(string(content), "brew install langtind/tap/gren") {
 			t.Error("README should contain homebrew install command")
 		}
-		if !contains(string(content), "config.json") {
-			t.Error("README should describe config.json")
+		if !contains(string(content), "config.toml") {
+			t.Error("README should describe config.toml")
 		}
 		if !contains(string(content), "post-create.sh") {
 			t.Error("README should describe post-create.sh")

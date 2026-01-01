@@ -48,6 +48,7 @@ type worktreeDeletedMsg struct {
 }
 
 type openInInitializedMsg struct {
+	worktreeName string
 	worktreePath string
 	actions      []PostCreateAction
 }
@@ -139,3 +140,38 @@ type compareDiffLoadedMsg struct {
 	content string
 	err     error
 }
+
+type mergeProgressMsg struct {
+	message string
+}
+
+type mergeCompleteMsg struct {
+	result string
+	err    error
+}
+
+type forEachItemCompleteMsg struct {
+	worktree string
+	output   string
+	success  bool
+}
+
+type forEachCompleteMsg struct{}
+
+type stepCommitCompleteMsg struct {
+	result string
+	err    error
+}
+
+type llmMessageGeneratedMsg struct {
+	message string
+	err     error
+}
+
+type navigateCompleteMsg struct {
+	worktreeName string
+	worktreePath string
+	err          error
+}
+
+type clearStatusMsg struct{}
