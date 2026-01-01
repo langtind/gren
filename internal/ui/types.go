@@ -279,7 +279,8 @@ type ForEachResult struct {
 type StepCommitStep int
 
 const (
-	StepCommitStepOptions StepCommitStep = iota
+	StepCommitStepOptions    StepCommitStep = iota
+	StepCommitStepGenerating                // LLM is generating message
 	StepCommitStepMessage
 	StepCommitStepInProgress
 	StepCommitStepComplete

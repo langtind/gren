@@ -161,3 +161,8 @@ type stepCommitCompleteMsg struct {
 	result string
 	err    error
 }
+
+type llmMessageGeneratedMsg struct {
+	message string
+	err     error
+}

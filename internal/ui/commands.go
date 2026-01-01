@@ -1456,6 +1456,60 @@ func (m Model) executeForEach() tea.Cmd {
 	}
 }
 
+func (m Model) generateLLMMessage() tea.Cmd {
+	if m.stepCommitState == nil {
+		return func() tea.Msg {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("step commit state is nil")}
+		}
+	}
+
+	configManager := m.configManager
+
+	return func() tea.Msg {
+		logging.Info("generateLLMMessage: generating commit message with LLM")
+
+		// Load config to get LLM settings
+		cfg, err := configManager.Load()
+		if err != nil {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("failed to load config: %w", err)}
+		}
+
+		// Check if LLM is configured
+		if cfg.CommitGenerator.Command == "" {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("LLM not configured. Set [commit-generation] command in config")}
+		}
+
+		// Get the staged diff
+		diff, err := exec.Command("git", "diff", "--cached").Output()
+		if err != nil {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("failed to get staged diff: %w", err)}
+		}
+
+		if len(diff) == 0 {
+			// Try unstaged diff if nothing staged
+			diff, err = exec.Command("git", "diff").Output()
+			if err != nil {
+				return llmMessageGeneratedMsg{err: fmt.Errorf("failed to get diff: %w", err)}
+			}
+		}
+
+		if len(diff) == 0 {
+			return llmMessageGeneratedMsg{err: fmt.Errorf("no changes to commit")}
+		}
+
+		// Create LLM generator
+		generator := core.NewLLMGenerator(cfg)
+
+		// Generate the commit message
+		message, err := generator.GenerateCommitMessage(string(diff), "")
+		if err != nil {
+			return llmMessageGeneratedMsg{err: err}
+		}
+
+		return llmMessageGeneratedMsg{message: message}
+	}
+}
+
 func (m Model) executeStepCommit() tea.Cmd {
 	if m.stepCommitState == nil {
 		return func() tea.Msg {
@@ -1465,17 +1519,16 @@ func (m Model) executeStepCommit() tea.Cmd {
 
 	gitRepo := m.gitRepo
 	configManager := m.configManager
-	useLLM := m.stepCommitState.useLLM
 	message := m.stepCommitState.message
 
 	return func() tea.Msg {
-		logging.Info("executeStepCommit: committing changes (useLLM=%v)", useLLM)
+		logging.Info("executeStepCommit: committing changes")
 
 		worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
 
 		opts := core.StepCommitOptions{
 			Message: message,
-			UseLLM:  useLLM,
+			UseLLM:  false, // Message is already set, no need for LLM
 		}
 
 		err := worktreeManager.StepCommit(opts)

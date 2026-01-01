@@ -366,6 +366,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case llmMessageGeneratedMsg:
+		if m.stepCommitState != nil {
+			if msg.err != nil {
+				// Show error and go back to options
+				m.stepCommitState.currentStep = StepCommitStepComplete
+				m.stepCommitState.err = msg.err
+			} else {
+				// Show generated message for review/edit
+				m.stepCommitState.message = msg.message
+				m.stepCommitState.currentStep = StepCommitStepMessage
+			}
+		}
+		return m, nil
+
 	case stepCommitCompleteMsg:
 		if m.stepCommitState != nil {
 			m.stepCommitState.currentStep = StepCommitStepComplete

@@ -1087,14 +1087,24 @@ func (m Model) handleStepCommitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, m.keys.Enter):
 			if m.stepCommitState.useLLM {
-				// Go directly to execution with LLM
-				m.stepCommitState.currentStep = StepCommitStepInProgress
-				return m, m.executeStepCommit()
+				// Generate LLM message first, then show it for review
+				m.stepCommitState.currentStep = StepCommitStepGenerating
+				return m, m.generateLLMMessage()
 			}
-			// Need to enter commit message
+			// Need to enter commit message manually
 			m.stepCommitState.currentStep = StepCommitStepMessage
 			return m, nil
 		}
+	case StepCommitStepGenerating:
+		// While generating, only allow quit or cancel
+		switch {
+		case key.Matches(msg, m.keys.Quit):
+			return m, tea.Quit
+		case key.Matches(msg, m.keys.Back):
+			m.stepCommitState.currentStep = StepCommitStepOptions
+			return m, nil
+		}
+		return m, nil
 	case StepCommitStepMessage:
 		switch {
 		case key.Matches(msg, m.keys.Quit):

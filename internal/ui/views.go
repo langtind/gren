@@ -183,14 +183,28 @@ func (m Model) renderStepCommitView() string {
 		b.WriteString("\n")
 		b.WriteString(mutedStyle.Render("Press enter to continue • esc to cancel"))
 
-	case StepCommitStepMessage:
-		b.WriteString(titleStyle.Render("Commit Message"))
+	case StepCommitStepGenerating:
+		b.WriteString(titleStyle.Render("Generating Commit Message..."))
 		b.WriteString("\n\n")
-		b.WriteString(labelStyle.Render("Message: "))
+		b.WriteString("Please wait while the AI generates a commit message.")
+		b.WriteString("\n\n")
+		b.WriteString(mutedStyle.Render("esc to cancel"))
+
+	case StepCommitStepMessage:
+		if m.stepCommitState.useLLM {
+			b.WriteString(titleStyle.Render("Review Commit Message"))
+			b.WriteString("\n\n")
+			b.WriteString(labelStyle.Render("AI-generated message (edit if needed):"))
+		} else {
+			b.WriteString(titleStyle.Render("Commit Message"))
+			b.WriteString("\n\n")
+			b.WriteString(labelStyle.Render("Message: "))
+		}
+		b.WriteString("\n")
 		b.WriteString(inputStyle.Render(m.stepCommitState.message))
 		b.WriteString("█")
 		b.WriteString("\n\n")
-		b.WriteString(mutedStyle.Render("Type message and press enter • esc to go back"))
+		b.WriteString(mutedStyle.Render("Edit message and press enter to commit • esc to go back"))
 
 	case StepCommitStepInProgress:
 		b.WriteString(titleStyle.Render("Committing..."))
