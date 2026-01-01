@@ -116,6 +116,10 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleForEach(args[2:])
 	case "step":
 		return c.handleStep(args[2:])
+	case "completion":
+		return c.handleCompletion(args[2:])
+	case "__complete":
+		return c.handleCompletionQuery(args[2:])
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
@@ -197,6 +201,13 @@ func (c *CLI) handleCreate(args []string) error {
 			logging.Error("CLI create: failed to write execute directive: %v", err)
 			return fmt.Errorf("worktree created but failed to set up execute command: %w", err)
 		}
+
+		// Run post-start hook
+		branchName := *branch
+		if branchName == "" {
+			branchName = *name
+		}
+		c.worktreeManager.RunPostStartHook(worktreePath, branchName, *execute)
 		// Don't print anything - shell wrapper will execute the command
 	}
 
@@ -619,6 +630,9 @@ func (c *CLI) handleNavigate(args []string) error {
 		logging.Error("CLI navigate: failed to write navigation directive: %v", err)
 		return fmt.Errorf("failed to write navigation command: %w", err)
 	}
+
+	// Run post-switch hook
+	c.worktreeManager.RunPostSwitchHook(targetWorktree.Path, targetWorktree.Branch)
 
 	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
 	if !directive.IsShellIntegrationActive() {

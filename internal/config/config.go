@@ -33,6 +33,8 @@ const (
 	HookPreRemove  HookType = "pre-remove"
 	HookPreMerge   HookType = "pre-merge"
 	HookPostMerge  HookType = "post-merge"
+	HookPostSwitch HookType = "post-switch"
+	HookPostStart  HookType = "post-start"
 )
 
 // Hooks represents the lifecycle hooks configuration.
@@ -46,6 +48,20 @@ type Hooks struct {
 	PreMerge string `json:"pre_merge,omitempty" toml:"pre-merge,omitempty"`
 	// PostMerge runs after successful merge (blocking, best-effort)
 	PostMerge string `json:"post_merge,omitempty" toml:"post-merge,omitempty"`
+	// PostSwitch runs after switching to a worktree (blocking)
+	PostSwitch string `json:"post_switch,omitempty" toml:"post-switch,omitempty"`
+	// PostStart runs after starting a command with -x flag (blocking)
+	PostStart string `json:"post_start,omitempty" toml:"post-start,omitempty"`
+}
+
+// ProjectNamedHooks holds named hooks for project configuration.
+type ProjectNamedHooks struct {
+	PostCreate []NamedHook `toml:"post-create,omitempty"`
+	PreRemove  []NamedHook `toml:"pre-remove,omitempty"`
+	PreMerge   []NamedHook `toml:"pre-merge,omitempty"`
+	PostMerge  []NamedHook `toml:"post-merge,omitempty"`
+	PostSwitch []NamedHook `toml:"post-switch,omitempty"`
+	PostStart  []NamedHook `toml:"post-start,omitempty"`
 }
 
 // CommitGenerator configures external LLM command for commit message generation.
@@ -65,8 +81,32 @@ func (h *Hooks) Get(hookType HookType) string {
 		return h.PreMerge
 	case HookPostMerge:
 		return h.PostMerge
+	case HookPostSwitch:
+		return h.PostSwitch
+	case HookPostStart:
+		return h.PostStart
 	default:
 		return ""
+	}
+}
+
+// GetNamedHooks returns the named hooks for a given hook type.
+func (pnh *ProjectNamedHooks) GetNamedHooks(hookType HookType) []NamedHook {
+	switch hookType {
+	case HookPostCreate:
+		return pnh.PostCreate
+	case HookPreRemove:
+		return pnh.PreRemove
+	case HookPreMerge:
+		return pnh.PreMerge
+	case HookPostMerge:
+		return pnh.PostMerge
+	case HookPostSwitch:
+		return pnh.PostSwitch
+	case HookPostStart:
+		return pnh.PostStart
+	default:
+		return nil
 	}
 }
 
@@ -79,10 +119,30 @@ type Config struct {
 	PackageManager string `json:"package_manager" toml:"package_manager"`
 	// PostCreateHook is deprecated - use Hooks.PostCreate instead
 	// Kept for backwards compatibility with old configs
-	PostCreateHook  string          `json:"post_create_hook,omitempty" toml:"post_create_hook,omitempty"`
-	Version         string          `json:"version" toml:"version"`
-	Hooks           Hooks           `json:"hooks,omitempty" toml:"hooks,omitempty"`
-	CommitGenerator CommitGenerator `json:"commit_generator,omitempty" toml:"commit-generation,omitempty"`
+	PostCreateHook  string            `json:"post_create_hook,omitempty" toml:"post_create_hook,omitempty"`
+	Version         string            `json:"version" toml:"version"`
+	Hooks           Hooks             `json:"hooks,omitempty" toml:"hooks,omitempty"`
+	NamedHooks      ProjectNamedHooks `json:"-" toml:"named-hooks,omitempty"`
+	CommitGenerator CommitGenerator   `json:"commit_generator,omitempty" toml:"commit-generation,omitempty"`
+}
+
+// GetAllHooks returns all hooks (simple + named) for a given hook type.
+func (c *Config) GetAllHooks(hookType HookType) []NamedHook {
+	var hooks []NamedHook
+
+	// Add simple hook as a named hook if set
+	simpleHook := c.Hooks.Get(hookType)
+	if simpleHook != "" {
+		hooks = append(hooks, NamedHook{
+			Name:    string(hookType) + "-default",
+			Command: simpleHook,
+		})
+	}
+
+	// Add named hooks
+	hooks = append(hooks, c.NamedHooks.GetNamedHooks(hookType)...)
+
+	return hooks
 }
 
 // Manager handles configuration operations.

@@ -1081,7 +1081,8 @@ func (m Model) handleStepCommitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.currentView = DashboardView
 			m.stepCommitState = nil
 			return m, nil
-		case msg.String() == "l" || msg.String() == "L":
+		case msg.String() == "tab":
+			// Toggle LLM option with tab (consistent with for-each view)
 			m.stepCommitState.useLLM = !m.stepCommitState.useLLM
 			return m, nil
 		case key.Matches(msg, m.keys.Enter):

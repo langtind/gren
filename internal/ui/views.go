@@ -163,7 +163,6 @@ func (m Model) renderStepCommitView() string {
 	var b strings.Builder
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary)
-	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary)
 	labelStyle := lipgloss.NewStyle().Foreground(ColorText)
 	mutedStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 	inputStyle := lipgloss.NewStyle().Foreground(ColorSecondary)
@@ -179,7 +178,7 @@ func (m Model) renderStepCommitView() string {
 		if m.stepCommitState.useLLM {
 			llmCheck = "[✓]"
 		}
-		b.WriteString(fmt.Sprintf("  %s %s Generate message with AI\n", keyStyle.Render("l"), llmCheck))
+		b.WriteString(fmt.Sprintf("  %s Generate message with AI (tab to toggle)\n", llmCheck))
 
 		b.WriteString("\n")
 		b.WriteString(mutedStyle.Render("Press enter to continue • esc to cancel"))
