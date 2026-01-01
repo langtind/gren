@@ -128,23 +128,49 @@ func (m Model) initializeConfigState() tea.Cmd {
 	return func() tea.Msg {
 		var files []ConfigFile
 
-		// Check for config.json
-		if _, err := os.Stat(".gren/config.json"); err == nil {
+		// Check for user config
+		ucm := config.NewUserConfigManager()
+		userConfigPath := ucm.ConfigPath()
+		if ucm.Exists() {
 			files = append(files, ConfigFile{
-				Name:        "config.json",
+				Name:        "User Config",
+				Path:        userConfigPath,
+				Icon:        "👤",
+				Description: "Global settings: LLM, defaults, hooks",
+			})
+		} else {
+			files = append(files, ConfigFile{
+				Name:        "User Config (create)",
+				Path:        userConfigPath,
+				Icon:        "➕",
+				Description: "Run 'gren config create' to create",
+			})
+		}
+
+		// Check for project config (TOML first, then JSON)
+		if _, err := os.Stat(".gren/config.toml"); err == nil {
+			files = append(files, ConfigFile{
+				Name:        "Project Config",
+				Path:        ".gren/config.toml",
+				Icon:        "📂",
+				Description: "Project-specific worktree settings",
+			})
+		} else if _, err := os.Stat(".gren/config.json"); err == nil {
+			files = append(files, ConfigFile{
+				Name:        "Project Config",
 				Path:        ".gren/config.json",
-				Icon:        "📄",
-				Description: "Main configuration file for gren settings",
+				Icon:        "📂",
+				Description: "Project-specific worktree settings",
 			})
 		}
 
 		// Check for post-create.sh
 		if _, err := os.Stat(".gren/post-create.sh"); err == nil {
 			files = append(files, ConfigFile{
-				Name:        "post-create.sh",
+				Name:        "Post-create Hook",
 				Path:        ".gren/post-create.sh",
-				Icon:        "📜",
-				Description: "Script that runs after creating new worktrees",
+				Icon:        "🪝",
+				Description: "Script that runs after creating worktrees",
 			})
 		}
 
