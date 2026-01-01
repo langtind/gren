@@ -131,6 +131,13 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleCompletionQuery(args[2:])
 	case "config":
 		return c.handleConfig(args[2:])
+	case "help":
+		if len(args) > 2 {
+			ShowCommandHelp(args[2])
+		} else {
+			c.ShowColoredHelp()
+		}
+		return nil
 	default:
 		logging.Error("CLI: unknown command: %s", command)
 		return fmt.Errorf("unknown command: %s", command)
