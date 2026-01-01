@@ -376,8 +376,8 @@ func showHooksHelp() {
 	fmt.Println()
 	fmt.Println("  Gren requires explicit approval for hook commands:")
 	fmt.Println("  • New hooks prompt for approval before running")
-	fmt.Println("  • Approvals stored in " + cyan("~/.local/share/gren/approvals/"))
-	fmt.Println("  • View approved: " + cyan("gren config --show-approvals"))
-	fmt.Println("  • Revoke all: " + cyan("gren config --revoke-approvals"))
+	fmt.Println("  • Approvals stored per-project")
+	fmt.Println("  • View approved: " + cyan("gren config approvals"))
+	fmt.Println("  • Revoke all: " + cyan("gren config approvals --revoke"))
 	fmt.Println()
 }

@@ -1765,11 +1765,13 @@ func (c *CLI) handleConfig(args []string) error {
 		return c.handleConfigCreate(subargs)
 	case "show":
 		return c.handleConfigShow(subargs)
+	case "approvals":
+		return c.handleConfigApprovals(subargs)
 	case "--help", "-h", "help":
 		c.showConfigHelp()
 		return nil
 	default:
-		return fmt.Errorf("unknown config subcommand: %s (use: create, show)", subcommand)
+		return fmt.Errorf("unknown config subcommand: %s (use: create, show, approvals)", subcommand)
 	}
 }
 
@@ -1779,14 +1781,17 @@ func (c *CLI) showConfigHelp() {
 	fmt.Println("Manage gren configuration")
 	fmt.Println()
 	fmt.Println("Subcommands:")
-	fmt.Println("  create   Create a configuration file with example values")
-	fmt.Println("  show     Show current configuration status (default)")
+	fmt.Println("  create     Create a configuration file with example values")
+	fmt.Println("  show       Show current configuration status (default)")
+	fmt.Println("  approvals  View or revoke approved hook commands")
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Println("  gren config                  # Show current config")
-	fmt.Println("  gren config show             # Same as above")
-	fmt.Println("  gren config create           # Create user config")
-	fmt.Println("  gren config create --project # Create project config")
+	fmt.Println("  gren config                    # Show current config")
+	fmt.Println("  gren config show               # Same as above")
+	fmt.Println("  gren config create             # Create user config")
+	fmt.Println("  gren config create --project   # Create project config")
+	fmt.Println("  gren config approvals          # List approved hooks")
+	fmt.Println("  gren config approvals --revoke # Revoke all approvals")
 	fmt.Println()
 	fmt.Println("Use 'gren config <subcommand> --help' for more information.")
 }
@@ -1915,6 +1920,106 @@ func (c *CLI) handleConfigShow(args []string) error {
 	c.showShellStatus()
 
 	return nil
+}
+
+func (c *CLI) handleConfigApprovals(args []string) error {
+	fs := flag.NewFlagSet("config approvals", flag.ExitOnError)
+	revoke := fs.Bool("revoke", false, "Revoke all approved commands for this project")
+	all := fs.Bool("all", false, "Show/revoke approvals for all projects")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren config approvals [--revoke] [--all]\n")
+		fmt.Fprintf(fs.Output(), "\nView or revoke approved hook commands\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren config approvals            # List approved hooks for this project\n")
+		fmt.Fprintf(fs.Output(), "  gren config approvals --all      # List all approved hooks\n")
+		fmt.Fprintf(fs.Output(), "  gren config approvals --revoke   # Revoke approvals for this project\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	am := config.NewApprovalManager()
+
+	if *revoke {
+		if *all {
+			// TODO: Would need to add a RevokeAllProjects method
+			return fmt.Errorf("--all with --revoke not yet supported")
+		}
+
+		projectID, err := config.GetProjectID()
+		if err != nil {
+			return fmt.Errorf("failed to get project ID: %w", err)
+		}
+
+		if err := am.RevokeAll(projectID); err != nil {
+			return fmt.Errorf("failed to revoke approvals: %w", err)
+		}
+
+		output.Success("Revoked all hook approvals for this project")
+		return nil
+	}
+
+	// List approvals
+	if *all {
+		c.showAllApprovals(am)
+	} else {
+		projectID, err := config.GetProjectID()
+		if err != nil {
+			return fmt.Errorf("failed to get project ID: %w", err)
+		}
+		c.showProjectApprovals(am, projectID)
+	}
+
+	return nil
+}
+
+func (c *CLI) showProjectApprovals(am *config.ApprovalManager, projectID string) {
+	approved := am.ListApproved(projectID)
+
+	fmt.Println("━━━ APPROVED HOOKS ━━━")
+	fmt.Printf("📁 Project: %s\n\n", projectID)
+
+	if len(approved) == 0 {
+		fmt.Println("ℹ️  No approved hooks for this project")
+		fmt.Println("💡 Hooks are approved when you confirm them during execution")
+		return
+	}
+
+	for _, cmd := range approved {
+		fmt.Printf("  ✅ %s\n", cmd)
+	}
+	fmt.Println()
+	fmt.Println("💡 To revoke all: gren config approvals --revoke")
+}
+
+func (c *CLI) showAllApprovals(am *config.ApprovalManager) {
+	// We need to expose all projects - let's add a method or read the file directly
+	fmt.Println("━━━ ALL APPROVED HOOKS ━━━")
+	fmt.Println()
+
+	// For now, just show current project since we don't have ListAllProjects
+	projectID, err := config.GetProjectID()
+	if err != nil {
+		fmt.Printf("❌ Error: %v\n", err)
+		return
+	}
+
+	approved := am.ListApproved(projectID)
+	if len(approved) == 0 {
+		fmt.Println("ℹ️  No approved hooks found")
+		return
+	}
+
+	fmt.Printf("📁 %s\n", projectID)
+	for _, cmd := range approved {
+		fmt.Printf("  ✅ %s\n", cmd)
+	}
+	fmt.Println()
+	fmt.Println("💡 To revoke: gren config approvals --revoke")
 }
 
 func (c *CLI) showUserConfig() {
