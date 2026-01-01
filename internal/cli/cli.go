@@ -1027,6 +1027,27 @@ func validateFilePath(path string) error {
 }
 
 func (c *CLI) handleMarker(args []string) error {
+	showMarkerHelp := func() {
+		fmt.Println("Usage: gren marker <subcommand>")
+		fmt.Println("\nManage Claude activity markers for branches")
+		fmt.Println("\nSubcommands:")
+		fmt.Println("  set      Set a marker for a branch")
+		fmt.Println("  get      Get the marker for a branch")
+		fmt.Println("  clear    Clear marker(s)")
+		fmt.Println("  list     List all markers (default)")
+		fmt.Println("\nMarker types:")
+		fmt.Println("  working  🤖  Claude is actively working")
+		fmt.Println("  waiting  💬  Claude is waiting for input")
+		fmt.Println("  idle     💤  Claude session is idle")
+		fmt.Println("\nExamples:")
+		fmt.Println("  gren marker                          # List all markers")
+		fmt.Println("  gren marker set working              # Set working on current branch")
+		fmt.Println("  gren marker set waiting -branch feat # Set on specific branch")
+		fmt.Println("  gren marker clear                    # Clear current branch marker")
+		fmt.Println("  gren marker clear --all              # Clear all markers")
+		fmt.Println("\nUse 'gren marker <subcommand> --help' for more information.")
+	}
+
 	if len(args) == 0 {
 		return c.handleMarkerList()
 	}
@@ -1043,6 +1064,9 @@ func (c *CLI) handleMarker(args []string) error {
 		return c.handleMarkerGet(subargs)
 	case "list":
 		return c.handleMarkerList()
+	case "--help", "-h", "help":
+		showMarkerHelp()
+		return nil
 	default:
 		return fmt.Errorf("unknown marker subcommand: %s (use: set, clear, get, list)", subcommand)
 	}
@@ -1385,6 +1409,14 @@ func (c *CLI) handleForEach(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren for-each --skip-main -- git pull\n")
 	}
 
+	// Check for help flag before looking for -- separator
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" || arg == "help" {
+			fs.Usage()
+			return nil
+		}
+	}
+
 	dashIndex := -1
 	for i, arg := range args {
 		if arg == "--" {
@@ -1451,8 +1483,9 @@ func (c *CLI) handleForEach(args []string) error {
 }
 
 func (c *CLI) handleStep(args []string) error {
-	if len(args) < 1 {
+	showStepHelp := func() {
 		fmt.Println("Usage: gren step <subcommand>")
+		fmt.Println("\nRun individual workflow operations")
 		fmt.Println("\nSubcommands:")
 		fmt.Println("  commit     Stage and commit all changes")
 		fmt.Println("  squash     Squash commits since target branch")
@@ -1463,6 +1496,11 @@ func (c *CLI) handleStep(args []string) error {
 		fmt.Println("  gren step squash")
 		fmt.Println("  gren step squash main")
 		fmt.Println("  gren step squash --llm")
+		fmt.Println("\nUse 'gren step <subcommand> --help' for more information.")
+	}
+
+	if len(args) < 1 {
+		showStepHelp()
 		return fmt.Errorf("no subcommand provided")
 	}
 
@@ -1472,8 +1510,11 @@ func (c *CLI) handleStep(args []string) error {
 		return c.handleStepCommit(args[1:])
 	case "squash":
 		return c.handleStepSquash(args[1:])
+	case "--help", "-h", "help":
+		showStepHelp()
+		return nil
 	default:
-		return fmt.Errorf("unknown step subcommand: %s", subcommand)
+		return fmt.Errorf("unknown step subcommand: %s (use: commit, squash)", subcommand)
 	}
 }
 
