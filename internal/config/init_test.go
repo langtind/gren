@@ -375,8 +375,8 @@ func TestCreateGrenReadme(t *testing.T) {
 		if !contains(string(content), "brew install langtind/tap/gren") {
 			t.Error("README should contain homebrew install command")
 		}
-		if !contains(string(content), "config.json") {
-			t.Error("README should describe config.json")
+		if !contains(string(content), "config.toml") {
+			t.Error("README should describe config.toml")
 		}
 		if !contains(string(content), "post-create.sh") {
 			t.Error("README should describe post-create.sh")

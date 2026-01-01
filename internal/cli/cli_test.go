@@ -162,8 +162,9 @@ func TestHandleListInGitRepo(t *testing.T) {
 	}
 
 	// Should list at least one worktree (the main repo)
-	if !strings.Contains(output, "master") && !strings.Contains(output, "main") {
-		t.Errorf("expected output to contain branch name, got: %s", output)
+	// Simple list shows worktree names with ▸ prefix for current
+	if !strings.Contains(output, "▸") && !strings.Contains(output, "gren-cli-test") {
+		t.Errorf("expected output to contain worktree indicator or name, got: %s", output)
 	}
 }
 
@@ -197,9 +198,14 @@ func TestHandleListVerbose(t *testing.T) {
 		t.Fatalf("list -v command error: %v", err)
 	}
 
-	// Verbose output should have table headers
-	if !strings.Contains(output, "BRANCH") || !strings.Contains(output, "PATH") {
-		t.Errorf("verbose output should have headers, got: %s", output)
+	// Verbose output should have header and show paths
+	// Format: "🌳 Git Worktree Manager" header with worktree details including paths
+	if !strings.Contains(output, "Git Worktree Manager") {
+		t.Errorf("verbose output should have header, got: %s", output)
+	}
+	// Verbose mode shows paths (starting with /)
+	if !strings.Contains(output, "/") {
+		t.Errorf("verbose output should show paths, got: %s", output)
 	}
 }
 

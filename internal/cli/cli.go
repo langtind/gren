@@ -26,6 +26,7 @@ type spinner struct {
 	message string
 	done    chan struct{}
 	wg      sync.WaitGroup
+	active  bool
 }
 
 func newSpinner(message string) *spinner {
@@ -37,6 +38,11 @@ func newSpinner(message string) *spinner {
 }
 
 func (s *spinner) Start() {
+	// Don't show spinner if stdout is not a terminal (e.g., in tests or pipes)
+	if !isTerminal() {
+		return
+	}
+	s.active = true
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -56,6 +62,9 @@ func (s *spinner) Start() {
 }
 
 func (s *spinner) Stop() {
+	if !s.active {
+		return
+	}
 	close(s.done)
 	s.wg.Wait()
 }
