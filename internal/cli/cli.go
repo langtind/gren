@@ -664,7 +664,7 @@ func (c *CLI) handleNavigate(args []string) error {
 
 	// Print styled output
 	output.Successf("Switching to %s", output.Bold(targetWorktree.Name))
-	output.KeyValue("Path", output.Path(targetWorktree.Path))
+	fmt.Println("📂 " + output.Path(targetWorktree.Path))
 
 	if !directive.IsShellIntegrationActive() {
 		output.Blank()

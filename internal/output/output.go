@@ -57,7 +57,7 @@ var (
 
 // Success prints a success message with green checkmark
 func Success(message string) {
-	fmt.Println(successStyle.Render(SymbolSuccess) + " " + greenStyle.Render(message))
+	fmt.Println(successStyle.Render("✅") + " " + greenStyle.Render(message))
 }
 
 // Successf prints a formatted success message
@@ -67,7 +67,7 @@ func Successf(format string, args ...interface{}) {
 
 // Error prints an error message with red X
 func Error(message string) {
-	fmt.Fprintln(os.Stderr, errorStyle.Render(SymbolError)+" "+redStyle.Render(message))
+	fmt.Fprintln(os.Stderr, errorStyle.Render("❌")+" "+redStyle.Render(message))
 }
 
 // Errorf prints a formatted error message
@@ -77,7 +77,7 @@ func Errorf(format string, args ...interface{}) {
 
 // Warning prints a warning message with yellow triangle
 func Warning(message string) {
-	fmt.Println(warningStyle.Render(SymbolWarning) + " " + yellowStyle.Render(message))
+	fmt.Println(warningStyle.Render("⚠️") + " " + yellowStyle.Render(message))
 }
 
 // Warningf prints a formatted warning message
@@ -87,7 +87,7 @@ func Warningf(format string, args ...interface{}) {
 
 // Progress prints a progress message with cyan circle
 func Progress(message string) {
-	fmt.Println(progressStyle.Render(SymbolProgress) + " " + cyanStyle.Render(message))
+	fmt.Println(progressStyle.Render("⏳") + " " + cyanStyle.Render(message))
 }
 
 // Progressf prints a formatted progress message
@@ -97,7 +97,7 @@ func Progressf(format string, args ...interface{}) {
 
 // Hint prints a hint message with dim arrow
 func Hint(message string) {
-	fmt.Println(hintStyle.Render(SymbolHint) + " " + dimStyle.Render(message))
+	fmt.Println(hintStyle.Render("💡") + " " + dimStyle.Render(message))
 }
 
 // Hintf prints a formatted hint message
@@ -194,14 +194,14 @@ func WorktreeHeader(repoName string) {
 func WorktreeCreated(name, branch, path string) {
 	Success("Worktree created")
 	Blank()
-	KeyValue("Branch", Branch(branch))
-	KeyValue("Path", Path(path))
+	fmt.Println("🌿 " + Branch(branch))
+	fmt.Println("📂 " + Path(path))
 }
 
 // WorktreeSwitched prints info when switching to a worktree
 func WorktreeSwitched(name, path string) {
 	Successf("Switched to %s", Bold(name))
-	KeyValue("Path", Path(path))
+	fmt.Println("📂 " + Path(path))
 }
 
 // WorktreeRemoved prints info when removing a worktree
