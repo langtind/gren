@@ -664,9 +664,10 @@ func (c *CLI) handleNavigate(args []string) error {
 
 	// Print styled output
 	output.Successf("Switching to %s", output.Bold(targetWorktree.Name))
-	fmt.Println("📂 " + output.Path(targetWorktree.Path))
 
 	if !directive.IsShellIntegrationActive() {
+		// Show path only when shell wrapper won't show "Now in:"
+		fmt.Println("📂 " + output.Path(targetWorktree.Path))
 		output.Blank()
 		output.Hint("Shell integration not detected. Run:")
 		fmt.Printf("   eval \"$(gren shell-init zsh)\"  # or bash/fish\n")
