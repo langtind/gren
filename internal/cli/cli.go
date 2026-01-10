@@ -17,6 +17,7 @@ import (
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
 	"github.com/langtind/gren/internal/output"
+	"golang.org/x/term"
 )
 
 // spinner provides a simple CLI spinner
@@ -155,6 +156,7 @@ func (c *CLI) handleCreate(args []string) error {
 	existing := fs.Bool("existing", false, "Use existing branch instead of creating new one")
 	worktreeDir := fs.String("dir", "", "Directory to create worktrees in")
 	execute := fs.String("x", "", "Command to run after creating worktree (e.g., -x claude)")
+	autoYes := fs.Bool("y", false, "Auto-approve hooks without prompting")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren create -n <name> [options]\n")
@@ -167,6 +169,7 @@ func (c *CLI) handleCreate(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren create -n existing-feature --existing --branch feature-branch\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-auth -x claude              # Create and start Claude\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-ui -x \"npm run dev\"         # Create and start dev server\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-api -y                      # Auto-approve hooks\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -219,7 +222,7 @@ func (c *CLI) handleCreate(args []string) error {
 	if branchName == "" {
 		branchName = *name
 	}
-	c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, false)
+	c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
 
 	// Handle execute flag (-x)
 	if *execute != "" {
@@ -398,6 +401,11 @@ func (c *CLI) handleDelete(args []string) error {
 
 	// Confirmation unless force is specified
 	if !*force {
+		// Check if we're running in an interactive terminal
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return fmt.Errorf("cannot delete worktree without confirmation in non-interactive mode; use -f to force")
+		}
+
 		fmt.Printf("Delete worktree '%s'? (y/N): ", worktreeName)
 		var response string
 		fmt.Scanln(&response)
@@ -434,7 +442,7 @@ func (c *CLI) handleDelete(args []string) error {
 		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.Output)
 	}
 
-	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, false)
+	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, *force)
 	if err != nil {
 		logging.Error("CLI delete failed: %v", err)
 	} else {

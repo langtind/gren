@@ -17,8 +17,8 @@ func setupTempGitRepo(t *testing.T) (string, func()) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
+	// Initialize git repo with 'main' as the default branch
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(dir)
@@ -256,7 +256,7 @@ func TestIsInitialized(t *testing.T) {
 		os.Chdir(dir)
 
 		// Initialize git repo
-		exec.Command("git", "init").Run()
+		exec.Command("git", "init", "-b", "main").Run()
 
 		if isInitialized() {
 			t.Error("isInitialized() = true, want false")
@@ -275,7 +275,7 @@ func TestIsInitialized(t *testing.T) {
 		os.Chdir(dir)
 
 		// Initialize git repo and create .gren directory
-		exec.Command("git", "init").Run()
+		exec.Command("git", "init", "-b", "main").Run()
 		os.Mkdir(".gren", 0755)
 
 		if !isInitialized() {
@@ -295,7 +295,7 @@ func TestIsInitialized(t *testing.T) {
 
 		// Initialize git repo and create .gren directory at repo root
 		os.Chdir(dir)
-		exec.Command("git", "init").Run()
+		exec.Command("git", "init", "-b", "main").Run()
 		os.Mkdir(".gren", 0755)
 
 		// Create and change to subdirectory

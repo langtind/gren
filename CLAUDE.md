@@ -414,6 +414,45 @@ The actual project structure:
 
 ## Testing and Development
 
+### Running Tests
+
+**IMPORTANT:** Always run tests with `-p 1` flag to disable parallelism:
+```bash
+go test -p 1 ./...           # Run all tests
+go test -p 1 -cover ./...    # With coverage
+go test -v -p 1 ./...        # Verbose
+go test -v -p 1 -run "TestName" ./...  # Specific test
+```
+
+**Why `-p 1`?** Many tests use `os.Chdir()` to simulate running in different directories. Since the working directory is process-global, parallel tests interfere with each other causing race conditions and failures.
+
+**Quick command:** Use `/test` to run tests with correct flags.
+
+### Test Setup Requirements
+
+When writing tests that create git repositories:
+```go
+// Always use explicit branch name for consistency
+cmd := exec.Command("git", "init", "-b", "main")
+```
+
+For tests that need hooks to run in non-interactive mode:
+- CLI commands need `-y` flag to auto-approve hooks
+- Or pre-approve hooks via the approval system
+
+### Test Coverage by Package
+
+| Package | Target | Notes |
+|---------|--------|-------|
+| directive | 94%+ | Well covered |
+| output | 89%+ | Well covered |
+| config | 80%+ | Good coverage |
+| logging | 53%+ | Adequate |
+| git | 47%+ | Integration heavy |
+| core | 46%+ | Integration heavy |
+| cli | 34%+ | E2E tested |
+| ui | 7%+ | TUI hard to unit test |
+
 ### Current Working Directory Behavior
 Both TUI and CLI respect the current working directory when:
 - Detecting git repositories

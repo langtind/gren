@@ -723,7 +723,7 @@ func TestHandleListEmpty(t *testing.T) {
 	os.Chdir(dir)
 
 	// Create minimal git repo without worktrees to test the branch
-	exec.Command("git", "init").Run()
+	exec.Command("git", "init", "-b", "main").Run()
 	exec.Command("git", "config", "user.email", "test@test.com").Run()
 	exec.Command("git", "config", "user.name", "Test User").Run()
 
@@ -879,7 +879,8 @@ func setupTempGitRepo(t *testing.T) (string, func()) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	cmd := exec.Command("git", "init")
+	// Initialize with 'main' as the default branch
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(dir)
@@ -917,7 +918,8 @@ func setupTempGitRepoWithCleanWorktrees(t *testing.T) (string, func()) {
 	// Calculate worktree directory path
 	worktreeDir := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-worktrees")
 
-	cmd := exec.Command("git", "init")
+	// Initialize with 'main' as the default branch
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(dir)

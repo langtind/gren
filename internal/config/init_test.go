@@ -174,7 +174,7 @@ func TestInitialize(t *testing.T) {
 		os.Chdir(tempDir)
 
 		// Initialize git repo (required for getRepoRoot)
-		exec.Command("git", "init").Run()
+		exec.Command("git", "init", "-b", "main").Run()
 		exec.Command("git", "config", "user.email", "test@test.com").Run()
 		exec.Command("git", "config", "user.name", "Test User").Run()
 
@@ -275,7 +275,7 @@ func TestInitialize(t *testing.T) {
 		os.Chdir(tempDir)
 
 		// Initialize git repo (required for getRepoRoot)
-		exec.Command("git", "init").Run()
+		exec.Command("git", "init", "-b", "main").Run()
 		exec.Command("git", "config", "user.email", "test@test.com").Run()
 		exec.Command("git", "config", "user.name", "Test User").Run()
 
@@ -315,7 +315,7 @@ func TestInitialize(t *testing.T) {
 		os.Chdir(tempDir)
 
 		// Initialize git repo (required for getRepoRoot)
-		exec.Command("git", "init").Run()
+		exec.Command("git", "init", "-b", "main").Run()
 		exec.Command("git", "config", "user.email", "test@test.com").Run()
 		exec.Command("git", "config", "user.name", "Test User").Run()
 

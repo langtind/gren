@@ -21,8 +21,8 @@ func setupTestEnvironment(t *testing.T) (string, *WorktreeManager, func()) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
+	// Initialize git repo with 'main' as the default branch
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(dir)

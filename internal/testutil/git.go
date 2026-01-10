@@ -17,7 +17,8 @@ func CreateTempRepo(t *testing.T) (string, func()) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	cmd := exec.Command("git", "init")
+	// Initialize with 'main' as the default branch
+	cmd := exec.Command("git", "init", "-b", "main")
 	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		os.RemoveAll(dir)
