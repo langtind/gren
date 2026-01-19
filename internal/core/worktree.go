@@ -283,6 +283,10 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 		return "", "", fmt.Errorf("git worktree add failed: %s", string(output))
 	}
 
+	// Ensure the branch tracks the correct remote (origin/<branchName>)
+	// This fixes issues where branches inherit incorrect upstream from their parent branch
+	wm.setCorrectUpstream(worktreePath, branchName)
+
 	// Initialize submodules in the new worktree
 	if _, err := os.Stat(".gitmodules"); err == nil {
 		submoduleCmd := exec.Command("git", "-C", worktreePath, "submodule", "update", "--init", "--recursive")
@@ -585,6 +589,36 @@ func (wm *WorktreeManager) GetBranchSyncStatus(branch string) BranchSyncStatus {
 	}
 
 	return status
+}
+
+// setCorrectUpstream ensures the branch in the worktree tracks the correct remote branch.
+// This fixes the issue where a branch created from another branch (e.g., main) inherits
+// the parent's upstream (origin/main) instead of tracking origin/<branchName>.
+func (wm *WorktreeManager) setCorrectUpstream(worktreePath, branchName string) {
+	// Check if the remote branch exists
+	remoteRef := "origin/" + branchName
+	remoteCheckCmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/remotes/"+remoteRef)
+	remoteExists := remoteCheckCmd.Run() == nil
+
+	if remoteExists {
+		// Remote branch exists - set upstream to it
+		setUpstreamCmd := exec.Command("git", "-C", worktreePath, "branch", "--set-upstream-to", remoteRef)
+		if err := setUpstreamCmd.Run(); err != nil {
+			logging.Debug("setCorrectUpstream: failed to set upstream to %s: %v", remoteRef, err)
+		} else {
+			logging.Info("setCorrectUpstream: set upstream to %s for branch %s", remoteRef, branchName)
+		}
+	} else {
+		// Remote branch doesn't exist yet - clear any incorrect upstream
+		// This prevents the branch from tracking the wrong remote (e.g., origin/main)
+		unsetCmd := exec.Command("git", "-C", worktreePath, "branch", "--unset-upstream")
+		if err := unsetCmd.Run(); err != nil {
+			// This is fine - might not have an upstream set
+			logging.Debug("setCorrectUpstream: no upstream to unset for %s", branchName)
+		} else {
+			logging.Info("setCorrectUpstream: cleared incorrect upstream for branch %s (remote doesn't exist yet)", branchName)
+		}
+	}
 }
 
 // FetchOrigin runs git fetch origin to update remote tracking branches

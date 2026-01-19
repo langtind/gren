@@ -312,6 +312,173 @@ func TestCreateWorktreeWithRemoteBranch(t *testing.T) {
 	})
 }
 
+// TestCreateWorktreeSetsCorrectUpstream tests that worktrees get the correct
+// upstream tracking branch set, not inherited from parent branch.
+// This is a fix for the issue where a branch created from main inherits
+// origin/main as upstream instead of origin/<branchName>.
+func TestCreateWorktreeSetsCorrectUpstream(t *testing.T) {
+	dir, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	t.Run("new branch clears inherited upstream when remote does not exist", func(t *testing.T) {
+		// Set up a remote repository
+		remoteDir, err := os.MkdirTemp("", "gren-remote-upstream-*")
+		if err != nil {
+			t.Fatalf("failed to create remote dir: %v", err)
+		}
+		defer os.RemoveAll(remoteDir)
+
+		// Init bare repo as remote
+		exec.Command("git", "-C", remoteDir, "init", "--bare").Run()
+
+		// Add as remote origin
+		exec.Command("git", "-C", dir, "remote", "add", "origin", remoteDir).Run()
+
+		// Push main to remote and set up tracking
+		exec.Command("git", "-C", dir, "push", "-u", "origin", "main").Run()
+
+		// Set autosetuprebase to simulate the user's config
+		exec.Command("git", "-C", dir, "config", "branch.autosetuprebase", "always").Run()
+
+		// Create a local branch from main (this may inherit main's upstream with autosetuprebase)
+		exec.Command("git", "-C", dir, "checkout", "-b", "feature-no-remote").Run()
+		exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+		// Create worktree for the local branch
+		req := CreateWorktreeRequest{
+			Name:        "feature-no-remote-wt",
+			Branch:      "feature-no-remote",
+			IsNewBranch: false,
+		}
+
+		worktreePath, _, err := manager.CreateWorktree(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateWorktree() error: %v", err)
+		}
+
+		// Check that upstream is NOT set (since origin/feature-no-remote doesn't exist)
+		upstreamCmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+		output, err := upstreamCmd.CombinedOutput()
+		if err == nil {
+			t.Errorf("Expected no upstream to be set, but got: %s", string(output))
+		}
+		// Error is expected - means no upstream is set
+	})
+
+	t.Run("new branch sets correct upstream when remote exists", func(t *testing.T) {
+		// Set up a remote repository
+		remoteDir, err := os.MkdirTemp("", "gren-remote-upstream2-*")
+		if err != nil {
+			t.Fatalf("failed to create remote dir: %v", err)
+		}
+		defer os.RemoveAll(remoteDir)
+
+		// Init bare repo as remote
+		exec.Command("git", "-C", remoteDir, "init", "--bare").Run()
+
+		// Remove any existing origin and add new one
+		exec.Command("git", "-C", dir, "remote", "remove", "origin").Run()
+		exec.Command("git", "-C", dir, "remote", "add", "origin", remoteDir).Run()
+
+		// Push main to remote
+		exec.Command("git", "-C", dir, "push", "-u", "origin", "main").Run()
+
+		// Create and push a feature branch
+		exec.Command("git", "-C", dir, "checkout", "-b", "feature-with-remote").Run()
+		testFile := filepath.Join(dir, "feature.txt")
+		os.WriteFile(testFile, []byte("feature"), 0644)
+		exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+		exec.Command("git", "-C", dir, "commit", "-m", "Feature commit").Run()
+		exec.Command("git", "-C", dir, "push", "-u", "origin", "feature-with-remote").Run()
+		exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+		// Now delete the local branch and create it again from main
+		// This simulates the scenario where git config might cause wrong upstream
+		exec.Command("git", "-C", dir, "branch", "-D", "feature-with-remote").Run()
+		exec.Command("git", "-C", dir, "checkout", "-b", "feature-with-remote").Run()
+		exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+		// Fetch to ensure we have the remote ref
+		exec.Command("git", "-C", dir, "fetch", "origin").Run()
+
+		// Create worktree for the local branch
+		req := CreateWorktreeRequest{
+			Name:        "feature-with-remote-wt",
+			Branch:      "feature-with-remote",
+			IsNewBranch: false,
+		}
+
+		worktreePath, _, err := manager.CreateWorktree(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateWorktree() error: %v", err)
+		}
+
+		// Check that upstream is set correctly to origin/feature-with-remote
+		upstreamCmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+		output, err := upstreamCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("Failed to get upstream: %v", err)
+		}
+
+		upstream := string(output[:len(output)-1]) // trim newline
+		expected := "origin/feature-with-remote"
+		if upstream != expected {
+			t.Errorf("upstream = %q, want %q", upstream, expected)
+		}
+	})
+
+	t.Run("creating new branch from base does not track base upstream", func(t *testing.T) {
+		// Set up a remote repository
+		remoteDir, err := os.MkdirTemp("", "gren-remote-upstream3-*")
+		if err != nil {
+			t.Fatalf("failed to create remote dir: %v", err)
+		}
+		defer os.RemoveAll(remoteDir)
+
+		// Init bare repo as remote
+		exec.Command("git", "-C", remoteDir, "init", "--bare").Run()
+
+		// Remove any existing origin and add new one
+		exec.Command("git", "-C", dir, "remote", "remove", "origin").Run()
+		exec.Command("git", "-C", dir, "remote", "add", "origin", remoteDir).Run()
+
+		// Push main to remote with tracking
+		exec.Command("git", "-C", dir, "push", "-u", "origin", "main").Run()
+
+		// Set autosetuprebase to simulate the user's problematic config
+		exec.Command("git", "-C", dir, "config", "branch.autosetuprebase", "always").Run()
+
+		// Create a NEW worktree with a new branch from main
+		req := CreateWorktreeRequest{
+			Name:        "brand-new-feature",
+			BaseBranch:  "main",
+			IsNewBranch: true,
+		}
+
+		worktreePath, _, err := manager.CreateWorktree(ctx, req)
+		if err != nil {
+			t.Fatalf("CreateWorktree() error: %v", err)
+		}
+
+		// The new branch should NOT be tracking origin/main
+		// It should either track nothing (remote doesn't exist) or origin/brand-new-feature
+		upstreamCmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+		output, err := upstreamCmd.CombinedOutput()
+
+		if err == nil {
+			upstream := string(output[:len(output)-1])
+			if upstream == "origin/main" {
+				t.Errorf("New branch is incorrectly tracking origin/main, should not track anything or track origin/brand-new-feature")
+			}
+		}
+		// If error, that's expected - no upstream set
+	})
+
+	_ = dir // keep reference for cleanup
+}
+
 // TestCreateWorktreeWithExistingBranchBothLocalAndRemote tests the --existing flag
 // when a branch exists both locally and on remote (in sync or behind).
 // This is a regression test for GitHub issue #4.
