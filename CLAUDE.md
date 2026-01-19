@@ -277,9 +277,9 @@ The threshold is defined as `NarrowWidthThreshold = 160` in `internal/ui/dashboa
 
 ## Release Process
 
-Releases are automated via GitHub Actions:
+Releases are fully automated via GitHub Actions and GoReleaser:
 
-### 1. Create and push tag
+### Create and push tag
 ```bash
 # View commits since last tag
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
@@ -298,57 +298,26 @@ Fixes:
 git push origin main && git push origin v0.X.0
 ```
 
-### 2. Update GitHub release notes
-After GitHub Actions completes, update with detailed changelog:
+That's it! GoReleaser will automatically:
+1. Build binaries for all platforms (macOS, Linux, Windows)
+2. Create GitHub release with checksums
+3. Update the Homebrew tap (`langtind/homebrew-tap`)
+
+### Installation (for users)
 ```bash
-gh release edit v0.X.0 --notes "$(cat <<'EOF'
-## What's New
-
-### 🆕 Feature Name
-- Description
-
-## Improvements
-- Improvement description
-
-## Bug Fixes
-- Fix description
-
-## Installation
-
-### Homebrew (macOS)
-\`\`\`bash
+# Homebrew (macOS/Linux)
 brew tap langtind/tap
 brew install gren
 # or upgrade
 brew upgrade gren
-\`\`\`
 
-### Go
-\`\`\`bash
-go install github.com/langtind/gren@v0.X.0
-\`\`\`
-
-**Full Changelog**: https://github.com/langtind/gren/compare/v0.PREV.0...v0.X.0
-EOF
-)"
+# Go
+go install github.com/langtind/gren@latest
 ```
 
-### 3. Update Homebrew tap
-```bash
-# Get checksums
-gh release download v0.X.0 --pattern checksums.txt --output -
-
-# Update ../homebrew-tap/Formula/gren.rb with:
-# - New version number
-# - SHA256 for darwin-arm64.tar.gz
-# - SHA256 for darwin-amd64.tar.gz
-
-# Commit and push
-cd ../homebrew-tap
-git add Formula/gren.rb
-git commit -m "Update gren to v0.X.0"
-git push
-```
+### Configuration
+- `.goreleaser.yaml` - GoReleaser configuration
+- `HOMEBREW_TAP_TOKEN` secret - GitHub PAT with write access to homebrew-tap repo
 
 ## Debugging
 

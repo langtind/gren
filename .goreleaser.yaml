@@ -1,0 +1,64 @@
+version: 2
+
+project_name: gren
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gren
+    main: .
+    binary: gren
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    targets:
+      - darwin_amd64
+      - darwin_arm64
+      - linux_amd64
+      - linux_arm64
+      - linux_arm
+      - linux_386
+      - windows_amd64
+      - windows_arm64
+      - windows_386
+
+archives:
+  - ids:
+      - gren
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - repository:
+      owner: langtind
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/langtind/gren"
+    description: "Git worktree manager with TUI and CLI"
+    license: "MIT"
+    install: |
+      bin.install "gren"
+    test: |
+      system "#{bin}/gren", "--version"

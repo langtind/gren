@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -12,93 +12,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
 
-    - name: Get version from tag
-      id: version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-    - name: Build binaries
-      run: |
-        # Get build info
-        VERSION=${{ steps.version.outputs.VERSION }}
-        COMMIT=$(git rev-parse --short HEAD)
-        DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-        # Build flags
-        LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
-
-        # Create release directory
-        mkdir -p releases
-
-        # Build for multiple platforms
-        platforms=(
-          "windows/amd64"
-          "windows/386"
-          "windows/arm64"
-          "darwin/amd64"
-          "darwin/arm64"
-          "linux/amd64"
-          "linux/386"
-          "linux/arm64"
-          "linux/arm"
-        )
-
-        for platform in "${platforms[@]}"; do
-          platform_split=(${platform//\// })
-          GOOS=${platform_split[0]}
-          GOARCH=${platform_split[1]}
-
-          output_name="gren-${VERSION}-${GOOS}-${GOARCH}"
-          if [ $GOOS = "windows" ]; then
-            output_name+='.exe'
-          fi
-
-          echo "Building $output_name..."
-          env GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" -o releases/$output_name .
-
-          # Create compressed archive
-          if [ $GOOS = "windows" ]; then
-            zip -j releases/$output_name.zip releases/$output_name
-          else
-            tar -czf releases/$output_name.tar.gz -C releases $output_name
-          fi
-        done
-
-    - name: Generate checksums
-      run: |
-        cd releases
-        sha256sum * > checksums.txt
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: releases/*
-        generate_release_notes: true
-        body: |
-          ## Installation
-
-          ### Install with Go
-          ```bash
-          go install github.com/langtind/gren@${{ steps.version.outputs.VERSION }}
-          ```
-
-          ### Download Binary
-          Download the appropriate binary for your platform below.
-
-          ### Verify Download
-          You can verify your download using the checksums.txt file:
-          ```bash
-          sha256sum -c checksums.txt
-          ```
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
