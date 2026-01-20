@@ -267,11 +267,15 @@ func generateHookContentWithSymlinks(config *Config, detected DetectedFiles) str
 
 	// Symlink .claude directory
 	if detected.ClaudeDir {
-		builder.WriteString("# Symlink .claude directory\n")
+		builder.WriteString("# Symlink .claude directory (skip if already exists as real directory - e.g., committed to git)\n")
 		builder.WriteString("if [ -d \"$REPO_ROOT/.claude\" ]; then\n")
-		builder.WriteString("    echo \"🔗 Symlinking .claude...\"\n")
-		builder.WriteString("    ln -sf \"$REPO_ROOT/.claude\" \"$WORKTREE_PATH/.claude\"\n")
-		builder.WriteString("    echo \"   ✓ .claude\"\n")
+		builder.WriteString("    if [ -d \"$WORKTREE_PATH/.claude\" ] && [ ! -L \"$WORKTREE_PATH/.claude\" ]; then\n")
+		builder.WriteString("        echo \"⏭️  Skipping .claude (already exists in worktree)\"\n")
+		builder.WriteString("    elif [ ! -e \"$WORKTREE_PATH/.claude\" ]; then\n")
+		builder.WriteString("        echo \"🔗 Symlinking .claude...\"\n")
+		builder.WriteString("        ln -sf \"$REPO_ROOT/.claude\" \"$WORKTREE_PATH/.claude\"\n")
+		builder.WriteString("        echo \"   ✓ .claude\"\n")
+		builder.WriteString("    fi\n")
 		builder.WriteString("fi\n")
 		builder.WriteString("echo \"\"\n\n")
 	}
@@ -289,11 +293,15 @@ func generateHookContentWithSymlinks(config *Config, detected DetectedFiles) str
 
 	// Symlink .gren directory (if gitignored)
 	if detected.GrenDir {
-		builder.WriteString("# Symlink .gren configuration\n")
+		builder.WriteString("# Symlink .gren configuration (skip if already exists as real directory - e.g., committed to git)\n")
 		builder.WriteString("if [ -d \"$REPO_ROOT/.gren\" ]; then\n")
-		builder.WriteString("    echo \"🔗 Symlinking .gren...\"\n")
-		builder.WriteString("    ln -sf \"$REPO_ROOT/.gren\" \"$WORKTREE_PATH/.gren\"\n")
-		builder.WriteString("    echo \"   ✓ .gren\"\n")
+		builder.WriteString("    if [ -d \"$WORKTREE_PATH/.gren\" ] && [ ! -L \"$WORKTREE_PATH/.gren\" ]; then\n")
+		builder.WriteString("        echo \"⏭️  Skipping .gren (already exists in worktree)\"\n")
+		builder.WriteString("    elif [ ! -e \"$WORKTREE_PATH/.gren\" ]; then\n")
+		builder.WriteString("        echo \"🔗 Symlinking .gren...\"\n")
+		builder.WriteString("        ln -sf \"$REPO_ROOT/.gren\" \"$WORKTREE_PATH/.gren\"\n")
+		builder.WriteString("        echo \"   ✓ .gren\"\n")
+		builder.WriteString("    fi\n")
 		builder.WriteString("fi\n")
 		builder.WriteString("echo \"\"\n\n")
 	}

@@ -461,6 +461,46 @@ func TestDetectClaudeMd(t *testing.T) {
 }
 
 func TestGenerateHookContent(t *testing.T) {
+	t.Run("claude dir symlink skips when directory already exists as real dir", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir:    "../worktrees",
+			PackageManager: "npm",
+			Version:        "1.0.0",
+		}
+
+		detected := DetectedFiles{
+			ClaudeDir: true,
+		}
+
+		content := generateHookContentWithSymlinks(config, detected)
+
+		// The script should check if .claude is already a real directory (not a symlink)
+		// and skip creating a symlink if so. This handles the case where .claude is
+		// committed to git and already exists in the worktree after checkout.
+		if !contains(content, "! -L") || !contains(content, "-d \"$WORKTREE_PATH/.claude\"") {
+			t.Error("Hook should check if .claude is a real directory (not symlink) before symlinking")
+		}
+	})
+
+	t.Run("gren dir symlink skips when directory already exists as real dir", func(t *testing.T) {
+		config := &Config{
+			WorktreeDir:    "../worktrees",
+			PackageManager: "npm",
+			Version:        "1.0.0",
+		}
+
+		detected := DetectedFiles{
+			GrenDir: true,
+		}
+
+		content := generateHookContentWithSymlinks(config, detected)
+
+		// Same check for .gren directory
+		if !contains(content, "! -L") || !contains(content, "-d \"$WORKTREE_PATH/.gren\"") {
+			t.Error("Hook should check if .gren is a real directory (not symlink) before symlinking")
+		}
+	})
+
 	t.Run("hook has gren header with install info", func(t *testing.T) {
 		config := &Config{
 			WorktreeDir:    "../worktrees",
