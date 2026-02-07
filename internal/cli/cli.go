@@ -891,9 +891,11 @@ if command -v gren >/dev/null 2>&1; or set -q GREN_BIN
     # Creates a temp file, passes path via GREN_DIRECTIVE_FILE, sources it after.
     # GREN_BIN can override the binary path (for testing dev builds).
     function gren
+        set -l gren_bin (set -q GREN_BIN; and echo $GREN_BIN; or echo gren)
+
         # Completion mode: call binary directly, no directive file needed.
         if set -q COMPLETE
-            command (set -q GREN_BIN; and echo $GREN_BIN; or echo gren) $argv
+            command $gren_bin $argv
             return
         end
 
@@ -901,7 +903,7 @@ if command -v gren >/dev/null 2>&1; or set -q GREN_BIN
         set -l exit_code 0
         set -l old_pwd $PWD
 
-        GREN_DIRECTIVE_FILE=$directive_file command (set -q GREN_BIN; and echo $GREN_BIN; or echo gren) $argv
+        GREN_DIRECTIVE_FILE=$directive_file command $gren_bin $argv
         or set exit_code $status
 
         if test -s $directive_file
