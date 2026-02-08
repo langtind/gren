@@ -42,7 +42,7 @@ func (m Model) renderCommitConfirmStep() string {
 
 	b.WriteString(WizardSubtitleStyle.Render("Files ready to commit:"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  .gren/config.json"))
+	b.WriteString(WizardDescStyle.Render("  .gren/config.toml"))
 	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
 	b.WriteString("\n")
@@ -83,7 +83,7 @@ func (m Model) renderFinalStep() string {
 
 	b.WriteString(WizardSubtitleStyle.Render("Configuration files:"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  .gren/config.json      - settings"))
+	b.WriteString(WizardDescStyle.Render("  .gren/config.toml      - settings"))
 	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh   - setup script"))
 	b.WriteString("\n\n")

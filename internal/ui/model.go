@@ -541,6 +541,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
+		// Handle spinner animation for AI generation
+		if m.initState != nil && m.initState.currentStep == InitStepAIGenerating {
+			var cmd tea.Cmd
+			m.initState.aiSpinner, cmd = m.initState.aiSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
 		if len(cmds) > 0 {
 			return m, tea.Batch(cmds...)
 		}

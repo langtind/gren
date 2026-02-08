@@ -95,6 +95,8 @@ type InitState struct {
 	aiError            string // Error message from AI generation
 	trackGrenInGit     bool   // whether to track .gren/ in git or add to .gitignore
 	recommendationMode int    // 0=Accept, 1=Customize, 2=AI (saved from recommendations step)
+	aiSpinner          spinner.Model
+	aiScrollOffset     int // scroll position in AI result script view
 }
 
 // DetectedFile represents a detected file that could be useful for worktrees

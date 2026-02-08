@@ -622,6 +622,16 @@ func (m Model) runInitialization() tea.Cmd {
 			return initExecutionCompleteMsg{err: result.Error}
 		}
 
+		// If AI-generated script exists, overwrite the template-based hook
+		if m.initState != nil && m.initState.postCreateScript != "" {
+			hookPath := ".gren/post-create.sh"
+			if err := os.WriteFile(hookPath, []byte(m.initState.postCreateScript), 0755); err != nil {
+				logging.Error("Failed to write AI-generated script: %v", err)
+			} else {
+				logging.Info("Overwrote post-create.sh with AI-generated script")
+			}
+		}
+
 		return initExecutionCompleteMsg{
 			configCreated: result.ConfigCreated,
 			hookCreated:   result.HookCreated,
