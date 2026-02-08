@@ -66,6 +66,11 @@ func TestGetSkillBody(t *testing.T) {
 			input:    "---\nname: skill\ndescription: A test skill\nallowed-tools: Read, Glob\n---\n\n# Title\n\nContent here.",
 			expected: "# Title\n\nContent here.",
 		},
+		{
+			name:     "body contains horizontal rule",
+			input:    "---\nname: test\n---\n# Title\n\n---\n\nMore content",
+			expected: "# Title\n\n---\n\nMore content",
+		},
 	}
 
 	for _, tt := range tests {

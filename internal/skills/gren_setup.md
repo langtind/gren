@@ -147,7 +147,7 @@ Start with `#!/usr/bin/env bash` and end with the final echo statement.
 
 Here is an example of what a complete script might look like for a typical Node.js project:
 
-```
+```bash
 #!/usr/bin/env bash
 set -euo pipefail
 

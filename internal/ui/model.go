@@ -76,6 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.initState.currentStep = InitStepComplete
 			} else {
 				m.initState.currentStep = InitStepCreated
+				if msg.warning != "" {
+					m.initState.aiError = msg.warning
+				}
 				// Mark as initialized if successful
 				if m.repoInfo != nil {
 					m.repoInfo.IsInitialized = true

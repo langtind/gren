@@ -7,6 +7,25 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// aiScriptScrollParams calculates visible lines and max scroll offset for the AI script preview.
+// Used by both the handler (for input clamping) and the renderer (for display).
+const aiScriptReservedLines = 14 // header(2) + success(2) + options(5) + helpbar(2) + padding(3)
+
+func aiScriptScrollParams(termHeight, totalLines int) (visibleLines, maxOffset int) {
+	visibleLines = termHeight - aiScriptReservedLines
+	if visibleLines < 5 {
+		visibleLines = 5
+	}
+	if visibleLines > totalLines {
+		visibleLines = totalLines
+	}
+	maxOffset = totalLines - visibleLines
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return visibleLines, maxOffset
+}
+
 // renderAIGeneratingStep shows the AI script generation in progress
 func (m Model) renderAIGeneratingStep() string {
 	var b strings.Builder
@@ -51,29 +70,19 @@ func (m Model) renderAIResultStep() string {
 	b.WriteString("\n\n")
 
 	// Calculate visible area for script preview
-	// Reserve lines for: header(2) + success(2) + options(5) + helpbar(2) + padding(3) = ~14
-	visibleLines := m.height - 14
-	if visibleLines < 5 {
-		visibleLines = 5
-	}
-	if visibleLines > totalLines {
-		visibleLines = totalLines
-	}
+	visibleLines, maxOffset := aiScriptScrollParams(m.height, totalLines)
 
-	// Clamp scroll offset
-	maxOffset := totalLines - visibleLines
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if m.initState.aiScrollOffset > maxOffset {
-		m.initState.aiScrollOffset = maxOffset
+	// Use local scroll offset for rendering (don't mutate state in View)
+	scrollOffset := m.initState.aiScrollOffset
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
 	}
 
 	// Show script window with scroll
 	codeStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
 	lineNumStyle := lipgloss.NewStyle().Foreground(ColorBorder)
 
-	for i := m.initState.aiScrollOffset; i < m.initState.aiScrollOffset+visibleLines && i < totalLines; i++ {
+	for i := scrollOffset; i < scrollOffset+visibleLines && i < totalLines; i++ {
 		lineNum := lineNumStyle.Render(fmt.Sprintf(" %3d ", i+1))
 		b.WriteString(lineNum + codeStyle.Render(scriptLines[i]))
 		b.WriteString("\n")
@@ -82,8 +91,8 @@ func (m Model) renderAIResultStep() string {
 	// Scroll indicator
 	if totalLines > visibleLines {
 		scrollInfo := fmt.Sprintf("  Lines %d-%d of %d",
-			m.initState.aiScrollOffset+1,
-			min(m.initState.aiScrollOffset+visibleLines, totalLines),
+			scrollOffset+1,
+			min(scrollOffset+visibleLines, totalLines),
 			totalLines)
 		b.WriteString(lineNumStyle.Render(scrollInfo))
 		b.WriteString("\n")

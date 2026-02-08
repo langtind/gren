@@ -623,10 +623,12 @@ func (m Model) runInitialization() tea.Cmd {
 		}
 
 		// If AI-generated script exists, overwrite the template-based hook
+		var aiWriteWarning string
 		if m.initState != nil && m.initState.postCreateScript != "" {
 			hookPath := ".gren/post-create.sh"
 			if err := os.WriteFile(hookPath, []byte(m.initState.postCreateScript), 0755); err != nil {
 				logging.Error("Failed to write AI-generated script: %v", err)
+				aiWriteWarning = fmt.Sprintf("Warning: failed to save AI-generated script: %v", err)
 			} else {
 				logging.Info("Overwrote post-create.sh with AI-generated script")
 			}
@@ -636,6 +638,7 @@ func (m Model) runInitialization() tea.Cmd {
 			configCreated: result.ConfigCreated,
 			hookCreated:   result.HookCreated,
 			message:       result.Message,
+			warning:       aiWriteWarning,
 		}
 	}
 }
@@ -1125,10 +1128,14 @@ func (m Model) generateAISetupScript() tea.Cmd {
 		cmd.Dir, _ = os.Getwd()
 		cmd.Stdin = strings.NewReader(prompt)
 
-		output, err := cmd.CombinedOutput()
+		output, err := cmd.Output()
 		if err != nil {
-			logging.Error("Claude CLI failed: %v, output: %s", err, string(output))
-			return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %s", string(output))}
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				logging.Error("Claude CLI failed: %v, stderr: %s", err, string(exitErr.Stderr))
+				return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %s", string(exitErr.Stderr))}
+			}
+			logging.Error("Claude CLI failed: %v", err)
+			return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %v", err)}
 		}
 
 		script := strings.TrimSpace(string(output))
@@ -1148,7 +1155,11 @@ func (m Model) generateAISetupScript() tea.Cmd {
 				}
 			}
 			if len(scriptLines) > 0 {
-				script = strings.Join(scriptLines, "\n")
+				// Strip trailing markdown fences if present
+				for len(scriptLines) > 0 && strings.TrimSpace(scriptLines[len(scriptLines)-1]) == "```" {
+					scriptLines = scriptLines[:len(scriptLines)-1]
+				}
+				script = strings.TrimRight(strings.Join(scriptLines, "\n"), "\n")
 			} else {
 				script = "#!/bin/bash\n\n# AI-generated script\n" + script
 			}

@@ -872,14 +872,7 @@ func (m Model) handleAIResultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	scriptLines := strings.Split(m.initState.aiGeneratedScript, "\n")
 	totalLines := len(scriptLines)
-	visibleLines := m.height - 14
-	if visibleLines < 5 {
-		visibleLines = 5
-	}
-	maxOffset := totalLines - visibleLines
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	_, maxOffset := aiScriptScrollParams(m.height, totalLines)
 
 	switch {
 	case key.Matches(msg, m.keys.Quit):

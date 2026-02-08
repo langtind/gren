@@ -130,12 +130,17 @@ func TestRestoreBranchFromConfig(t *testing.T) {
 func TestSetupClaudePlugin(t *testing.T) {
 	// Create a temp directory to work in
 	tmpDir := t.TempDir()
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to chdir to temp dir: %v", err)
+	}
 	defer os.Chdir(origDir)
 
 	// Run setup
-	err := SetupClaudePlugin(false)
+	err = SetupClaudePlugin(false)
 	if err != nil {
 		t.Fatalf("SetupClaudePlugin() error = %v", err)
 	}
@@ -190,15 +195,20 @@ func TestSetupClaudePlugin(t *testing.T) {
 
 func TestSetupClaudePluginAlreadyExists(t *testing.T) {
 	tmpDir := t.TempDir()
-	origDir, _ := os.Getwd()
-	os.Chdir(tmpDir)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get working directory: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to chdir to temp dir: %v", err)
+	}
 	defer os.Chdir(origDir)
 
 	// Create the plugin directory
 	os.MkdirAll(".claude-plugin", 0755)
 
 	// Should fail without force
-	err := SetupClaudePlugin(false)
+	err = SetupClaudePlugin(false)
 	if err == nil {
 		t.Fatal("SetupClaudePlugin() should fail when directory exists without force")
 	}
