@@ -20,14 +20,14 @@ func (m Model) renderPreviewStep() string {
 		BorderForeground(ColorBorder).
 		Padding(0, 1)
 
-	aiUsed := m.initState.postCreateScript != ""
+	aiUsed := m.initState.aiGeneratedScript != ""
 
 	var summary strings.Builder
 	summary.WriteString(WizardSubtitleStyle.Render("Location: ") + m.initState.worktreeDir + "\n")
 	summary.WriteString(WizardSubtitleStyle.Render("Command:  ") + m.initState.postCreateCmd + "\n")
 	summary.WriteString(WizardSubtitleStyle.Render("Files:    ") + fmt.Sprintf("%d to symlink", len(m.initState.detectedFiles)))
 	if aiUsed {
-		lineCount := len(strings.Split(m.initState.postCreateScript, "\n"))
+		lineCount := len(strings.Split(m.initState.aiGeneratedScript, "\n"))
 		summary.WriteString("\n")
 		summary.WriteString(WizardSubtitleStyle.Render("Script:   ") + fmt.Sprintf("AI-generated (%d lines)", lineCount))
 	}
@@ -99,7 +99,7 @@ func (m Model) renderCreatedStep() string {
 	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
 	b.WriteString("\n\n")
 
-	aiUsed := m.initState.postCreateScript != ""
+	aiUsed := m.initState.aiGeneratedScript != ""
 
 	if aiUsed {
 		b.WriteString(WizardSubtitleStyle.Render("Recommended:"))
