@@ -1,6 +1,9 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +124,97 @@ func TestRestoreBranchFromConfig(t *testing.T) {
 				t.Errorf("restoreBranchFromConfig(%q) = %q, want %q", tt.key, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSetupClaudePlugin(t *testing.T) {
+	// Create a temp directory to work in
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	// Run setup
+	err := SetupClaudePlugin(false)
+	if err != nil {
+		t.Fatalf("SetupClaudePlugin() error = %v", err)
+	}
+
+	// Verify directory structure
+	expectedFiles := []string{
+		".claude-plugin/plugin.json",
+		".claude-plugin/hooks/hooks.json",
+		".claude-plugin/skills/gren-setup/SKILL.md",
+	}
+
+	for _, f := range expectedFiles {
+		path := filepath.Join(tmpDir, f)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("Expected file %s to exist", f)
+		}
+	}
+
+	// Verify SKILL.md contains frontmatter
+	skillContent, err := os.ReadFile(filepath.Join(tmpDir, ".claude-plugin/skills/gren-setup/SKILL.md"))
+	if err != nil {
+		t.Fatalf("Failed to read SKILL.md: %v", err)
+	}
+	if !strings.HasPrefix(string(skillContent), "---") {
+		t.Error("SKILL.md should start with YAML frontmatter")
+	}
+	if !strings.Contains(string(skillContent), "name: gren-setup") {
+		t.Error("SKILL.md should contain 'name: gren-setup'")
+	}
+	if !strings.Contains(string(skillContent), "post-create hook") {
+		t.Error("SKILL.md should contain post-create hook instructions")
+	}
+
+	// Verify plugin.json content
+	pluginContent, err := os.ReadFile(filepath.Join(tmpDir, ".claude-plugin/plugin.json"))
+	if err != nil {
+		t.Fatalf("Failed to read plugin.json: %v", err)
+	}
+	if !strings.Contains(string(pluginContent), `"name": "gren"`) {
+		t.Error("plugin.json should contain plugin name")
+	}
+
+	// Verify hooks.json content
+	hooksContent, err := os.ReadFile(filepath.Join(tmpDir, ".claude-plugin/hooks/hooks.json"))
+	if err != nil {
+		t.Fatalf("Failed to read hooks.json: %v", err)
+	}
+	if !strings.Contains(string(hooksContent), "gren marker set working") {
+		t.Error("hooks.json should contain marker hooks")
+	}
+}
+
+func TestSetupClaudePluginAlreadyExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	// Create the plugin directory
+	os.MkdirAll(".claude-plugin", 0755)
+
+	// Should fail without force
+	err := SetupClaudePlugin(false)
+	if err == nil {
+		t.Fatal("SetupClaudePlugin() should fail when directory exists without force")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("Error should mention 'already exists', got: %v", err)
+	}
+
+	// Should succeed with force
+	err = SetupClaudePlugin(true)
+	if err != nil {
+		t.Fatalf("SetupClaudePlugin(force=true) error = %v", err)
+	}
+
+	// Verify files were created
+	if _, err := os.Stat(filepath.Join(tmpDir, ".claude-plugin/skills/gren-setup/SKILL.md")); os.IsNotExist(err) {
+		t.Error("SKILL.md should exist after force overwrite")
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/directive"
 	"github.com/langtind/gren/internal/logging"
+	"github.com/langtind/gren/internal/skills"
 )
 
 // loadProjectInfo loads project information asynchronously
@@ -1077,77 +1078,42 @@ func (m Model) generateAISetupScript() tea.Cmd {
 
 		logging.Debug("Found Claude CLI at: %s", claudePath)
 
-		// Gather project context
-		var contextBuilder strings.Builder
-		contextBuilder.WriteString("Analyze this project and generate a bash setup script for a new git worktree.\n\n")
-		contextBuilder.WriteString("Project context:\n")
+		// Build context header with TUI-detected info
+		var contextHeader strings.Builder
+		contextHeader.WriteString("# Project context (pre-detected by gren TUI)\n\n")
 
 		// Detected files
 		if m.initState != nil && len(m.initState.detectedFiles) > 0 {
-			contextBuilder.WriteString("\nDetected files to consider:\n")
+			contextHeader.WriteString("Detected files:\n")
 			for _, f := range m.initState.detectedFiles {
 				gitIgnored := ""
 				if f.IsGitIgnored {
 					gitIgnored = " (gitignored)"
 				}
-				contextBuilder.WriteString(fmt.Sprintf("- %s%s\n", f.Path, gitIgnored))
+				contextHeader.WriteString(fmt.Sprintf("- %s%s\n", f.Path, gitIgnored))
 			}
+			contextHeader.WriteString("\n")
 		}
 
 		// Package manager
 		if m.initState != nil && m.initState.packageManager != "" {
-			contextBuilder.WriteString(fmt.Sprintf("\nDetected package manager: %s\n", m.initState.packageManager))
+			contextHeader.WriteString(fmt.Sprintf("Detected package manager: %s\n", m.initState.packageManager))
 		}
 
-		// Check for common project files
-		projectFiles := []string{"package.json", "go.mod", "Cargo.toml", "requirements.txt", "pyproject.toml", "Makefile", ".envrc"}
-		var foundFiles []string
-		for _, f := range projectFiles {
-			if _, err := os.Stat(f); err == nil {
-				foundFiles = append(foundFiles, f)
-			}
-		}
-		if len(foundFiles) > 0 {
-			contextBuilder.WriteString(fmt.Sprintf("\nProject files found: %s\n", strings.Join(foundFiles, ", ")))
-		}
-
-		// Add .gren symlink instruction if it should be gitignored
-		grenSymlinkNote := ""
+		// .gren tracking
 		if m.initState != nil && !m.initState.trackGrenInGit {
-			grenSymlinkNote = "\n7. Symlink .gren/ configuration directory (it's gitignored, so symlink keeps it in sync)"
+			contextHeader.WriteString("\nNote: .gren/ is gitignored in this project — it should be symlinked.\n")
 		}
 
-		contextBuilder.WriteString(fmt.Sprintf(`
-The script receives these arguments:
-- $1 = WORKTREE_PATH (absolute path to the new worktree)
-- $2 = BRANCH_NAME (name of the branch)
-- $3 = BASE_BRANCH (the branch it was created from)
-- $4 = REPO_ROOT (absolute path to the main repository)
+		contextHeader.WriteString("\nUse the tools below to explore the project further and verify these findings.\n\n")
 
-Requirements for the script:
-1. Use symlinks (ln -sf) to link gitignored files from REPO_ROOT to WORKTREE_PATH
-   - This keeps files in sync and avoids duplication
-   - Example: ln -sf "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
-2. Symlink ALL gitignored environment files (.env, .env.local, .env.*.local, etc.)
-3. Symlink gitignored config directories (like .claude/) if they exist
-4. Install dependencies using the detected package manager
-5. Handle direnv: run "direnv allow" if .envrc exists and direnv is installed
-6. Be idempotent (safe to run multiple times)%s
+		// Combine context header with skill prompt
+		prompt := contextHeader.String() + skills.GetGrenSetupPrompt()
 
-Example symlink section:
-  # Symlink environment files
-  [ -f "$REPO_ROOT/.env" ] && ln -sf "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
-  [ -f "$REPO_ROOT/.env.local" ] && ln -sf "$REPO_ROOT/.env.local" "$WORKTREE_PATH/.env.local"
-
-  # Symlink config directories
-  [ -d "$REPO_ROOT/.claude" ] && ln -sf "$REPO_ROOT/.claude" "$WORKTREE_PATH/.claude"
-
-Output ONLY the bash script content, no explanations. Start with #!/usr/bin/env bash
-`, grenSymlinkNote))
-
-		// Run Claude CLI with the prompt
-		cmd := exec.Command(claudePath, "-p", contextBuilder.String())
+		// Run Claude CLI with prompt via stdin (avoids CLI argument length limits)
+		cmd := exec.Command(claudePath, "-p", "--allowedTools", "Read,Glob,Grep,Bash")
 		cmd.Dir, _ = os.Getwd()
+		cmd.Stdin = strings.NewReader(prompt)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {
