@@ -643,6 +643,40 @@ func (m Model) runInitialization() tea.Cmd {
 	}
 }
 
+// isClaudeAvailable checks if the Claude Code CLI is installed
+func isClaudeAvailable() bool {
+	if _, err := exec.LookPath("claude"); err == nil {
+		return true
+	}
+	// Check common install paths
+	for _, p := range []string{
+		"/usr/local/bin/claude",
+		"/opt/homebrew/bin/claude",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// initRecommendationOptions returns the option labels and their corresponding
+// recommendation modes, ordered based on Claude availability.
+func initRecommendationOptions(claudeAvailable bool) (labels []string, modes []int) {
+	if claudeAvailable {
+		return []string{
+			"Generate setup script with Claude Code",
+			"Accept and create configuration",
+			"Customize settings",
+		}, []int{RecommendAI, RecommendAccept, RecommendCustomize}
+	}
+	return []string{
+		"Accept and create configuration",
+		"Customize settings",
+		"Generate setup script with Claude Code",
+	}, []int{RecommendAccept, RecommendCustomize, RecommendAI}
+}
+
 // Additional helper functions for initialization and project analysis
 
 // analyzeProject analyzes the current project structure
@@ -662,6 +696,12 @@ func (m Model) analyzeProject() []DetectedFile {
 		}
 	}
 
+	// Track already-added paths to avoid duplicates
+	seen := make(map[string]bool)
+	for _, f := range files {
+		seen[f.Path] = true
+	}
+
 	// Common patterns to look for (excluding env files which we handle above)
 	patterns := map[string]string{
 		"package.json":  "config",
@@ -673,6 +713,9 @@ func (m Model) analyzeProject() []DetectedFile {
 	}
 
 	for pattern, fileType := range patterns {
+		if seen[pattern] {
+			continue
+		}
 		if _, err := os.Stat(pattern); err == nil {
 			files = append(files, DetectedFile{
 				Path:         pattern,
@@ -1124,7 +1167,11 @@ func (m Model) generateAISetupScript() tea.Cmd {
 		prompt := contextHeader.String() + skills.GetGrenSetupPrompt()
 
 		// Run Claude CLI with prompt via stdin (avoids CLI argument length limits)
-		cmd := exec.Command(claudePath, "-p", "--allowedTools", "Read,Glob,Grep,Bash")
+		// Scope Bash to read-only operations to prevent Claude from writing files
+		cmd := exec.Command(claudePath, "-p",
+			"--allowedTools", "Read", "Glob", "Grep",
+			"Bash(git check-ignore:*)", "Bash(git ls-files:*)", "Bash(ls:*)", "Bash(cat:*)",
+		)
 		cmd.Dir, _ = os.Getwd()
 		cmd.Stdin = strings.NewReader(prompt)
 

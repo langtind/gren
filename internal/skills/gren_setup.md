@@ -140,8 +140,14 @@ echo "Worktree setup complete!"
 
 ## Output format
 
-Output ONLY the bash script. No explanations, no markdown code fences, no commentary.
-Start with `#!/usr/bin/env bash` and end with the final echo statement.
+**CRITICAL**: Your entire response must be ONLY the bash script content. Nothing else.
+
+- Start with `#!/usr/bin/env bash` as the very first line
+- End with the final `echo` statement
+- Do NOT include any explanations, summaries, or commentary before or after the script
+- Do NOT wrap the script in markdown code fences (no ``` markers)
+- Do NOT create or write any files — just output the script text to stdout
+- Do NOT use the Bash tool to create hook files or write to the filesystem
 
 ## Example output
 

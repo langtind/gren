@@ -99,34 +99,16 @@ func (m Model) renderCreatedStep() string {
 	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
 	b.WriteString("\n\n")
 
-	aiUsed := m.initState.aiGeneratedScript != ""
-
-	if aiUsed {
-		b.WriteString(WizardSubtitleStyle.Render("Recommended:"))
-		b.WriteString("\n")
-		b.WriteString(WizardDescStyle.Render("  Review the AI-generated script before creating worktrees"))
-		b.WriteString("\n\n")
-	} else {
-		b.WriteString(WizardSubtitleStyle.Render("Next steps:"))
-		b.WriteString("\n")
-		b.WriteString(WizardDescStyle.Render("  • Edit post-create.sh to customize setup"))
-		b.WriteString("\n")
-		b.WriteString(WizardDescStyle.Render("  • Press 'n' to create your first worktree"))
-		b.WriteString("\n\n")
-	}
+	b.WriteString(WizardSubtitleStyle.Render("Next steps:"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  • Press 'n' to create your first worktree"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  • Edit .gren/post-create.sh to customize setup"))
+	b.WriteString("\n\n")
 
 	// Options
-	var options []string
-	if aiUsed {
-		options = []string{
-			"Review generated script",
-			"Go to dashboard",
-		}
-	} else {
-		options = []string{
-			"Edit setup script",
-			"Go to dashboard",
-		}
+	options := []string{
+		"Start using gren",
 	}
 
 	for i, opt := range options {

@@ -58,7 +58,42 @@ brews:
     homepage: "https://github.com/langtind/gren"
     description: "Git worktree manager with TUI and CLI"
     license: "MIT"
+    custom_block: |
+      head "https://github.com/langtind/gren.git", branch: "main"
+
+      head do
+        depends_on "go" => :build
+      end
     install: |
-      bin.install "gren"
+      if build.head?
+        ldflags = %W[
+          -s -w
+          -X main.version=HEAD-#{Utils.git_short_head}
+          -X main.commit=#{Utils.git_short_head}
+          -X main.date=#{time.iso8601}
+        ]
+        system "go", "build", *std_go_args(ldflags:)
+      else
+        bin.install "gren"
+      end
+    caveats: |
+      Navigation functionality requires shell integration.
+
+      Add one of these lines to your shell config:
+
+        # Zsh (~/.zshrc):
+        eval "$(gren shell-init zsh)"
+
+        # Bash (~/.bashrc):
+        eval "$(gren shell-init bash)"
+
+        # Fish (~/.config/fish/config.fish):
+        gren shell-init fish | source
+
+      This enables:
+        - 'g' key in TUI to navigate to worktree folder
+        - 'gcd <name>' alias for quick navigation
+        - 'gren navigate <name>' command
     test: |
-      system "#{bin}/gren", "--version"
+      assert_match "gren version", shell_output("#{bin}/gren --version")
+      assert_match "gren()", shell_output("#{bin}/gren shell-init zsh")

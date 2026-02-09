@@ -66,6 +66,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.initState.analysisComplete = true
 			m.initState.packageManager = m.detectPackageManager()
 			m.initState.postCreateCmd = m.detectPostCreateCommand()
+			m.initState.claudeAvailable = isClaudeAvailable()
 		}
 		return m, nil
 

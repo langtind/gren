@@ -79,6 +79,13 @@ const (
 	InitStepAIResult
 )
 
+// Recommendation modes for init wizard
+const (
+	RecommendAccept    = 0
+	RecommendCustomize = 1
+	RecommendAI        = 2
+)
+
 // InitState holds the state for project initialization
 type InitState struct {
 	currentStep        InitStep
@@ -94,7 +101,8 @@ type InitState struct {
 	aiGeneratedScript  string // AI-generated setup script content
 	aiError            string // Error message from AI generation
 	trackGrenInGit     bool   // whether to track .gren/ in git or add to .gitignore
-	recommendationMode int    // 0=Accept, 1=Customize, 2=AI (saved from recommendations step)
+	recommendationMode int    // RecommendAccept, RecommendCustomize, or RecommendAI
+	claudeAvailable    bool   // whether Claude Code CLI is installed
 	aiSpinner          spinner.Model
 	aiScrollOffset     int // scroll position in AI result script view
 }
