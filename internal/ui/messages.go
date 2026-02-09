@@ -33,6 +33,7 @@ type initExecutionCompleteMsg struct {
 	configCreated bool
 	hookCreated   bool
 	message       string
+	warning       string // Warning message (e.g., AI script write failure)
 	err           error
 }
 

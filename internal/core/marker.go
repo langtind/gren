@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/langtind/gren/internal/skills"
 )
 
 // MarkerType represents the type of Claude activity marker
@@ -227,15 +229,32 @@ func SetupClaudePlugin(force bool) error {
 		return fmt.Errorf("failed to write plugin.json: %w", err)
 	}
 
+	// Create skills directory and write gren-setup skill
+	skillsDir := filepath.Join(pluginDir, "skills", "gren-setup")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create skills directory: %w", err)
+	}
+
+	skillPath := filepath.Join(skillsDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(skills.GrenSetupSkill), 0644); err != nil {
+		return fmt.Errorf("failed to write SKILL.md: %w", err)
+	}
+
 	fmt.Println("✅ Created .claude-plugin directory")
 	fmt.Println("📁 .claude-plugin/")
 	fmt.Println("   ├── plugin.json")
-	fmt.Println("   └── hooks/")
-	fmt.Println("       └── hooks.json")
+	fmt.Println("   ├── hooks/")
+	fmt.Println("   │   └── hooks.json")
+	fmt.Println("   └── skills/")
+	fmt.Println("       └── gren-setup/")
+	fmt.Println("           └── SKILL.md")
 	fmt.Println("")
 	fmt.Println("Claude will now set markers when working in this repo:")
 	fmt.Println("  🤖 working - when processing your request")
 	fmt.Println("  💬 waiting - when waiting for input")
+	fmt.Println("")
+	fmt.Println("Skills available:")
+	fmt.Println("  /gren-setup - Generate a post-create hook script for worktree setup")
 	fmt.Println("")
 	fmt.Println("View markers with: gren marker list")
 	fmt.Println("See in TUI: markers appear next to branch names")

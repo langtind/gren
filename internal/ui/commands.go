@@ -17,6 +17,7 @@ import (
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/directive"
 	"github.com/langtind/gren/internal/logging"
+	"github.com/langtind/gren/internal/skills"
 )
 
 // loadProjectInfo loads project information asynchronously
@@ -621,12 +622,59 @@ func (m Model) runInitialization() tea.Cmd {
 			return initExecutionCompleteMsg{err: result.Error}
 		}
 
+		// If AI-generated script exists, overwrite the template-based hook
+		var aiWriteWarning string
+		if m.initState != nil && m.initState.postCreateScript != "" {
+			hookPath := ".gren/post-create.sh"
+			if err := os.WriteFile(hookPath, []byte(m.initState.postCreateScript), 0755); err != nil {
+				logging.Error("Failed to write AI-generated script: %v", err)
+				aiWriteWarning = fmt.Sprintf("Warning: failed to save AI-generated script: %v", err)
+			} else {
+				logging.Info("Overwrote post-create.sh with AI-generated script")
+			}
+		}
+
 		return initExecutionCompleteMsg{
 			configCreated: result.ConfigCreated,
 			hookCreated:   result.HookCreated,
 			message:       result.Message,
+			warning:       aiWriteWarning,
 		}
 	}
+}
+
+// isClaudeAvailable checks if the Claude Code CLI is installed
+func isClaudeAvailable() bool {
+	if _, err := exec.LookPath("claude"); err == nil {
+		return true
+	}
+	// Check common install paths
+	for _, p := range []string{
+		"/usr/local/bin/claude",
+		"/opt/homebrew/bin/claude",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// initRecommendationOptions returns the option labels and their corresponding
+// recommendation modes, ordered based on Claude availability.
+func initRecommendationOptions(claudeAvailable bool) (labels []string, modes []int) {
+	if claudeAvailable {
+		return []string{
+			"Generate setup script with Claude Code",
+			"Accept and create configuration",
+			"Customize settings",
+		}, []int{RecommendAI, RecommendAccept, RecommendCustomize}
+	}
+	return []string{
+		"Accept and create configuration",
+		"Customize settings",
+		"Generate setup script with Claude Code",
+	}, []int{RecommendAccept, RecommendCustomize, RecommendAI}
 }
 
 // Additional helper functions for initialization and project analysis
@@ -648,6 +696,12 @@ func (m Model) analyzeProject() []DetectedFile {
 		}
 	}
 
+	// Track already-added paths to avoid duplicates
+	seen := make(map[string]bool)
+	for _, f := range files {
+		seen[f.Path] = true
+	}
+
 	// Common patterns to look for (excluding env files which we handle above)
 	patterns := map[string]string{
 		"package.json":  "config",
@@ -659,6 +713,9 @@ func (m Model) analyzeProject() []DetectedFile {
 	}
 
 	for pattern, fileType := range patterns {
+		if seen[pattern] {
+			continue
+		}
 		if _, err := os.Stat(pattern); err == nil {
 			files = append(files, DetectedFile{
 				Path:         pattern,
@@ -1077,82 +1134,55 @@ func (m Model) generateAISetupScript() tea.Cmd {
 
 		logging.Debug("Found Claude CLI at: %s", claudePath)
 
-		// Gather project context
-		var contextBuilder strings.Builder
-		contextBuilder.WriteString("Analyze this project and generate a bash setup script for a new git worktree.\n\n")
-		contextBuilder.WriteString("Project context:\n")
+		// Build context header with TUI-detected info
+		var contextHeader strings.Builder
+		contextHeader.WriteString("# Project context (pre-detected by gren TUI)\n\n")
 
 		// Detected files
 		if m.initState != nil && len(m.initState.detectedFiles) > 0 {
-			contextBuilder.WriteString("\nDetected files to consider:\n")
+			contextHeader.WriteString("Detected files:\n")
 			for _, f := range m.initState.detectedFiles {
 				gitIgnored := ""
 				if f.IsGitIgnored {
 					gitIgnored = " (gitignored)"
 				}
-				contextBuilder.WriteString(fmt.Sprintf("- %s%s\n", f.Path, gitIgnored))
+				contextHeader.WriteString(fmt.Sprintf("- %s%s\n", f.Path, gitIgnored))
 			}
+			contextHeader.WriteString("\n")
 		}
 
 		// Package manager
 		if m.initState != nil && m.initState.packageManager != "" {
-			contextBuilder.WriteString(fmt.Sprintf("\nDetected package manager: %s\n", m.initState.packageManager))
+			contextHeader.WriteString(fmt.Sprintf("Detected package manager: %s\n", m.initState.packageManager))
 		}
 
-		// Check for common project files
-		projectFiles := []string{"package.json", "go.mod", "Cargo.toml", "requirements.txt", "pyproject.toml", "Makefile", ".envrc"}
-		var foundFiles []string
-		for _, f := range projectFiles {
-			if _, err := os.Stat(f); err == nil {
-				foundFiles = append(foundFiles, f)
-			}
-		}
-		if len(foundFiles) > 0 {
-			contextBuilder.WriteString(fmt.Sprintf("\nProject files found: %s\n", strings.Join(foundFiles, ", ")))
-		}
-
-		// Add .gren symlink instruction if it should be gitignored
-		grenSymlinkNote := ""
+		// .gren tracking
 		if m.initState != nil && !m.initState.trackGrenInGit {
-			grenSymlinkNote = "\n7. Symlink .gren/ configuration directory (it's gitignored, so symlink keeps it in sync)"
+			contextHeader.WriteString("\nNote: .gren/ is gitignored in this project — it should be symlinked.\n")
 		}
 
-		contextBuilder.WriteString(fmt.Sprintf(`
-The script receives these arguments:
-- $1 = WORKTREE_PATH (absolute path to the new worktree)
-- $2 = BRANCH_NAME (name of the branch)
-- $3 = BASE_BRANCH (the branch it was created from)
-- $4 = REPO_ROOT (absolute path to the main repository)
+		contextHeader.WriteString("\nUse the tools below to explore the project further and verify these findings.\n\n")
 
-Requirements for the script:
-1. Use symlinks (ln -sf) to link gitignored files from REPO_ROOT to WORKTREE_PATH
-   - This keeps files in sync and avoids duplication
-   - Example: ln -sf "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
-2. Symlink ALL gitignored environment files (.env, .env.local, .env.*.local, etc.)
-3. Symlink gitignored config directories (like .claude/) if they exist
-4. Install dependencies using the detected package manager
-5. Handle direnv: run "direnv allow" if .envrc exists and direnv is installed
-6. Be idempotent (safe to run multiple times)%s
+		// Combine context header with skill prompt
+		prompt := contextHeader.String() + skills.GetGrenSetupPrompt()
 
-Example symlink section:
-  # Symlink environment files
-  [ -f "$REPO_ROOT/.env" ] && ln -sf "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
-  [ -f "$REPO_ROOT/.env.local" ] && ln -sf "$REPO_ROOT/.env.local" "$WORKTREE_PATH/.env.local"
-
-  # Symlink config directories
-  [ -d "$REPO_ROOT/.claude" ] && ln -sf "$REPO_ROOT/.claude" "$WORKTREE_PATH/.claude"
-
-Output ONLY the bash script content, no explanations. Start with #!/usr/bin/env bash
-`, grenSymlinkNote))
-
-		// Run Claude CLI with the prompt
-		cmd := exec.Command(claudePath, "-p", contextBuilder.String())
+		// Run Claude CLI with prompt via stdin (avoids CLI argument length limits)
+		// Scope Bash to read-only operations to prevent Claude from writing files
+		cmd := exec.Command(claudePath, "-p",
+			"--allowedTools", "Read", "Glob", "Grep",
+			"Bash(git check-ignore:*)", "Bash(git ls-files:*)", "Bash(ls:*)", "Bash(cat:*)",
+		)
 		cmd.Dir, _ = os.Getwd()
+		cmd.Stdin = strings.NewReader(prompt)
 
-		output, err := cmd.CombinedOutput()
+		output, err := cmd.Output()
 		if err != nil {
-			logging.Error("Claude CLI failed: %v, output: %s", err, string(output))
-			return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %s", string(output))}
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				logging.Error("Claude CLI failed: %v, stderr: %s", err, string(exitErr.Stderr))
+				return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %s", string(exitErr.Stderr))}
+			}
+			logging.Error("Claude CLI failed: %v", err)
+			return aiScriptGeneratedMsg{err: fmt.Errorf("Claude CLI failed: %v", err)}
 		}
 
 		script := strings.TrimSpace(string(output))
@@ -1172,7 +1202,11 @@ Output ONLY the bash script content, no explanations. Start with #!/usr/bin/env 
 				}
 			}
 			if len(scriptLines) > 0 {
-				script = strings.Join(scriptLines, "\n")
+				// Strip trailing markdown fences if present
+				for len(scriptLines) > 0 && strings.TrimSpace(scriptLines[len(scriptLines)-1]) == "```" {
+					scriptLines = scriptLines[:len(scriptLines)-1]
+				}
+				script = strings.TrimRight(strings.Join(scriptLines, "\n"), "\n")
 			} else {
 				script = "#!/bin/bash\n\n# AI-generated script\n" + script
 			}

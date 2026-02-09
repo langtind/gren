@@ -20,10 +20,17 @@ func (m Model) renderPreviewStep() string {
 		BorderForeground(ColorBorder).
 		Padding(0, 1)
 
+	aiUsed := m.initState.aiGeneratedScript != ""
+
 	var summary strings.Builder
 	summary.WriteString(WizardSubtitleStyle.Render("Location: ") + m.initState.worktreeDir + "\n")
 	summary.WriteString(WizardSubtitleStyle.Render("Command:  ") + m.initState.postCreateCmd + "\n")
 	summary.WriteString(WizardSubtitleStyle.Render("Files:    ") + fmt.Sprintf("%d to symlink", len(m.initState.detectedFiles)))
+	if aiUsed {
+		lineCount := len(strings.Split(m.initState.aiGeneratedScript, "\n"))
+		summary.WriteString("\n")
+		summary.WriteString(WizardSubtitleStyle.Render("Script:   ") + fmt.Sprintf("AI-generated (%d lines)", lineCount))
+	}
 
 	b.WriteString(summaryStyle.Render(summary.String()))
 	b.WriteString("\n\n")
@@ -31,9 +38,13 @@ func (m Model) renderPreviewStep() string {
 	// Files to create
 	b.WriteString(WizardSubtitleStyle.Render("Will create:"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  .gren/config.json"))
+	b.WriteString(WizardDescStyle.Render("  .gren/config.toml"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
+	if aiUsed {
+		b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh (AI-generated)"))
+	} else {
+		b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
+	}
 	b.WriteString("\n\n")
 
 	// Options
@@ -64,7 +75,7 @@ func (m Model) renderExecutingStep() string {
 	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
 	b.WriteString(spinnerStyle.Render("◐ Creating .gren directory..."))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("○ Writing config.json..."))
+	b.WriteString(WizardDescStyle.Render("○ Writing config.toml..."))
 	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("○ Generating post-create.sh..."))
 
@@ -83,22 +94,21 @@ func (m Model) renderCreatedStep() string {
 
 	b.WriteString(WizardSubtitleStyle.Render("Created files:"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  .gren/config.json"))
+	b.WriteString(WizardDescStyle.Render("  .gren/config.toml"))
 	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("  .gren/post-create.sh"))
 	b.WriteString("\n\n")
 
 	b.WriteString(WizardSubtitleStyle.Render("Next steps:"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("  • Edit post-create.sh to customize setup"))
-	b.WriteString("\n")
 	b.WriteString(WizardDescStyle.Render("  • Press 'n' to create your first worktree"))
+	b.WriteString("\n")
+	b.WriteString(WizardDescStyle.Render("  • Edit .gren/post-create.sh to customize setup"))
 	b.WriteString("\n\n")
 
 	// Options
 	options := []string{
-		"Edit setup script",
-		"Go to dashboard",
+		"Start using gren",
 	}
 
 	for i, opt := range options {

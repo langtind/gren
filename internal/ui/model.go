@@ -66,6 +66,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.initState.analysisComplete = true
 			m.initState.packageManager = m.detectPackageManager()
 			m.initState.postCreateCmd = m.detectPostCreateCommand()
+			m.initState.claudeAvailable = isClaudeAvailable()
 		}
 		return m, nil
 
@@ -76,6 +77,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.initState.currentStep = InitStepComplete
 			} else {
 				m.initState.currentStep = InitStepCreated
+				if msg.warning != "" {
+					m.initState.aiError = msg.warning
+				}
 				// Mark as initialized if successful
 				if m.repoInfo != nil {
 					m.repoInfo.IsInitialized = true
@@ -538,6 +542,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.currentView == CompareView && m.compareState == nil {
 			var cmd tea.Cmd
 			m.compareSpinner, cmd = m.compareSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
+		// Handle spinner animation for AI generation
+		if m.initState != nil && m.initState.currentStep == InitStepAIGenerating {
+			var cmd tea.Cmd
+			m.initState.aiSpinner, cmd = m.initState.aiSpinner.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 

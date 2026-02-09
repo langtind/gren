@@ -54,14 +54,10 @@ func (m Model) renderRecommendationsStep() string {
 	}
 	b.WriteString("\n\n")
 
-	// Options
-	options := []string{
-		"Accept and create configuration",
-		"Customize settings",
-		"Generate setup script with Claude Code",
-	}
+	// Options — AI first if Claude is available
+	labels, _ := initRecommendationOptions(m.initState.claudeAvailable)
 
-	for i, option := range options {
+	for i, option := range labels {
 		b.WriteString(WizardOption(option, i == m.initState.selected))
 		b.WriteString("\n")
 	}

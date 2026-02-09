@@ -10,6 +10,14 @@ import (
 	"github.com/langtind/gren/internal/logging"
 )
 
+// newInitSpinner creates a spinner for AI generation
+func newInitSpinner() spinner.Model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = SpinnerStyle
+	return s
+}
+
 // handleInitKeys handles keyboard input for the init view
 func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.initState == nil {
@@ -75,7 +83,7 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case InitStepPreview:
 			maxItems = 3 // "Create configuration", "Back to customize", "Cancel"
 		case InitStepCreated:
-			maxItems = 2 // "Edit script" and "Skip and continue"
+			maxItems = 1 // "Start using gren"
 		}
 		if m.initState.selected < maxItems-1 {
 			m.initState.selected++
@@ -88,8 +96,9 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.initState.currentStep = InitStepAnalysis
 			return m, m.runProjectAnalysis()
 		case InitStepRecommendations:
-			// Save the choice and go to .gren config step
-			m.initState.recommendationMode = m.initState.selected
+			// Map selected index to recommendation mode based on option order
+			_, modes := initRecommendationOptions(m.initState.claudeAvailable)
+			m.initState.recommendationMode = modes[m.initState.selected]
 			m.initState.currentStep = InitStepGrenConfig
 			m.initState.selected = 0 // Default to "Track in git"
 			logging.Info("InitView: going to .gren configuration")
@@ -101,21 +110,22 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			// Continue based on original recommendation choice
 			switch m.initState.recommendationMode {
-			case 0:
+			case RecommendAccept:
 				// Accept recommendations -> go to preview
 				logging.Info("InitView: going to preview")
 				m.initState.currentStep = InitStepPreview
 				m.initState.selected = 0
-			case 1:
+			case RecommendCustomize:
 				// Customize -> go to customization
 				logging.Info("InitView: entering customization")
 				m.initState.currentStep = InitStepCustomization
 				m.initState.selected = 0
-			case 2:
+			case RecommendAI:
 				// AI generation -> generate script
 				logging.Info("InitView: generating AI setup script")
 				m.initState.currentStep = InitStepAIGenerating
-				return m, m.generateAISetupScript()
+				m.initState.aiSpinner = newInitSpinner()
+				return m, tea.Batch(m.initState.aiSpinner.Tick, m.generateAISetupScript())
 			}
 			return m, nil
 		case InitStepPreview:
@@ -138,25 +148,13 @@ func (m Model) handleInitKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case InitStepCreated:
-			if m.initState.selected == 0 {
-				// Edit script option - open in editor and return to dashboard
-				logging.Info("InitView: opening post-create script for editing")
-				// Mark as initialized
-				if m.repoInfo != nil {
-					m.repoInfo.IsInitialized = true
-				}
-				m.currentView = DashboardView
-				return m, tea.Batch(m.openPostCreateScript(), m.loadProjectInfo())
-			} else {
-				// Go to dashboard directly
-				logging.Info("InitView: going to dashboard")
-				// Mark as initialized
-				if m.repoInfo != nil {
-					m.repoInfo.IsInitialized = true
-				}
-				m.currentView = DashboardView
-				return m, m.loadProjectInfo()
+			// Go to dashboard
+			logging.Info("InitView: going to dashboard")
+			if m.repoInfo != nil {
+				m.repoInfo.IsInitialized = true
 			}
+			m.currentView = DashboardView
+			return m, m.loadProjectInfo()
 		case InitStepCommitConfirm:
 			// Commit changes
 			logging.Info("InitView: committing configuration")
@@ -861,23 +859,47 @@ func (m Model) handleAIResultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	scriptLines := strings.Split(m.initState.aiGeneratedScript, "\n")
+	totalLines := len(scriptLines)
+	_, maxOffset := aiScriptScrollParams(m.height, totalLines)
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Back):
 		m.initState.currentStep = InitStepRecommendations
 		m.initState.selected = 2
+		m.initState.aiScrollOffset = 0
 		return m, nil
-	case key.Matches(msg, m.keys.Up):
-		if m.initState.selected > 0 {
-			m.initState.selected--
+
+	// j/k and arrow keys scroll the script
+	case msg.String() == "j", key.Matches(msg, m.keys.Down):
+		if m.initState.aiScrollOffset < maxOffset {
+			m.initState.aiScrollOffset++
 		}
 		return m, nil
-	case key.Matches(msg, m.keys.Down):
-		if m.initState.selected < 2 { // 3 options
-			m.initState.selected++
+	case msg.String() == "k", key.Matches(msg, m.keys.Up):
+		if m.initState.aiScrollOffset > 0 {
+			m.initState.aiScrollOffset--
 		}
 		return m, nil
+
+	// Tab cycles through options
+	case msg.String() == "tab":
+		m.initState.selected = (m.initState.selected + 1) % 3
+		return m, nil
+
+	// Number keys select options directly
+	case msg.String() == "1":
+		m.initState.selected = 0
+		return m, nil
+	case msg.String() == "2":
+		m.initState.selected = 1
+		return m, nil
+	case msg.String() == "3":
+		m.initState.selected = 2
+		return m, nil
+
 	case key.Matches(msg, m.keys.Enter):
 		switch m.initState.selected {
 		case 0:
@@ -890,7 +912,9 @@ func (m Model) handleAIResultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Regenerate
 			logging.Info("InitView: regenerating AI script")
 			m.initState.currentStep = InitStepAIGenerating
-			return m, m.generateAISetupScript()
+			m.initState.aiScrollOffset = 0
+			m.initState.aiSpinner = newInitSpinner()
+			return m, tea.Batch(m.initState.aiSpinner.Tick, m.generateAISetupScript())
 		case 2:
 			// Edit manually instead - go to customization
 			logging.Info("InitView: editing manually instead")

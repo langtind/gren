@@ -1,10 +1,30 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+// aiScriptScrollParams calculates visible lines and max scroll offset for the AI script preview.
+// Used by both the handler (for input clamping) and the renderer (for display).
+const aiScriptReservedLines = 14 // header(2) + success(2) + options(5) + helpbar(2) + padding(3)
+
+func aiScriptScrollParams(termHeight, totalLines int) (visibleLines, maxOffset int) {
+	visibleLines = termHeight - aiScriptReservedLines
+	if visibleLines < 5 {
+		visibleLines = 5
+	}
+	if visibleLines > totalLines {
+		visibleLines = totalLines
+	}
+	maxOffset = totalLines - visibleLines
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return visibleLines, maxOffset
+}
 
 // renderAIGeneratingStep shows the AI script generation in progress
 func (m Model) renderAIGeneratingStep() string {
@@ -13,13 +33,12 @@ func (m Model) renderAIGeneratingStep() string {
 	b.WriteString(WizardHeader("Generating Setup Script"))
 	b.WriteString("\n\n")
 
-	spinnerStyle := lipgloss.NewStyle().Foreground(ColorAccent)
-	b.WriteString(spinnerStyle.Render("◐ Analyzing project with Claude Code..."))
+	b.WriteString(m.initState.aiSpinner.View() + " Generating with Claude Code...")
 	b.WriteString("\n\n")
 
-	b.WriteString(WizardDescStyle.Render("Using Claude Code CLI to generate a setup script"))
+	b.WriteString(WizardDescStyle.Render("Claude is reading files and analyzing your project structure"))
 	b.WriteString("\n")
-	b.WriteString(WizardDescStyle.Render("This may take a few seconds"))
+	b.WriteString(WizardDescStyle.Render("This may take up to a minute"))
 	b.WriteString("\n")
 
 	return m.wrapWizardContent(b.String())
@@ -41,30 +60,42 @@ func (m Model) renderAIResultStep() string {
 		return m.wrapWizardContent(b.String())
 	}
 
-	b.WriteString(WizardHeader("Claude Code Generated Script"))
-	b.WriteString("\n\n")
-
-	b.WriteString(WizardSuccessStyle.Render("Script generated successfully"))
-	b.WriteString("\n\n")
-
-	// Show a preview of the script (truncated if too long)
-	b.WriteString(WizardSubtitleStyle.Render("Preview:"))
-	b.WriteString("\n")
-
 	scriptLines := strings.Split(m.initState.aiGeneratedScript, "\n")
-	maxLines := 12
-	if len(scriptLines) > maxLines {
-		for i := 0; i < maxLines; i++ {
-			b.WriteString(WizardDescStyle.Render("  " + scriptLines[i]))
-			b.WriteString("\n")
-		}
-		b.WriteString(WizardDescStyle.Render("  ..."))
+	totalLines := len(scriptLines)
+
+	b.WriteString(WizardHeader("Generated Script"))
+	b.WriteString("\n\n")
+
+	b.WriteString(WizardSuccessStyle.Render(fmt.Sprintf("Script generated (%d lines)", totalLines)))
+	b.WriteString("\n\n")
+
+	// Calculate visible area for script preview
+	visibleLines, maxOffset := aiScriptScrollParams(m.height, totalLines)
+
+	// Use local scroll offset for rendering (don't mutate state in View)
+	scrollOffset := m.initState.aiScrollOffset
+	if scrollOffset > maxOffset {
+		scrollOffset = maxOffset
+	}
+
+	// Show script window with scroll
+	codeStyle := lipgloss.NewStyle().Foreground(ColorTextMuted)
+	lineNumStyle := lipgloss.NewStyle().Foreground(ColorBorder)
+
+	for i := scrollOffset; i < scrollOffset+visibleLines && i < totalLines; i++ {
+		lineNum := lineNumStyle.Render(fmt.Sprintf(" %3d ", i+1))
+		b.WriteString(lineNum + codeStyle.Render(scriptLines[i]))
 		b.WriteString("\n")
-	} else {
-		for _, line := range scriptLines {
-			b.WriteString(WizardDescStyle.Render("  " + line))
-			b.WriteString("\n")
-		}
+	}
+
+	// Scroll indicator
+	if totalLines > visibleLines {
+		scrollInfo := fmt.Sprintf("  Lines %d-%d of %d",
+			scrollOffset+1,
+			min(scrollOffset+visibleLines, totalLines),
+			totalLines)
+		b.WriteString(lineNumStyle.Render(scrollInfo))
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
@@ -81,7 +112,9 @@ func (m Model) renderAIResultStep() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(WizardHelpBar("↑↓ select", "enter confirm", "esc back"))
+
+	helpItems := []string{"j/k scroll", "tab select", "enter confirm", "esc back"}
+	b.WriteString(WizardHelpBar(helpItems...))
 
 	return m.wrapWizardContent(b.String())
 }
