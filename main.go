@@ -30,6 +30,9 @@ func main() {
 	}
 	defer logging.Close()
 
+	// Set up embedded skill files for install-skill command
+	cli.SetSkillFS(skillFS, "skills/gren", "gren")
+
 	// Parse command line flags
 	var showHelp = flag.Bool("help", false, "Show help message")
 	var showVersion = flag.Bool("version", false, "Show version information")

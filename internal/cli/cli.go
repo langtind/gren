@@ -134,6 +134,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleConfig(args[2:])
 	case "hook-run":
 		return c.handleHookRun(args[2:])
+	case "install-skill":
+		return c.installSkillCmd(args[2:])
 	case "help":
 		if len(args) > 2 {
 			ShowCommandHelp(args[2])

@@ -108,6 +108,7 @@ func (c *CLI) ShowColoredHelp() {
 
 	// Claude Integration
 	fmt.Println("  " + bold("Claude Integration"))
+	printCommand("install-skill", "", "Install gren skill for Claude Code")
 	printCommand("marker", "<set|get|clear|list>", "Manage activity markers")
 	printCommand("setup-claude-plugin", "", "Create Claude plugin hooks")
 	printCommand("statusline", "", "Output status for shell prompts")
