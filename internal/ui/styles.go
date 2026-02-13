@@ -181,6 +181,9 @@ var (
 
 	StatusWarningStyle = lipgloss.NewStyle().
 				Foreground(ColorWarning)
+
+	StatusRemoteStyle = lipgloss.NewStyle().
+				Foreground(ColorSecondary)
 )
 
 // ═══════════════════════════════════════════════════════════════════════════

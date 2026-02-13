@@ -163,8 +163,24 @@ func (m Model) renderExistingBranchStep() string {
 	// Build content
 	var content strings.Builder
 
-	// Search input
+	// Info about branch types (show when not searching)
 	hasSearch := m.createState.isSearching || m.createState.searchQuery != ""
+	if !hasSearch && len(branches) > 0 {
+		// Check if we have any remote branches to show the hint
+		hasRemote := false
+		for _, b := range branches {
+			if b.IsRemote {
+				hasRemote = true
+				break
+			}
+		}
+		if hasRemote {
+			content.WriteString(WizardDescStyle.Render("🌐 Remote branches (origin/*) are shown with globe icon"))
+			content.WriteString("\n\n")
+		}
+	}
+
+	// Search input
 	if hasSearch {
 		searchStyle := WizardInputStyle.Width(30)
 		if m.createState.isSearching {
@@ -624,20 +640,31 @@ func (m Model) renderBranchList(branches []BranchStatus, maxVisible int, showWar
 		// Build branch line
 		var line strings.Builder
 
-		// Status indicator
-		if branch.IsClean {
+		// Status indicator - use different icon for remote branches
+		if branch.IsRemote {
+			line.WriteString(StatusRemoteStyle.Render("🌐"))
+		} else if branch.IsClean {
 			line.WriteString(StatusCleanStyle.Render("✓"))
 		} else {
 			line.WriteString(StatusWarningStyle.Render("!"))
 		}
 		line.WriteString(" ")
 
-		// Branch name
-		line.WriteString(branch.Name)
+		// Branch name (with styling for remote branches)
+		if branch.IsRemote {
+			line.WriteString(StatusRemoteStyle.Render(branch.Name))
+		} else {
+			line.WriteString(branch.Name)
+		}
 
 		// Current indicator
 		if branch.IsCurrent {
 			line.WriteString(WizardDescStyle.Render(" (current)"))
+		}
+
+		// Remote indicator text (in addition to icon)
+		if branch.IsRemote {
+			line.WriteString(WizardDescStyle.Render(" (remote)"))
 		}
 
 		// Ahead/behind

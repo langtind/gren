@@ -534,8 +534,17 @@ func (m Model) handleCreateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if len(branches) > 0 && m.createState.selectedBranch < len(branches) {
 				selectedBranch := branches[m.createState.selectedBranch]
-				logging.Info("CreateView: selected existing branch: %s", selectedBranch.Name)
-				m.createState.branchName = selectedBranch.Name
+				logging.Info("CreateView: selected existing branch: %s (isRemote=%v)", selectedBranch.Name, selectedBranch.IsRemote)
+
+				// For remote branches, strip the "origin/" prefix
+				// GetBranchSyncStatus and CreateWorktree expect branch name without remote prefix
+				branchName := selectedBranch.Name
+				if selectedBranch.IsRemote {
+					branchName = strings.TrimPrefix(branchName, "origin/")
+					logging.Info("CreateView: stripped remote prefix, using: %s", branchName)
+				}
+
+				m.createState.branchName = branchName
 				m.createState.currentStep = CreateStepConfirm
 			}
 			return m, nil

@@ -169,6 +169,7 @@ type BranchStatus struct {
 	IsCurrent        bool
 	AheadCount       int
 	BehindCount      int
+	IsRemote         bool // True if this is a remote branch (origin/*)
 }
 
 // CreateState holds the state for worktree creation

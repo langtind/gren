@@ -200,99 +200,180 @@ func (m Model) initializeConfigState() tea.Cmd {
 func (m Model) getAvailableBranchesForWorktree() ([]BranchStatus, error) {
 	logging.Debug(" Starting getAvailableBranchesForWorktree")
 
-	// Get all local branches
-	cmd := exec.Command("git", "branch", "-v")
-	output, err := cmd.Output()
-	if err != nil {
-		logging.Debug(" git branch -v failed: %v", err)
-		return nil, fmt.Errorf("failed to run 'git branch -v': %w", err)
-	}
-
-	outputStr := string(output)
-	logging.Debug(" git branch -v output: %q", outputStr)
-
-	if strings.TrimSpace(outputStr) == "" {
-		return nil, fmt.Errorf("git branch command returned empty output")
-	}
-
 	var branches []BranchStatus
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 
-	// Get existing worktree branches for reference (but don't filter them out completely)
+	// Get existing worktree branches for filtering
 	existingWorktreeBranches := make(map[string]bool)
 	for _, wt := range m.worktrees {
 		existingWorktreeBranches[wt.Branch] = true
 	}
 	logging.Debug(" Existing worktree branches: %v", existingWorktreeBranches)
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Parse branch line format: "* main abc123 commit message" or "  feature def456 commit message"
-		isCurrent := strings.HasPrefix(line, "* ")
-
-		// Remove prefix and extract branch name safely
-		var branchName string
-		if isCurrent {
-			// Remove "* " and get first field
-			parts := strings.Fields(line[2:])
-			if len(parts) < 2 {
-				continue
-			}
-			branchName = parts[0]
-		} else {
-			// For non-current branches, skip leading spaces and get first field
-			parts := strings.Fields(line)
-			if len(parts) < 2 {
-				continue
-			}
-			branchName = parts[0]
-		}
-		logging.Debug(" Processing branch: %s, isCurrent: %v", branchName, isCurrent)
-
-		// Skip if this branch already has a worktree
-		if existingWorktreeBranches[branchName] {
-			logging.Debug(" Skipping branch %s - already has worktree", branchName)
-			continue
-		}
-
-		// Validate that branch exists and is a valid reference
-		validateCmd := exec.Command("git", "rev-parse", "--verify", branchName)
-		if err := validateCmd.Run(); err != nil {
-			logging.Debug(" Branch %s failed validation: %v", branchName, err)
-			// Skip invalid branches
-			continue
-		}
-		logging.Debug(" Branch %s passed validation", branchName)
-
-		// Get detailed status for this branch
-		branchStatus := BranchStatus{
-			Name:             branchName,
-			IsClean:          true, // Simplified for now
-			UncommittedFiles: 0,
-			UntrackedFiles:   0,
-			IsCurrent:        isCurrent,
-			AheadCount:       0,
-			BehindCount:      0,
-		}
-
-		branches = append(branches, branchStatus)
-		logging.Debug(" Added branch: %s", branchName)
+	// ========================================================================
+	// Step 1: Get all local branches
+	// ========================================================================
+	localCmd := exec.Command("git", "branch", "-v")
+	localOutput, err := localCmd.Output()
+	if err != nil {
+		logging.Debug(" git branch -v failed: %v", err)
+		return nil, fmt.Errorf("failed to run 'git branch -v': %w", err)
 	}
 
-	logging.Debug(" Final branches count: %d", len(branches))
+	localOutputStr := string(localOutput)
+	logging.Debug(" git branch -v output: %q", localOutputStr)
+
+	// Track which local branches we have (to avoid duplicates with remotes)
+	localBranchNames := make(map[string]bool)
+
+	if strings.TrimSpace(localOutputStr) != "" {
+		lines := strings.Split(strings.TrimSpace(localOutputStr), "\n")
+
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			// Parse branch line format: "* main abc123 commit message" or "  feature def456 commit message"
+			isCurrent := strings.HasPrefix(line, "* ")
+
+			// Remove prefix and extract branch name safely
+			var branchName string
+			if isCurrent {
+				// Remove "* " and get first field
+				parts := strings.Fields(line[2:])
+				if len(parts) < 2 {
+					continue
+				}
+				branchName = parts[0]
+			} else {
+				// For non-current branches, skip leading spaces and get first field
+				parts := strings.Fields(line)
+				if len(parts) < 2 {
+					continue
+				}
+				branchName = parts[0]
+			}
+			logging.Debug(" Processing local branch: %s, isCurrent: %v", branchName, isCurrent)
+
+			localBranchNames[branchName] = true
+
+			// Skip if this branch already has a worktree
+			if existingWorktreeBranches[branchName] {
+				logging.Debug(" Skipping branch %s - already has worktree", branchName)
+				continue
+			}
+
+			// Validate that branch exists and is a valid reference
+			validateCmd := exec.Command("git", "rev-parse", "--verify", branchName)
+			if err := validateCmd.Run(); err != nil {
+				logging.Debug(" Branch %s failed validation: %v", branchName, err)
+				continue
+			}
+			logging.Debug(" Branch %s passed validation", branchName)
+
+			// Add local branch
+			branchStatus := BranchStatus{
+				Name:             branchName,
+				IsClean:          true, // Simplified for now
+				UncommittedFiles: 0,
+				UntrackedFiles:   0,
+				IsCurrent:        isCurrent,
+				AheadCount:       0,
+				BehindCount:      0,
+				IsRemote:         false,
+			}
+
+			branches = append(branches, branchStatus)
+			logging.Debug(" Added local branch: %s", branchName)
+		}
+	}
+
+	// ========================================================================
+	// Step 2: Get remote branches
+	// ========================================================================
+	remoteCmd := exec.Command("git", "branch", "-r")
+	remoteOutput, err := remoteCmd.Output()
+	if err != nil {
+		logging.Debug(" git branch -r failed (might not have remotes): %v", err)
+		// This is OK - repo might not have remotes configured
+	} else {
+		remoteOutputStr := string(remoteOutput)
+		logging.Debug(" git branch -r output: %q", remoteOutputStr)
+
+		if strings.TrimSpace(remoteOutputStr) != "" {
+			remoteLines := strings.Split(strings.TrimSpace(remoteOutputStr), "\n")
+
+			for _, line := range remoteLines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+
+				// Skip HEAD pointer (origin/HEAD -> origin/main)
+				if strings.Contains(line, "->") {
+					continue
+				}
+
+				// Parse remote branch name (e.g., "origin/feature-branch")
+				remoteBranchName := line
+				logging.Debug(" Processing remote branch: %s", remoteBranchName)
+
+				// Extract local part of branch name (strip origin/ prefix)
+				// to check if we already have it locally
+				localPart := strings.TrimPrefix(remoteBranchName, "origin/")
+
+				// Skip if we already have this branch locally
+				if localBranchNames[localPart] {
+					logging.Debug(" Skipping remote %s - already have local branch %s", remoteBranchName, localPart)
+					continue
+				}
+
+				// Skip if this remote branch already has a worktree
+				// (Check both with and without origin/ prefix)
+				if existingWorktreeBranches[remoteBranchName] || existingWorktreeBranches[localPart] {
+					logging.Debug(" Skipping remote %s - already has worktree", remoteBranchName)
+					continue
+				}
+
+				// Validate that remote branch exists
+				validateCmd := exec.Command("git", "rev-parse", "--verify", remoteBranchName)
+				if err := validateCmd.Run(); err != nil {
+					logging.Debug(" Remote branch %s failed validation: %v", remoteBranchName, err)
+					continue
+				}
+				logging.Debug(" Remote branch %s passed validation", remoteBranchName)
+
+				// Add remote branch
+				branchStatus := BranchStatus{
+					Name:             remoteBranchName,
+					IsClean:          true,
+					UncommittedFiles: 0,
+					UntrackedFiles:   0,
+					IsCurrent:        false,
+					AheadCount:       0,
+					BehindCount:      0,
+					IsRemote:         true,
+				}
+
+				branches = append(branches, branchStatus)
+				logging.Debug(" Added remote branch: %s", remoteBranchName)
+			}
+		}
+	}
+
+	// ========================================================================
+	// Return results
+	// ========================================================================
+	logging.Debug(" Final branches count: %d (local + remote)", len(branches))
 	for i, b := range branches {
-		logging.Debug(" Branch %d: %s", i, b.Name)
+		logging.Debug(" Branch %d: %s (remote=%v)", i, b.Name, b.IsRemote)
 	}
 
-	// Debug: return info about what we found
+	// Allow empty list if repo has no branches (rare but possible)
 	if len(branches) == 0 {
-		totalLines := len(lines)
-		existingCount := len(existingWorktreeBranches)
-		return nil, fmt.Errorf("no available branches found - processed %d lines, %d existing worktrees", totalLines, existingCount)
+		logging.Debug(" No available branches found")
+		return nil, fmt.Errorf("no available branches found - all branches may have worktrees")
 	}
 
 	return branches, nil
