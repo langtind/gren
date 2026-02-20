@@ -1557,6 +1557,7 @@ func (c *CLI) handleForEach(args []string) error {
 	fs := flag.NewFlagSet("for-each", flag.ExitOnError)
 	skipCurrent := fs.Bool("skip-current", false, "Skip the current worktree")
 	skipMain := fs.Bool("skip-main", false, "Skip the main worktree")
+	failFast := fs.Bool("fail-fast", false, "Stop after first failure")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren for-each [options] -- <command>\n")
@@ -1578,6 +1579,7 @@ func (c *CLI) handleForEach(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren for-each -- npm install\n")
 		fmt.Fprintf(fs.Output(), "  gren for-each -- \"echo Branch: {{ branch }}\"\n")
 		fmt.Fprintf(fs.Output(), "  gren for-each --skip-main -- git pull\n")
+		fmt.Fprintf(fs.Output(), "  gren for-each --fail-fast -- npm test\n")
 	}
 
 	// Check for help flag before looking for -- separator
@@ -1617,6 +1619,7 @@ func (c *CLI) handleForEach(args []string) error {
 		Command:     command,
 		SkipCurrent: *skipCurrent,
 		SkipMain:    *skipMain,
+		FailFast:    *failFast,
 	}
 
 	results, err := c.worktreeManager.ForEach(ctx, opts)
