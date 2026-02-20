@@ -307,6 +307,7 @@ type WorktreeJSON struct {
 	PRState        string `json:"pr_state,omitempty"`
 	PRURL          string `json:"pr_url,omitempty"`
 	CIStatus       string `json:"ci_status,omitempty"`
+	StaleReason    string `json:"stale_reason,omitempty"`
 }
 
 // handleList handles the list command
@@ -346,10 +347,15 @@ func (c *CLI) handleList(args []string) error {
 
 	// In JSON mode: no spinner, no GitHub enrichment (keep output clean)
 	if jsonMode {
+		if *verbose {
+			fmt.Fprintln(os.Stderr, "warning: -v is ignored when --format=json is set")
+		}
 		worktrees, err := c.worktreeManager.ListWorktrees(ctx)
 		if err != nil {
 			logging.Error("CLI list (json) failed: %v", err)
-			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
+			errEnc := json.NewEncoder(os.Stdout)
+			errEnc.SetIndent("", "  ")
+			_ = errEnc.Encode(map[string]string{"error": err.Error()})
 			return err
 		}
 		items := make([]WorktreeJSON, len(worktrees))
@@ -372,6 +378,7 @@ func (c *CLI) handleList(args []string) error {
 				PRState:        wt.PRState,
 				PRURL:          wt.PRURL,
 				CIStatus:       wt.CIStatus,
+				StaleReason:    wt.StaleReason,
 			}
 		}
 		enc := json.NewEncoder(os.Stdout)
