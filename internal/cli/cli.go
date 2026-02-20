@@ -298,10 +298,10 @@ type WorktreeJSON struct {
 	IsMain         bool   `json:"is_main"`
 	Status         string `json:"status"`
 	LastCommit     string `json:"last_commit,omitempty"`
-	StagedCount    int    `json:"staged_count,omitempty"`
-	ModifiedCount  int    `json:"modified_count,omitempty"`
-	UnpushedCount  int    `json:"unpushed_count,omitempty"`
-	UntrackedCount int    `json:"untracked_count,omitempty"`
+	StagedCount    int    `json:"staged_count"`
+	ModifiedCount  int    `json:"modified_count"`
+	UnpushedCount  int    `json:"unpushed_count"`
+	UntrackedCount int    `json:"untracked_count"`
 	BranchStatus   string `json:"branch_status,omitempty"`
 	PRNumber       int    `json:"pr_number,omitempty"`
 	PRState        string `json:"pr_state,omitempty"`
@@ -349,6 +349,7 @@ func (c *CLI) handleList(args []string) error {
 		worktrees, err := c.worktreeManager.ListWorktrees(ctx)
 		if err != nil {
 			logging.Error("CLI list (json) failed: %v", err)
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"error": err.Error()})
 			return err
 		}
 		items := make([]WorktreeJSON, len(worktrees))
