@@ -126,6 +126,8 @@ func (c *CLI) ParseAndExecute(args []string) error {
 		return c.handleMerge(args[2:])
 	case "for-each":
 		return c.handleForEach(args[2:])
+	case "diff":
+		return c.handleDiff(args[2:])
 	case "step":
 		return c.handleStep(args[2:])
 	case "completion":
@@ -1651,6 +1653,109 @@ func (c *CLI) handleForEach(args []string) error {
 
 	if failCount > 0 {
 		return fmt.Errorf("%d worktree(s) failed", failCount)
+	}
+
+	return nil
+}
+
+// handleDiff shows all changes on the current branch since it diverged from the
+// default (or specified) base branch: committed, staged, unstaged, and untracked.
+func (c *CLI) handleDiff(args []string) error {
+	fs := flag.NewFlagSet("diff", flag.ExitOnError)
+	base := fs.String("base", "", "Base branch to diff against (default: auto-detect default branch)")
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren diff [options]\n")
+		fmt.Fprintf(fs.Output(), "\nShow all changes since branching from the base branch\n\n")
+		fmt.Fprintf(fs.Output(), "Options:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nExamples:\n")
+		fmt.Fprintf(fs.Output(), "  gren diff\n")
+		fmt.Fprintf(fs.Output(), "  gren diff --base main\n")
+		fmt.Fprintf(fs.Output(), "  gren diff | delta\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Determine base branch
+	baseBranch := *base
+	if baseBranch == "" {
+		out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "origin/HEAD").Output()
+		if err != nil {
+			// fallback: try main then master
+			for _, candidate := range []string{"main", "master"} {
+				if err2 := exec.Command("git", "rev-parse", "--verify", candidate).Run(); err2 == nil {
+					baseBranch = candidate
+					break
+				}
+			}
+		} else {
+			// origin/HEAD -> strip "origin/" prefix
+			baseBranch = strings.TrimSpace(strings.TrimPrefix(string(out), "origin/"))
+		}
+		if baseBranch == "" {
+			return fmt.Errorf("could not determine default branch; use --base to specify one")
+		}
+	}
+
+	// Verify base branch exists
+	if err := exec.Command("git", "rev-parse", "--verify", baseBranch).Run(); err != nil {
+		return fmt.Errorf("base branch %q not found", baseBranch)
+	}
+
+	// Find merge-base (divergence point)
+	mergeBaseOut, err := exec.Command("git", "merge-base", "HEAD", baseBranch).Output()
+	if err != nil {
+		return fmt.Errorf("failed to find merge-base with %q: %w", baseBranch, err)
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOut))
+
+	// 1. Committed changes since merge-base
+	committedCmd := exec.Command("git", "diff", mergeBase, "HEAD")
+	committedCmd.Stdout = os.Stdout
+	committedCmd.Stderr = os.Stderr
+	if err := committedCmd.Run(); err != nil {
+		// non-zero exit is normal if there are no committed changes
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("git diff (committed) failed: %w", err)
+		}
+	}
+
+	// 2. Staged changes (index vs HEAD)
+	stagedCmd := exec.Command("git", "diff", "--cached")
+	stagedCmd.Stdout = os.Stdout
+	stagedCmd.Stderr = os.Stderr
+	if err := stagedCmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("git diff --cached (staged) failed: %w", err)
+		}
+	}
+
+	// 3. Unstaged changes (working tree vs index)
+	unstagedCmd := exec.Command("git", "diff")
+	unstagedCmd.Stdout = os.Stdout
+	unstagedCmd.Stderr = os.Stderr
+	if err := unstagedCmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("git diff (unstaged) failed: %w", err)
+		}
+	}
+
+	// 4. Untracked files (shown as new-file diffs)
+	untrackedOut, err := exec.Command("git", "ls-files", "--others", "--exclude-standard").Output()
+	if err != nil {
+		return fmt.Errorf("git ls-files failed: %w", err)
+	}
+	for _, file := range strings.Split(strings.TrimSpace(string(untrackedOut)), "\n") {
+		if file == "" {
+			continue
+		}
+		untrackedCmd := exec.Command("git", "diff", "--no-index", "/dev/null", file)
+		untrackedCmd.Stdout = os.Stdout
+		// git diff --no-index exits 1 when files differ (always for new files), ignore
+		_ = untrackedCmd.Run()
 	}
 
 	return nil
