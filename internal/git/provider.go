@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,36 @@ type CIProvider interface {
 	GetCIStatus(branch string) (*CIInfo, error)
 	// OpenPR opens the PR/MR in browser
 	OpenPR(branch string) error
+	// GetBranchForPRNumber returns the head branch name for a PR/MR number
+	GetBranchForPRNumber(number int) (string, error)
+}
+
+// ParsePRRef parses a "pr:<number>" or "mr:<number>" reference.
+// Returns the prefix ("pr" or "mr"), the number, and an error if the ref is invalid.
+func ParsePRRef(ref string) (prefix string, number int, err error) {
+	var numStr string
+	switch {
+	case strings.HasPrefix(ref, "pr:"):
+		prefix = "pr"
+		numStr = strings.TrimPrefix(ref, "pr:")
+	case strings.HasPrefix(ref, "mr:"):
+		prefix = "mr"
+		numStr = strings.TrimPrefix(ref, "mr:")
+	default:
+		return "", 0, fmt.Errorf("%q is not a pr:/mr: reference", ref)
+	}
+
+	n, parseErr := strconv.Atoi(numStr)
+	if parseErr != nil || n <= 0 {
+		return "", 0, fmt.Errorf("invalid %s reference %q: number must be a positive integer", prefix, ref)
+	}
+	return prefix, n, nil
+}
+
+// IsPRRef returns true if the string is a valid pr:/mr: reference.
+func IsPRRef(ref string) bool {
+	_, _, err := ParsePRRef(ref)
+	return err == nil
 }
 
 // PRInfo contains pull/merge request information
@@ -151,6 +182,25 @@ func (g *GitHubProvider) OpenPR(branch string) error {
 	return cmd.Run()
 }
 
+func (g *GitHubProvider) GetBranchForPRNumber(number int) (string, error) {
+	cmd := exec.Command("gh", "pr", "view", fmt.Sprintf("%d", number), "--json", "headRefName")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch PR #%d: %w", number, err)
+	}
+
+	var result struct {
+		HeadRefName string `json:"headRefName"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", fmt.Errorf("failed to parse PR response: %w", err)
+	}
+	if result.HeadRefName == "" {
+		return "", fmt.Errorf("PR #%d has no head branch", number)
+	}
+	return result.HeadRefName, nil
+}
+
 // GitLabProvider implements CIProvider for GitLab
 type GitLabProvider struct {
 	host string // For self-hosted GitLab instances
@@ -260,4 +310,23 @@ func (g *GitLabProvider) GetCIStatus(branch string) (*CIInfo, error) {
 func (g *GitLabProvider) OpenPR(branch string) error {
 	cmd := exec.Command("glab", "mr", "view", branch, "--web")
 	return cmd.Run()
+}
+
+func (g *GitLabProvider) GetBranchForPRNumber(number int) (string, error) {
+	cmd := exec.Command("glab", "mr", "view", fmt.Sprintf("%d", number), "--output", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch MR !%d: %w", number, err)
+	}
+
+	var mr struct {
+		SourceBranch string `json:"source_branch"`
+	}
+	if err := json.Unmarshal(output, &mr); err != nil {
+		return "", fmt.Errorf("failed to parse MR response: %w", err)
+	}
+	if mr.SourceBranch == "" {
+		return "", fmt.Errorf("MR !%d has no source branch", number)
+	}
+	return mr.SourceBranch, nil
 }

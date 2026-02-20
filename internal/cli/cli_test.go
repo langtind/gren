@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1345,5 +1346,191 @@ func TestHandleNavigateStoresPreviousPath(t *testing.T) {
 	}
 	if resolvedStored != resolvedDir {
 		t.Errorf("stored previous path = %q, want %q (resolved)", resolvedStored, resolvedDir)
+	}
+}
+
+// --- pr:/mr: shorthand tests ---
+
+// mockCIProvider is a controllable CIProvider for testing pr: resolution.
+type mockCIProvider struct {
+	available   bool
+	branchByNum map[int]string // number → branch name
+	branchErr   error
+}
+
+func (m *mockCIProvider) Name() string                                   { return "mock" }
+func (m *mockCIProvider) IsAvailable() bool                              { return m.available }
+func (m *mockCIProvider) GetPRInfo(branch string) (*git.PRInfo, error)   { return nil, nil }
+func (m *mockCIProvider) GetCIStatus(branch string) (*git.CIInfo, error) { return nil, nil }
+func (m *mockCIProvider) OpenPR(branch string) error                     { return nil }
+func (m *mockCIProvider) GetBranchForPRNumber(number int) (string, error) {
+	if m.branchErr != nil {
+		return "", m.branchErr
+	}
+	if branch, ok := m.branchByNum[number]; ok {
+		return branch, nil
+	}
+	return "", fmt.Errorf("PR #%d not found", number)
+}
+
+func TestHandleCreate_PRShorthand_Positional(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	// Inject a mock provider that resolves PR #42 to "feature/auth"
+	c.prProvider = &mockCIProvider{
+		available:   true,
+		branchByNum: map[int]string{42: "feature/auth"},
+	}
+
+	// First create the branch so it exists for --existing
+	exec.Command("git", "-C", dir, "checkout", "-b", "feature/auth").Run()
+	exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "pr:42"})
+	if err != nil {
+		t.Fatalf("create pr:42 failed: %v", err)
+	}
+
+	// Verify the worktree was created on the correct branch
+	worktreeDir := filepath.Join(filepath.Dir(dir), filepath.Base(dir)+"-worktrees")
+	entries, _ := os.ReadDir(worktreeDir)
+	var found bool
+	for _, e := range entries {
+		if e.IsDir() {
+			// Check branch in the worktree
+			out, err := exec.Command("git", "-C", filepath.Join(worktreeDir, e.Name()), "branch", "--show-current").Output()
+			if err == nil && strings.TrimSpace(string(out)) == "feature/auth" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected a worktree on branch feature/auth to be created")
+	}
+}
+
+func TestHandleCreate_PRShorthand_FlagN(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	c.prProvider = &mockCIProvider{
+		available:   true,
+		branchByNum: map[int]string{7: "bugfix/login"},
+	}
+
+	exec.Command("git", "-C", dir, "checkout", "-b", "bugfix/login").Run()
+	exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "-n", "pr:7"})
+	if err != nil {
+		t.Fatalf("create -n pr:7 failed: %v", err)
+	}
+}
+
+func TestHandleCreate_PRShorthand_ProviderUnavailable(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	c.prProvider = &mockCIProvider{available: false}
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "pr:42"})
+	if err == nil {
+		t.Fatal("expected error when provider unavailable, got nil")
+	}
+	if !strings.Contains(err.Error(), "not available") && !strings.Contains(err.Error(), "not installed") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestHandleCreate_PRShorthand_InvalidNumber(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+	c.prProvider = &mockCIProvider{available: true}
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "pr:abc"})
+	if err == nil {
+		t.Fatal("expected error for invalid PR number, got nil")
+	}
+}
+
+func TestHandleCreate_PRShorthand_ProviderError(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+	c.prProvider = &mockCIProvider{
+		available: true,
+		branchErr: fmt.Errorf("API rate limit exceeded"),
+	}
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "pr:42"})
+	if err == nil {
+		t.Fatal("expected error when provider returns error, got nil")
+	}
+	if !strings.Contains(err.Error(), "resolve") {
+		t.Errorf("expected error message to mention 'resolve', got: %v", err)
+	}
+}
+
+func TestHandleCreate_PRShorthand_MRPrefix(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	c.prProvider = &mockCIProvider{
+		available:   true,
+		branchByNum: map[int]string{101: "feature/payments"},
+	}
+
+	exec.Command("git", "-C", dir, "checkout", "-b", "feature/payments").Run()
+	exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "mr:101"})
+	if err != nil {
+		t.Fatalf("create mr:101 failed: %v", err)
 	}
 }
