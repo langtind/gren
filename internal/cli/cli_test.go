@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1533,4 +1534,142 @@ func TestHandleCreate_PRShorthand_MRPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create mr:101 failed: %v", err)
 	}
+}
+
+// --- JSON output tests ---
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	fn()
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	return buf.String()
+}
+
+func TestHandleListJSONFormat(t *testing.T) {
+	dir, cleanup := setupTempGitRepo(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = c.ParseAndExecute([]string{"gren", "list", "--format=json"})
+	})
+	if err != nil {
+		t.Fatalf("list --format=json error: %v", err)
+	}
+
+	// Must be valid JSON array
+	var worktrees []map[string]interface{}
+	if jsonErr := json.Unmarshal([]byte(out), &worktrees); jsonErr != nil {
+		t.Fatalf("output is not valid JSON: %v\noutput: %s", jsonErr, out)
+	}
+
+	if len(worktrees) == 0 {
+		t.Fatal("expected at least one worktree in JSON output")
+	}
+
+	// Each entry must have required fields
+	required := []string{"branch", "path", "is_current", "is_main", "status"}
+	for _, field := range required {
+		if _, ok := worktrees[0][field]; !ok {
+			t.Errorf("JSON output missing required field %q", field)
+		}
+	}
+}
+
+func TestHandleListJSONNoSpinnerNoColors(t *testing.T) {
+	dir, cleanup := setupTempGitRepo(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = c.ParseAndExecute([]string{"gren", "list", "--format=json"})
+	})
+	if err != nil {
+		t.Fatalf("list --format=json error: %v", err)
+	}
+
+	// Output must be parseable JSON — no spinner characters or ANSI escapes mixed in
+	trimmed := strings.TrimSpace(out)
+	if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
+		t.Errorf("JSON output must start with '[' and end with ']', got: %q", trimmed[:min(len(trimmed), 80)])
+	}
+}
+
+func TestHandleListJSONIsCurrent(t *testing.T) {
+	dir, cleanup := setupTempGitRepo(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = c.ParseAndExecute([]string{"gren", "list", "--format=json"})
+	})
+	if err != nil {
+		t.Fatalf("list --format=json error: %v", err)
+	}
+
+	var worktrees []map[string]interface{}
+	if jsonErr := json.Unmarshal([]byte(out), &worktrees); jsonErr != nil {
+		t.Fatalf("invalid JSON: %v", jsonErr)
+	}
+
+	// Exactly one worktree should be marked current
+	currentCount := 0
+	for _, wt := range worktrees {
+		if isCurrent, ok := wt["is_current"].(bool); ok && isCurrent {
+			currentCount++
+		}
+	}
+	if currentCount != 1 {
+		t.Errorf("expected exactly 1 current worktree, got %d", currentCount)
+	}
+}
+
+func TestHandleListJSONErrorIsJSON(t *testing.T) {
+	// Run list outside a git repo — should still return an error (or empty JSON)
+	// but must not crash with human-readable text mixed with JSON.
+	// We just verify the flag is accepted without panicking.
+	mockRepo := newMockRepository()
+	mockRepo.RepoInfoErr = fmt.Errorf("not a git repo")
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+
+	// This should either succeed (empty array) or return an error — but not panic.
+	_ = c.ParseAndExecute([]string{"gren", "list", "--format=json"})
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
