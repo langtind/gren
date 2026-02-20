@@ -682,8 +682,16 @@ func (c *CLI) handleNavigate(args []string) error {
 		if err != nil || prevPath == "" {
 			return fmt.Errorf("no previous worktree")
 		}
+		resolvedPrev, _ := filepath.EvalSymlinks(prevPath)
+		if resolvedPrev == "" {
+			resolvedPrev = prevPath
+		}
 		for i, wt := range worktrees {
-			if wt.Path == prevPath {
+			resolvedWt, _ := filepath.EvalSymlinks(wt.Path)
+			if resolvedWt == "" {
+				resolvedWt = wt.Path
+			}
+			if resolvedWt == resolvedPrev {
 				targetWorktree = &worktrees[i]
 				break
 			}

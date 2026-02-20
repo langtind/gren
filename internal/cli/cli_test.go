@@ -1262,7 +1262,7 @@ func TestHandleNavigatePreviousSuccess(t *testing.T) {
 	cli := NewCLI(gitRepo, configManager)
 
 	// Create a target worktree
-	if err := cli.ParseAndExecute([]string{"gren", "create", "-n", "prev-target"}); err != nil {
+	if err := cli.ParseAndExecute([]string{"gren", "create", "-y", "-n", "prev-target"}); err != nil {
 		t.Fatalf("create worktree failed: %v", err)
 	}
 
@@ -1307,7 +1307,7 @@ func TestHandleNavigateStoresPreviousPath(t *testing.T) {
 	cli := NewCLI(gitRepo, configManager)
 
 	// Create a target worktree
-	if err := cli.ParseAndExecute([]string{"gren", "create", "-n", "mark-target"}); err != nil {
+	if err := cli.ParseAndExecute([]string{"gren", "create", "-y", "-n", "mark-target"}); err != nil {
 		t.Fatalf("create worktree failed: %v", err)
 	}
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"time"
@@ -18,8 +19,12 @@ func (wm *WorktreeManager) GetPreviousWorktreePath() (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "config", "--local", previousWorktreeConfigKey)
 	output, err := cmd.Output()
 	if err != nil {
-		// git config exits with code 1 when the key doesn't exist — not an error
-		return "", nil
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			// git config exits with code 1 when the key doesn't exist — not an error
+			return "", nil
+		}
+		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
 }
