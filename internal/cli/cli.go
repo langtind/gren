@@ -75,6 +75,7 @@ type CLI struct {
 	gitRepo         git.Repository
 	configManager   *config.Manager
 	worktreeManager *core.WorktreeManager
+	prProvider      git.CIProvider // injectable for tests; nil means auto-detect
 }
 
 // NewCLI creates a new CLI instance
@@ -162,6 +163,8 @@ func (c *CLI) handleCreate(args []string) error {
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren create -n <name> [options]\n")
+		fmt.Fprintf(fs.Output(), "       gren create pr:<number>              # Check out a GitHub PR\n")
+		fmt.Fprintf(fs.Output(), "       gren create mr:<number>              # Check out a GitLab MR\n")
 		fmt.Fprintf(fs.Output(), "\nCreate a new git worktree\n\n")
 		fmt.Fprintf(fs.Output(), "Options:\n")
 		fs.PrintDefaults()
@@ -169,19 +172,45 @@ func (c *CLI) handleCreate(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren create -n feature-branch\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n hotfix -b main\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n existing-feature --existing --branch feature-branch\n")
-		fmt.Fprintf(fs.Output(), "  gren create -n feat-auth -x claude              # Create and start Claude\n")
-		fmt.Fprintf(fs.Output(), "  gren create -n feat-ui -x \"npm run dev\"         # Create and start dev server\n")
-		fmt.Fprintf(fs.Output(), "  gren create -n feat-api -y                      # Auto-approve hooks\n")
+		fmt.Fprintf(fs.Output(), "  gren create pr:42                         # Check out PR #42 branch\n")
+		fmt.Fprintf(fs.Output(), "  gren create mr:101                        # Check out MR !101 branch\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-auth -x claude        # Create and start Claude\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-ui -x \"npm run dev\"   # Create and start dev server\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-api -y                # Auto-approve hooks\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
+	// Support positional pr:/mr: syntax: gren create pr:42
+	if *name == "" && len(fs.Args()) == 1 && git.IsPRRef(fs.Args()[0]) {
+		*name = fs.Args()[0]
+	}
+
 	if *name == "" {
 		logging.Error("CLI create: worktree name is required")
 		fs.Usage()
 		return fmt.Errorf("worktree name is required")
+	}
+
+	// Resolve pr:/mr: shorthands to branch names.
+	// Accepts pr:42 in either -n or --branch.
+	prRef := *name
+	if !git.IsPRRef(prRef) {
+		prRef = *branch
+	}
+	if git.IsPRRef(prRef) {
+		resolvedBranch, resolvedName, err := c.resolvePRRef(prRef)
+		if err != nil {
+			return err
+		}
+		*branch = resolvedBranch
+		if git.IsPRRef(*name) {
+			*name = resolvedName
+		}
+		*existing = true
+		logging.Info("CLI create: resolved %s → branch=%s name=%s", prRef, *branch, *name)
 	}
 
 	// If no base branch specified for CLI, default to current branch
@@ -2180,6 +2209,36 @@ func (c *CLI) showShellStatus() {
 	fmt.Println("💡 To enable navigation features, add to your shell config:")
 	fmt.Println("   eval \"$(gren shell-init zsh)\"   # for zsh")
 	fmt.Println("   eval \"$(gren shell-init bash)\"  # for bash")
+}
+
+// resolvePRRef resolves a "pr:<number>" or "mr:<number>" reference to its head branch name.
+// Returns (branchName, worktreeName, error).
+func (c *CLI) resolvePRRef(ref string) (branch, name string, err error) {
+	prefix, number, parseErr := git.ParsePRRef(ref)
+	if parseErr != nil {
+		return "", "", parseErr
+	}
+
+	provider := c.prProvider
+	if provider == nil {
+		provider = git.DetectProvider()
+	}
+
+	if !provider.IsAvailable() {
+		return "", "", fmt.Errorf(
+			"provider CLI (%s) is not installed or not authenticated; cannot resolve %s",
+			provider.Name(), ref,
+		)
+	}
+
+	branchName, err := provider.GetBranchForPRNumber(number)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve %s: %w", ref, err)
+	}
+
+	// Derive a safe worktree name: "pr-42" or "mr-101"
+	wtName := fmt.Sprintf("%s-%d", prefix, number)
+	return branchName, wtName, nil
 }
 
 // handleHookRun runs hooks with terminal access (used by TUI for interactive hooks).

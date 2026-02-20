@@ -234,6 +234,78 @@ func TestGitLabPipelineStatuses(t *testing.T) {
 	}
 }
 
+func TestParsePRRef(t *testing.T) {
+	tests := []struct {
+		ref        string
+		wantPrefix string
+		wantNumber int
+		wantErr    bool
+	}{
+		{"pr:42", "pr", 42, false},
+		{"pr:1", "pr", 1, false},
+		{"pr:9999", "pr", 9999, false},
+		{"mr:101", "mr", 101, false},
+		{"mr:1", "mr", 1, false},
+		// Invalid cases
+		{"pr:", "", 0, true},
+		{"mr:", "", 0, true},
+		{"pr:abc", "", 0, true},
+		{"pr:-1", "", 0, true},
+		{"pr:0", "", 0, true},
+		{"feature/auth", "", 0, true},
+		{"", "", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			prefix, number, err := ParsePRRef(tt.ref)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParsePRRef(%q) error = %v, wantErr %v", tt.ref, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if prefix != tt.wantPrefix {
+					t.Errorf("ParsePRRef(%q) prefix = %q, want %q", tt.ref, prefix, tt.wantPrefix)
+				}
+				if number != tt.wantNumber {
+					t.Errorf("ParsePRRef(%q) number = %d, want %d", tt.ref, number, tt.wantNumber)
+				}
+			}
+		})
+	}
+}
+
+func TestIsPRRef(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{"pr:42", true},
+		{"mr:101", true},
+		{"pr:1", true},
+		{"feature/auth", false},
+		{"main", false},
+		{"pr:", false},
+		{"", false},
+		{"pr:abc", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			got := IsPRRef(tt.ref)
+			if got != tt.want {
+				t.Errorf("IsPRRef(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCIProviderInterface_GetBranchForPRNumber(t *testing.T) {
+	// Ensure both providers implement the updated interface
+	var _ CIProvider = &GitHubProvider{}
+	var _ CIProvider = &GitLabProvider{}
+}
+
 func TestGitHubCheckStates(t *testing.T) {
 	tests := []struct {
 		name       string
