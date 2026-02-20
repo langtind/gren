@@ -95,6 +95,7 @@ type ForEachOptions struct {
 	Command     []string // Command and arguments to run
 	SkipCurrent bool     // Skip the current worktree
 	SkipMain    bool     // Skip the main worktree
+	FailFast    bool     // Stop after first failure (default: continue)
 	Parallel    bool     // Run in parallel (default: sequential)
 }
 
@@ -1555,6 +1556,10 @@ func (wm *WorktreeManager) ForEach(ctx context.Context, opts ForEachOptions) ([]
 		}
 
 		results = append(results, result)
+
+		if opts.FailFast && result.Error != nil {
+			break
+		}
 	}
 
 	return results, nil

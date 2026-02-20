@@ -1680,3 +1680,192 @@ func TestHandleListUnknownFormatReturnsError(t *testing.T) {
 		t.Errorf("expected error to mention 'unsupported format', got: %v", err)
 	}
 }
+
+// --- for-each tests ---
+
+// setupForEachRepo creates a real git repo with two worktrees for for-each testing.
+// Returns the repo root path. Cleanup is handled automatically by t.TempDir().
+func setupForEachRepo(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	repoRoot := filepath.Join(tmpDir, "repo")
+	if err := os.MkdirAll(repoRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	run(repoRoot, "git", "init", "-b", "main")
+	run(repoRoot, "git", "config", "user.email", "test@test.com")
+	run(repoRoot, "git", "config", "user.name", "test")
+	run(repoRoot, "git", "commit", "--allow-empty", "-m", "initial commit")
+
+	// Create a second branch and worktree
+	wtPath := filepath.Join(tmpDir, "feature-wt")
+	run(repoRoot, "git", "worktree", "add", "-b", "feature/test", wtPath)
+
+	return repoRoot
+}
+
+func TestForEachRunsCommandInAllWorktrees(t *testing.T) {
+	repoRoot := setupForEachRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "for-each", "--", "echo", "hello"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	// Should have output for at least 2 worktrees
+	if strings.Count(out, "hello") < 2 {
+		t.Errorf("expected 'hello' at least twice (once per worktree), got:\n%s", out)
+	}
+}
+
+func TestForEachMissingDoubleDashReturnsError(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+
+	err := c.ParseAndExecute([]string{"gren", "for-each", "echo", "hello"})
+	if err == nil {
+		t.Fatal("expected error when -- separator is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "--") {
+		t.Errorf("expected error to mention '--' separator, got: %v", err)
+	}
+}
+
+func TestForEachEmptyCommandReturnsError(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+
+	err := c.ParseAndExecute([]string{"gren", "for-each", "--"})
+	if err == nil {
+		t.Fatal("expected error when no command after --, got nil")
+	}
+}
+
+func TestForEachSkipMain(t *testing.T) {
+	repoRoot := setupForEachRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "for-each", "--skip-main", "--", "echo", "hello"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	// With --skip-main, only 1 worktree should run
+	if strings.Count(out, "hello") != 1 {
+		t.Errorf("expected 'hello' exactly once with --skip-main, got:\n%s", out)
+	}
+}
+
+func TestForEachFailFastStopsAfterFirstFailure(t *testing.T) {
+	repoRoot := setupForEachRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+
+		// Command that always fails — with --fail-fast only 1 worktree should run
+		err := c.ParseAndExecute([]string{"gren", "for-each", "--fail-fast", "--", "sh", "-c", "exit 1"})
+		if err == nil {
+			t.Fatal("expected error when command fails with --fail-fast, got nil")
+		}
+	})
+
+	// Should report exactly 1 failure (stopped after first)
+	if !strings.Contains(out, "1 failed") {
+		t.Errorf("expected '1 failed' with --fail-fast, got:\n%s", out)
+	}
+	if strings.Contains(out, "2 failed") {
+		t.Errorf("expected only 1 failure with --fail-fast, but got 2:\n%s", out)
+	}
+}
+
+func TestForEachWithoutFailFastContinuesOnFailure(t *testing.T) {
+	repoRoot := setupForEachRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		// First worktree fails, second should still run
+		err := c.ParseAndExecute([]string{"gren", "for-each", "--", "sh", "-c", "exit 1"})
+		if err == nil {
+			t.Error("expected error when commands fail, got nil")
+		}
+	})
+
+	// Summary line should show 2 failures (ran in both worktrees)
+	if !strings.Contains(out, "2 failed") {
+		t.Errorf("expected '2 failed' in output without --fail-fast, got:\n%s", out)
+	}
+}
+
+func TestForEachExitCodeOnFailure(t *testing.T) {
+	repoRoot := setupForEachRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+
+	err := c.ParseAndExecute([]string{"gren", "for-each", "--", "sh", "-c", "exit 1"})
+	if err == nil {
+		t.Fatal("expected non-nil error when commands fail")
+	}
+}
