@@ -289,6 +289,9 @@ func (c *CLI) handleCreate(args []string) error {
 }
 
 // WorktreeJSON is the JSON representation of a worktree for --format=json output.
+// Note: PR/CI fields (PRNumber, PRState, PRURL, CIStatus) are omitted from JSON
+// mode because GitHub/GitLab enrichment is skipped to keep output fast and clean.
+// These fields will be empty/zero and omitted via omitempty.
 type WorktreeJSON struct {
 	Name           string `json:"name"`
 	Branch         string `json:"branch"`

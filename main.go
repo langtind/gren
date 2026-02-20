@@ -77,7 +77,7 @@ func main() {
 	if len(cliArgs) > 0 {
 		cliHandler := cli.NewCLI(gitRepo, configManager)
 		if err := cliHandler.ParseAndExecute(append([]string{"gren"}, cliArgs...)); err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		return
