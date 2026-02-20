@@ -1221,3 +1221,129 @@ func TestShowHelpIncludesCompare(t *testing.T) {
 		t.Error("help should mention compare command")
 	}
 }
+
+func TestHandleNavigatePreviousNotSet(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	err := cli.ParseAndExecute([]string{"gren", "switch", "-"})
+	if err == nil {
+		t.Error("expected error when no previous worktree is set, got nil")
+	}
+	if !strings.Contains(err.Error(), "no previous worktree") {
+		t.Errorf("error = %q, want message containing 'no previous worktree'", err.Error())
+	}
+}
+
+func TestHandleNavigatePreviousSuccess(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	// Create a target worktree
+	if err := cli.ParseAndExecute([]string{"gren", "create", "-y", "-n", "prev-target"}); err != nil {
+		t.Fatalf("create worktree failed: %v", err)
+	}
+
+	directiveFile, err := os.CreateTemp("", "gren-directive-*")
+	if err != nil {
+		t.Fatalf("failed to create directive file: %v", err)
+	}
+	directiveFile.Close()
+	defer os.Remove(directiveFile.Name())
+	os.Setenv("GREN_DIRECTIVE_FILE", directiveFile.Name())
+	defer os.Unsetenv("GREN_DIRECTIVE_FILE")
+
+	// First switch to the target worktree — this records current dir as "previous"
+	if err := cli.ParseAndExecute([]string{"gren", "switch", "prev-target"}); err != nil {
+		t.Fatalf("first switch failed: %v", err)
+	}
+
+	// Now switch back using "-" — should return to where we were before
+	if err := cli.ParseAndExecute([]string{"gren", "switch", "-"}); err != nil {
+		t.Fatalf("switch to previous failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(directiveFile.Name())
+	if !strings.Contains(string(content), "cd ") {
+		t.Errorf("directive file should contain cd command after switch -, got: %s", content)
+	}
+}
+
+func TestHandleNavigateStoresPreviousPath(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	cli := NewCLI(gitRepo, configManager)
+
+	// Create a target worktree
+	if err := cli.ParseAndExecute([]string{"gren", "create", "-y", "-n", "mark-target"}); err != nil {
+		t.Fatalf("create worktree failed: %v", err)
+	}
+
+	directiveFile, err := os.CreateTemp("", "gren-directive-*")
+	if err != nil {
+		t.Fatalf("failed to create directive file: %v", err)
+	}
+	directiveFile.Close()
+	defer os.Remove(directiveFile.Name())
+	os.Setenv("GREN_DIRECTIVE_FILE", directiveFile.Name())
+	defer os.Unsetenv("GREN_DIRECTIVE_FILE")
+
+	// Switch away — current dir should be recorded as previous
+	if err := cli.ParseAndExecute([]string{"gren", "switch", "mark-target"}); err != nil {
+		t.Fatalf("switch failed: %v", err)
+	}
+
+	// Verify that the previous worktree path was stored.
+	// The stored path comes from git worktree list (symlink-resolved), so resolve dir too.
+	storedPrev, err := cli.worktreeManager.GetPreviousWorktreePath()
+	if err != nil {
+		t.Fatalf("GetPreviousWorktreePath() error: %v", err)
+	}
+	if storedPrev == "" {
+		t.Fatal("expected a previous worktree path to be stored after switch, got empty")
+	}
+
+	resolvedDir, _ := filepath.EvalSymlinks(dir)
+	if resolvedDir == "" {
+		resolvedDir = dir
+	}
+	resolvedStored, _ := filepath.EvalSymlinks(storedPrev)
+	if resolvedStored == "" {
+		resolvedStored = storedPrev
+	}
+	if resolvedStored != resolvedDir {
+		t.Errorf("stored previous path = %q, want %q (resolved)", resolvedStored, resolvedDir)
+	}
+}
