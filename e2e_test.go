@@ -272,7 +272,7 @@ func TestE2E_DeleteWorktreeScenarios(t *testing.T) {
 		// Should fail without force in non-TTY mode (can't get confirmation)
 		result := h.DeleteWorktree("dirty-worktree", false)
 		result.AssertFailed(t)
-		result.AssertStdoutContains(t, "non-interactive mode")
+		result.AssertStderrContains(t, "non-interactive mode")
 
 		// Worktree should still exist
 		if !h.WorktreeExists("dirty-worktree") {

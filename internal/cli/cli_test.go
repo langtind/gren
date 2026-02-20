@@ -1730,9 +1730,9 @@ func TestForEachRunsCommandInAllWorktrees(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		mockRepo := newMockRepository()
+		gitRepo := git.NewLocalRepository()
 		configManager := config.NewManager()
-		c := NewCLI(mockRepo, configManager)
+		c := NewCLI(gitRepo, configManager)
 		err := c.ParseAndExecute([]string{"gren", "for-each", "--", "echo", "hello"})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -1780,9 +1780,9 @@ func TestForEachSkipMain(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		mockRepo := newMockRepository()
+		gitRepo := git.NewLocalRepository()
 		configManager := config.NewManager()
-		c := NewCLI(mockRepo, configManager)
+		c := NewCLI(gitRepo, configManager)
 		err := c.ParseAndExecute([]string{"gren", "for-each", "--skip-main", "--", "echo", "hello"})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -1804,11 +1804,10 @@ func TestForEachFailFastStopsAfterFirstFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var out string
-	out = captureStdout(t, func() {
-		mockRepo := newMockRepository()
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
 		configManager := config.NewManager()
-		c := NewCLI(mockRepo, configManager)
+		c := NewCLI(gitRepo, configManager)
 
 		// Command that always fails — with --fail-fast only 1 worktree should run
 		err := c.ParseAndExecute([]string{"gren", "for-each", "--fail-fast", "--", "sh", "-c", "exit 1"})
@@ -1836,9 +1835,9 @@ func TestForEachWithoutFailFastContinuesOnFailure(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		mockRepo := newMockRepository()
+		gitRepo := git.NewLocalRepository()
 		configManager := config.NewManager()
-		c := NewCLI(mockRepo, configManager)
+		c := NewCLI(gitRepo, configManager)
 		// First worktree fails, second should still run
 		err := c.ParseAndExecute([]string{"gren", "for-each", "--", "sh", "-c", "exit 1"})
 		if err == nil {
