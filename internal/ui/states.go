@@ -97,6 +97,7 @@ func convertCoreWorktreeToUI(wt core.WorktreeInfo) Worktree {
 		Branch:         wt.Branch,
 		Status:         wt.Status,
 		IsCurrent:      wt.IsCurrent,
+		IsPrevious:     wt.IsPrevious,
 		IsMain:         wt.IsMain,
 		LastCommit:     wt.LastCommit,
 		StagedCount:    wt.StagedCount,

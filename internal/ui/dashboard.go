@@ -440,6 +440,9 @@ func (m Model) renderWorktreeRow(wt Worktree, selected bool, width int) string {
 	if wt.Marker != "" {
 		branch = branch + " " + wt.Marker
 	}
+	if wt.IsPrevious {
+		branch = branch + " ←"
+	}
 	if wt.IsCurrent {
 		branch = "● " + branch
 	} else {

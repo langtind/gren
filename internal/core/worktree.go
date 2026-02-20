@@ -43,6 +43,7 @@ type WorktreeInfo struct {
 	Path           string
 	Branch         string
 	IsCurrent      bool
+	IsPrevious     bool   // True if this was the most recently active worktree (i.e. `gren switch -` target)
 	IsMain         bool   // True if this is the main worktree (where .git directory lives)
 	Status         string // "clean", "modified", "untracked", "mixed", "unpushed", "missing"
 	LastCommit     string // Relative time of last commit (e.g., "2 hours ago")
@@ -337,6 +338,26 @@ func (wm *WorktreeManager) ListWorktrees(ctx context.Context) ([]WorktreeInfo, e
 	}
 
 	wm.enrichMarkers(ctx, worktrees)
+
+	// Mark the previously active worktree (for `gren switch -` display).
+	// Resolve symlinks on both sides to handle platforms where os.TempDir()
+	// returns an unresolved path (e.g. /var/folders on macOS → /private/var/folders).
+	if prevPath, err := wm.GetPreviousWorktreePath(); err == nil && prevPath != "" {
+		resolvedPrev, _ := filepath.EvalSymlinks(prevPath)
+		if resolvedPrev == "" {
+			resolvedPrev = prevPath
+		}
+		for i := range worktrees {
+			resolvedWt, _ := filepath.EvalSymlinks(worktrees[i].Path)
+			if resolvedWt == "" {
+				resolvedWt = worktrees[i].Path
+			}
+			if resolvedWt == resolvedPrev && !worktrees[i].IsCurrent {
+				worktrees[i].IsPrevious = true
+				break
+			}
+		}
+	}
 
 	return worktrees, nil
 }

@@ -678,7 +678,7 @@ func (c *CLI) handleNavigate(args []string) error {
 
 	switch query {
 	case "-":
-		prevPath, err := getPreviousWorktree()
+		prevPath, err := c.worktreeManager.GetPreviousWorktreePath()
 		if err != nil || prevPath == "" {
 			return fmt.Errorf("no previous worktree")
 		}
@@ -717,7 +717,7 @@ func (c *CLI) handleNavigate(args []string) error {
 	}
 
 	if currentPath != "" && currentPath != targetWorktree.Path {
-		_ = setPreviousWorktree(currentPath)
+		_ = c.worktreeManager.SetPreviousWorktreePath(currentPath)
 	}
 
 	if err := directive.WriteCD(targetWorktree.Path); err != nil {
@@ -773,26 +773,6 @@ func findWorktreeByQuery(worktrees []core.WorktreeInfo, query string) *core.Work
 	}
 
 	return nil
-}
-
-func getPreviousWorktree() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", "config", "--local", "gren.previousWorktree")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-func setPreviousWorktree(path string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", "config", "--local", "gren.previousWorktree", path)
-	return cmd.Run()
 }
 
 func getCurrentWorktreePath(worktrees []core.WorktreeInfo) string {
