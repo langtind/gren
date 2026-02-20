@@ -297,7 +297,7 @@ type WorktreeJSON struct {
 	IsPrevious     bool   `json:"is_previous"`
 	IsMain         bool   `json:"is_main"`
 	Status         string `json:"status"`
-	LastCommit     string `json:"last_commit,omitempty"`
+	LastCommit     string `json:"last_commit"`
 	StagedCount    int    `json:"staged_count"`
 	ModifiedCount  int    `json:"modified_count"`
 	UnpushedCount  int    `json:"unpushed_count"`
