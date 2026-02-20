@@ -300,12 +300,6 @@ func TestIsPRRef(t *testing.T) {
 	}
 }
 
-func TestCIProviderInterface_GetBranchForPRNumber(t *testing.T) {
-	// Ensure both providers implement the updated interface
-	var _ CIProvider = &GitHubProvider{}
-	var _ CIProvider = &GitLabProvider{}
-}
-
 func TestGitHubCheckStates(t *testing.T) {
 	tests := []struct {
 		name       string

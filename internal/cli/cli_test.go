@@ -1488,6 +1488,24 @@ func TestHandleCreate_PRShorthand_InvalidNumber(t *testing.T) {
 	}
 }
 
+func TestHandleCreate_PRShorthand_ProviderError(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+	c.prProvider = &mockCIProvider{
+		available: true,
+		branchErr: fmt.Errorf("API rate limit exceeded"),
+	}
+
+	err := c.ParseAndExecute([]string{"gren", "create", "-y", "pr:42"})
+	if err == nil {
+		t.Fatal("expected error when provider returns error, got nil")
+	}
+	if !strings.Contains(err.Error(), "resolve") {
+		t.Errorf("expected error message to mention 'resolve', got: %v", err)
+	}
+}
+
 func TestHandleCreate_PRShorthand_MRPrefix(t *testing.T) {
 	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
 	defer cleanup()
