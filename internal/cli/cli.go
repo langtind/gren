@@ -444,13 +444,18 @@ func (c *CLI) handleDelete(args []string) error {
 		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.Output)
 	}
 
+	worktreePath := targetWorktree.Path
+	worktreeBranch := targetWorktree.Branch
 	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, *force)
 	if err != nil {
 		logging.Error("CLI delete failed: %v", err)
-	} else {
-		logging.Info("CLI delete succeeded: %s", worktreeName)
+		return err
 	}
-	return err
+
+	logging.Info("CLI delete succeeded: %s", worktreeName)
+	// Run post-remove hooks (best-effort: failures are logged but don't affect outcome)
+	c.worktreeManager.RunPostRemoveHookWithApproval(worktreePath, worktreeBranch, false)
+	return nil
 }
 
 // handleCleanup handles the cleanup command (delete all stale worktrees)
@@ -2223,6 +2228,9 @@ func (c *CLI) handleHookRun(args []string) error {
 				return fmt.Errorf("hook failed: %v", failed.Err)
 			}
 		}
+	case config.HookPostRemove:
+		// post-remove is best-effort; errors are logged but not returned
+		c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, true)
 	case config.HookPreMerge:
 		results := c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
 		if core.HooksFailed(results) {
