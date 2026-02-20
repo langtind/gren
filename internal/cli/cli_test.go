@@ -1869,3 +1869,205 @@ func TestForEachExitCodeOnFailure(t *testing.T) {
 		t.Fatal("expected non-nil error when commands fail")
 	}
 }
+
+// --- diff tests ---
+
+func setupDiffRepo(t *testing.T) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("command %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	run(tmpDir, "git", "init", "-b", "main")
+	run(tmpDir, "git", "config", "user.email", "test@test.com")
+	run(tmpDir, "git", "config", "user.name", "test")
+
+	// Initial commit on main
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run(tmpDir, "git", "add", ".")
+	run(tmpDir, "git", "commit", "-m", "initial commit")
+
+	// Create feature branch with a committed change
+	run(tmpDir, "git", "checkout", "-b", "feature/test")
+	if err := os.WriteFile(filepath.Join(tmpDir, "committed.txt"), []byte("committed change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run(tmpDir, "git", "add", ".")
+	run(tmpDir, "git", "commit", "-m", "add committed.txt")
+
+	// Stage a change
+	if err := os.WriteFile(filepath.Join(tmpDir, "staged.txt"), []byte("staged change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run(tmpDir, "git", "add", "staged.txt")
+
+	// Unstaged modification: first commit the file, then modify without staging
+	if err := os.WriteFile(filepath.Join(tmpDir, "unstaged.txt"), []byte("original\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run(tmpDir, "git", "add", "unstaged.txt")
+	run(tmpDir, "git", "commit", "-m", "add unstaged.txt")
+	if err := os.WriteFile(filepath.Join(tmpDir, "unstaged.txt"), []byte("unstaged change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Untracked file
+	if err := os.WriteFile(filepath.Join(tmpDir, "untracked.txt"), []byte("untracked\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	return tmpDir
+}
+
+func TestDiffShowsCommittedChanges(t *testing.T) {
+	repoRoot := setupDiffRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "diff"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "committed.txt") {
+		t.Errorf("expected committed.txt in diff output, got:\n%s", out)
+	}
+}
+
+func TestDiffShowsStagedChanges(t *testing.T) {
+	repoRoot := setupDiffRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "diff"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "staged.txt") {
+		t.Errorf("expected staged.txt in diff output, got:\n%s", out)
+	}
+}
+
+func TestDiffShowsUnstagedChanges(t *testing.T) {
+	repoRoot := setupDiffRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "diff"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "unstaged.txt") {
+		t.Errorf("expected unstaged.txt in diff output, got:\n%s", out)
+	}
+}
+
+func TestDiffShowsUntrackedFiles(t *testing.T) {
+	repoRoot := setupDiffRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "diff"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "untracked.txt") {
+		t.Errorf("expected untracked.txt in diff output, got:\n%s", out)
+	}
+}
+
+func TestDiffCustomBase(t *testing.T) {
+	repoRoot := setupDiffRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		gitRepo := git.NewLocalRepository()
+		configManager := config.NewManager()
+		c := NewCLI(gitRepo, configManager)
+		err := c.ParseAndExecute([]string{"gren", "diff", "--base", "main"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "committed.txt") {
+		t.Errorf("expected committed.txt when using --base main, got:\n%s", out)
+	}
+}
+
+func TestDiffUnknownBaseReturnsError(t *testing.T) {
+	repoRoot := setupDiffRepo(t)
+
+	origDir, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	gitRepo := git.NewLocalRepository()
+	configManager := config.NewManager()
+	c := NewCLI(gitRepo, configManager)
+	err := c.ParseAndExecute([]string{"gren", "diff", "--base", "nonexistent-branch-xyz"})
+	if err == nil {
+		t.Fatal("expected error for unknown base branch, got nil")
+	}
+}
