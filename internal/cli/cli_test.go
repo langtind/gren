@@ -1916,7 +1916,12 @@ func setupDiffRepo(t *testing.T) string {
 	}
 	run(tmpDir, "git", "add", "staged.txt")
 
-	// Unstaged modification
+	// Unstaged modification: first commit the file, then modify without staging
+	if err := os.WriteFile(filepath.Join(tmpDir, "unstaged.txt"), []byte("original\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run(tmpDir, "git", "add", "unstaged.txt")
+	run(tmpDir, "git", "commit", "-m", "add unstaged.txt")
 	if err := os.WriteFile(filepath.Join(tmpDir, "unstaged.txt"), []byte("unstaged change\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -1682,22 +1682,12 @@ func (c *CLI) handleDiff(args []string) error {
 	// Determine base branch
 	baseBranch := *base
 	if baseBranch == "" {
-		out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "origin/HEAD").Output()
-		if err != nil {
-			// fallback: try main then master
-			for _, candidate := range []string{"main", "master"} {
-				if err2 := exec.Command("git", "rev-parse", "--verify", candidate).Run(); err2 == nil {
-					baseBranch = candidate
-					break
-				}
-			}
-		} else {
-			// origin/HEAD -> strip "origin/" prefix
-			baseBranch = strings.TrimSpace(strings.TrimPrefix(string(out), "origin/"))
-		}
-		if baseBranch == "" {
+		ctx := context.Background()
+		recommended, err := c.gitRepo.GetRecommendedBaseBranch(ctx)
+		if err != nil || recommended == "" {
 			return fmt.Errorf("could not determine default branch; use --base to specify one")
 		}
+		baseBranch = recommended
 	}
 
 	// Verify base branch exists
@@ -1717,10 +1707,7 @@ func (c *CLI) handleDiff(args []string) error {
 	committedCmd.Stdout = os.Stdout
 	committedCmd.Stderr = os.Stderr
 	if err := committedCmd.Run(); err != nil {
-		// non-zero exit is normal if there are no committed changes
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-			return fmt.Errorf("git diff (committed) failed: %w", err)
-		}
+		return fmt.Errorf("git diff (committed) failed: %w", err)
 	}
 
 	// 2. Staged changes (index vs HEAD)
@@ -1728,9 +1715,7 @@ func (c *CLI) handleDiff(args []string) error {
 	stagedCmd.Stdout = os.Stdout
 	stagedCmd.Stderr = os.Stderr
 	if err := stagedCmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-			return fmt.Errorf("git diff --cached (staged) failed: %w", err)
-		}
+		return fmt.Errorf("git diff --cached (staged) failed: %w", err)
 	}
 
 	// 3. Unstaged changes (working tree vs index)
@@ -1738,9 +1723,7 @@ func (c *CLI) handleDiff(args []string) error {
 	unstagedCmd.Stdout = os.Stdout
 	unstagedCmd.Stderr = os.Stderr
 	if err := unstagedCmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
-			return fmt.Errorf("git diff (unstaged) failed: %w", err)
-		}
+		return fmt.Errorf("git diff (unstaged) failed: %w", err)
 	}
 
 	// 4. Untracked files (shown as new-file diffs)
@@ -1752,7 +1735,7 @@ func (c *CLI) handleDiff(args []string) error {
 		if file == "" {
 			continue
 		}
-		untrackedCmd := exec.Command("git", "diff", "--no-index", "/dev/null", file)
+		untrackedCmd := exec.Command("git", "diff", "--no-index", os.DevNull, file)
 		untrackedCmd.Stdout = os.Stdout
 		// git diff --no-index exits 1 when files differ (always for new files), ignore
 		_ = untrackedCmd.Run()
