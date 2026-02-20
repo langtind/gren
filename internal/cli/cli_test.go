@@ -1654,7 +1654,7 @@ func TestHandleListJSONIsCurrent(t *testing.T) {
 	}
 }
 
-func TestHandleListJSONErrorIsJSON(t *testing.T) {
+func TestHandleListJSONNoPanicOutsideGitRepo(t *testing.T) {
 	// Run list outside a git repo — should still return an error (or empty JSON)
 	// but must not crash with human-readable text mixed with JSON.
 	// We just verify the flag is accepted without panicking.
@@ -1667,9 +1667,16 @@ func TestHandleListJSONErrorIsJSON(t *testing.T) {
 	_ = c.ParseAndExecute([]string{"gren", "list", "--format=json"})
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+func TestHandleListUnknownFormatReturnsError(t *testing.T) {
+	mockRepo := newMockRepository()
+	configManager := config.NewManager()
+	c := NewCLI(mockRepo, configManager)
+
+	err := c.ParseAndExecute([]string{"gren", "list", "--format=csv"})
+	if err == nil {
+		t.Fatal("expected error for unknown format, got nil")
 	}
-	return b
+	if !strings.Contains(err.Error(), "unsupported format") {
+		t.Errorf("expected error to mention 'unsupported format', got: %v", err)
+	}
 }

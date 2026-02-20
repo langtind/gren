@@ -290,22 +290,23 @@ func (c *CLI) handleCreate(args []string) error {
 
 // WorktreeJSON is the JSON representation of a worktree for --format=json output.
 type WorktreeJSON struct {
-	Name          string `json:"name"`
-	Branch        string `json:"branch"`
-	Path          string `json:"path"`
-	IsCurrent     bool   `json:"is_current"`
-	IsPrevious    bool   `json:"is_previous"`
-	IsMain        bool   `json:"is_main"`
-	Status        string `json:"status"`
-	LastCommit    string `json:"last_commit,omitempty"`
-	StagedCount   int    `json:"staged_count,omitempty"`
-	ModifiedCount int    `json:"modified_count,omitempty"`
-	UnpushedCount int    `json:"unpushed_count,omitempty"`
-	BranchStatus  string `json:"branch_status,omitempty"`
-	PRNumber      int    `json:"pr_number,omitempty"`
-	PRState       string `json:"pr_state,omitempty"`
-	PRURL         string `json:"pr_url,omitempty"`
-	CIStatus      string `json:"ci_status,omitempty"`
+	Name           string `json:"name"`
+	Branch         string `json:"branch"`
+	Path           string `json:"path"`
+	IsCurrent      bool   `json:"is_current"`
+	IsPrevious     bool   `json:"is_previous"`
+	IsMain         bool   `json:"is_main"`
+	Status         string `json:"status"`
+	LastCommit     string `json:"last_commit,omitempty"`
+	StagedCount    int    `json:"staged_count,omitempty"`
+	ModifiedCount  int    `json:"modified_count,omitempty"`
+	UnpushedCount  int    `json:"unpushed_count,omitempty"`
+	UntrackedCount int    `json:"untracked_count,omitempty"`
+	BranchStatus   string `json:"branch_status,omitempty"`
+	PRNumber       int    `json:"pr_number,omitempty"`
+	PRState        string `json:"pr_state,omitempty"`
+	PRURL          string `json:"pr_url,omitempty"`
+	CIStatus       string `json:"ci_status,omitempty"`
 }
 
 // handleList handles the list command
@@ -330,7 +331,15 @@ func (c *CLI) handleList(args []string) error {
 		return err
 	}
 
-	jsonMode := *format == "json"
+	var jsonMode bool
+	switch *format {
+	case "":
+		jsonMode = false
+	case "json":
+		jsonMode = true
+	default:
+		return fmt.Errorf("unsupported format %q; supported formats: json", *format)
+	}
 	logging.Debug("CLI list: verbose=%v json=%v", *verbose, jsonMode)
 
 	ctx := context.Background()
@@ -345,22 +354,23 @@ func (c *CLI) handleList(args []string) error {
 		items := make([]WorktreeJSON, len(worktrees))
 		for i, wt := range worktrees {
 			items[i] = WorktreeJSON{
-				Name:          wt.Name,
-				Branch:        wt.Branch,
-				Path:          wt.Path,
-				IsCurrent:     wt.IsCurrent,
-				IsPrevious:    wt.IsPrevious,
-				IsMain:        wt.IsMain,
-				Status:        wt.Status,
-				LastCommit:    wt.LastCommit,
-				StagedCount:   wt.StagedCount,
-				ModifiedCount: wt.ModifiedCount,
-				UnpushedCount: wt.UnpushedCount,
-				BranchStatus:  wt.BranchStatus,
-				PRNumber:      wt.PRNumber,
-				PRState:       wt.PRState,
-				PRURL:         wt.PRURL,
-				CIStatus:      wt.CIStatus,
+				Name:           wt.Name,
+				Branch:         wt.Branch,
+				Path:           wt.Path,
+				IsCurrent:      wt.IsCurrent,
+				IsPrevious:     wt.IsPrevious,
+				IsMain:         wt.IsMain,
+				Status:         wt.Status,
+				LastCommit:     wt.LastCommit,
+				StagedCount:    wt.StagedCount,
+				ModifiedCount:  wt.ModifiedCount,
+				UnpushedCount:  wt.UnpushedCount,
+				UntrackedCount: wt.UntrackedCount,
+				BranchStatus:   wt.BranchStatus,
+				PRNumber:       wt.PRNumber,
+				PRState:        wt.PRState,
+				PRURL:          wt.PRURL,
+				CIStatus:       wt.CIStatus,
 			}
 		}
 		enc := json.NewEncoder(os.Stdout)
