@@ -1346,6 +1346,10 @@ func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*Merge
 			logging.Warn("Merge: failed to remove worktree: %v", err)
 		} else {
 			result.WorktreeRemoved = true
+			if opts.Verify {
+				// Run post-remove hooks (best-effort: failures are logged but don't affect outcome)
+				wm.RunPostRemoveHookWithApproval(currentPath, currentBranch, true)
+			}
 		}
 
 		if repoRoot != "" {

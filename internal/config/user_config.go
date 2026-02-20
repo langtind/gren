@@ -44,6 +44,7 @@ type UserDefaults struct {
 type NamedHooksConfig struct {
 	PostCreate []NamedHook `toml:"post-create,omitempty"`
 	PreRemove  []NamedHook `toml:"pre-remove,omitempty"`
+	PostRemove []NamedHook `toml:"post-remove,omitempty"`
 	PreMerge   []NamedHook `toml:"pre-merge,omitempty"`
 	PostMerge  []NamedHook `toml:"post-merge,omitempty"`
 	PostSwitch []NamedHook `toml:"post-switch,omitempty"`
@@ -172,6 +173,9 @@ func MergeConfigs(user *UserConfig, project *Config) *Config {
 	if user.Hooks.PreRemove != "" && project.Hooks.PreRemove == "" {
 		project.Hooks.PreRemove = user.Hooks.PreRemove
 	}
+	if user.Hooks.PostRemove != "" && project.Hooks.PostRemove == "" {
+		project.Hooks.PostRemove = user.Hooks.PostRemove
+	}
 	if user.Hooks.PreMerge != "" && project.Hooks.PreMerge == "" {
 		project.Hooks.PreMerge = user.Hooks.PreMerge
 	}
@@ -189,6 +193,8 @@ func (uc *UserConfig) GetNamedHooks(hookType HookType) []NamedHook {
 		return uc.NamedHooks.PostCreate
 	case HookPreRemove:
 		return uc.NamedHooks.PreRemove
+	case HookPostRemove:
+		return uc.NamedHooks.PostRemove
 	case HookPreMerge:
 		return uc.NamedHooks.PreMerge
 	case HookPostMerge:

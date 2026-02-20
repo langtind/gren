@@ -31,6 +31,7 @@ type HookType string
 const (
 	HookPostCreate HookType = "post-create"
 	HookPreRemove  HookType = "pre-remove"
+	HookPostRemove HookType = "post-remove"
 	HookPreMerge   HookType = "pre-merge"
 	HookPostMerge  HookType = "post-merge"
 	HookPostSwitch HookType = "post-switch"
@@ -44,6 +45,8 @@ type Hooks struct {
 	PostCreate string `json:"post_create,omitempty" toml:"post-create,omitempty"`
 	// PreRemove runs before worktree removal (blocking, fail-fast)
 	PreRemove string `json:"pre_remove,omitempty" toml:"pre-remove,omitempty"`
+	// PostRemove runs after worktree removal (best-effort, runs from repo root)
+	PostRemove string `json:"post_remove,omitempty" toml:"post-remove,omitempty"`
 	// PreMerge runs before merge operations (blocking, fail-fast)
 	PreMerge string `json:"pre_merge,omitempty" toml:"pre-merge,omitempty"`
 	// PostMerge runs after successful merge (blocking, best-effort)
@@ -58,6 +61,7 @@ type Hooks struct {
 type ProjectNamedHooks struct {
 	PostCreate []NamedHook `toml:"post-create,omitempty"`
 	PreRemove  []NamedHook `toml:"pre-remove,omitempty"`
+	PostRemove []NamedHook `toml:"post-remove,omitempty"`
 	PreMerge   []NamedHook `toml:"pre-merge,omitempty"`
 	PostMerge  []NamedHook `toml:"post-merge,omitempty"`
 	PostSwitch []NamedHook `toml:"post-switch,omitempty"`
@@ -77,6 +81,8 @@ func (h *Hooks) Get(hookType HookType) string {
 		return h.PostCreate
 	case HookPreRemove:
 		return h.PreRemove
+	case HookPostRemove:
+		return h.PostRemove
 	case HookPreMerge:
 		return h.PreMerge
 	case HookPostMerge:
@@ -97,6 +103,8 @@ func (pnh *ProjectNamedHooks) GetNamedHooks(hookType HookType) []NamedHook {
 		return pnh.PostCreate
 	case HookPreRemove:
 		return pnh.PreRemove
+	case HookPostRemove:
+		return pnh.PostRemove
 	case HookPreMerge:
 		return pnh.PreMerge
 	case HookPostMerge:
@@ -260,7 +268,8 @@ func (m *Manager) Save(config *Config) error {
 # post-switch = "npm run dev"            # After switching worktree
 # pre-merge = "npm test"                 # Before merging (blocks on failure)
 # post-merge = "echo 'Merged!'"          # After successful merge
-# pre-remove = "npm run cleanup"         # Before deleting worktree
+# pre-remove = "npm run cleanup"         # Before deleting worktree (blocks on failure)
+# post-remove = "echo 'Removed!'"        # After deleting worktree (best-effort, runs from repo root)
 #
 # For named hooks with branch filtering, see: gren help hooks
 

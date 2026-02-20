@@ -291,6 +291,19 @@ func (wm *WorktreeManager) RunPreRemoveHookWithApproval(worktreePath, branchName
 	return wm.RunHooksWithApproval(config.HookPreRemove, ctx, autoYes)
 }
 
+// RunPostRemoveHookWithApproval runs post-remove hooks with approval checking.
+// The hook runs from the repo root since the worktree directory no longer exists.
+// Hook failures are best-effort and do not affect the outcome of the removal.
+func (wm *WorktreeManager) RunPostRemoveHookWithApproval(worktreePath, branchName string, autoYes bool) []HookResult {
+	repoRoot, _ := wm.getRepoRoot()
+	ctx := HookContext{
+		WorktreePath: worktreePath,
+		BranchName:   branchName,
+		RepoRoot:     repoRoot,
+	}
+	return wm.RunHooksWithApproval(config.HookPostRemove, ctx, autoYes)
+}
+
 // RunPreMergeHookWithApproval runs pre-merge hooks with approval checking.
 func (wm *WorktreeManager) RunPreMergeHookWithApproval(worktreePath, branchName, targetBranch string, autoYes bool) []HookResult {
 	repoRoot, _ := wm.getRepoRoot()

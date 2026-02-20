@@ -95,6 +95,7 @@ func TestHookTypes(t *testing.T) {
 	hookTypes := []config.HookType{
 		config.HookPostCreate,
 		config.HookPreRemove,
+		config.HookPostRemove,
 		config.HookPreMerge,
 		config.HookPostMerge,
 		config.HookPostSwitch,
@@ -112,6 +113,7 @@ func TestHooksGet(t *testing.T) {
 	hooks := config.Hooks{
 		PostCreate: "npm install",
 		PreRemove:  "npm run cleanup",
+		PostRemove: "echo removed",
 		PreMerge:   "npm test",
 		PostMerge:  "npm run deploy",
 		PostSwitch: "npm run switch",
@@ -124,6 +126,7 @@ func TestHooksGet(t *testing.T) {
 	}{
 		{config.HookPostCreate, "npm install"},
 		{config.HookPreRemove, "npm run cleanup"},
+		{config.HookPostRemove, "echo removed"},
 		{config.HookPreMerge, "npm test"},
 		{config.HookPostMerge, "npm run deploy"},
 		{config.HookPostSwitch, "npm run switch"},
@@ -243,6 +246,9 @@ func TestProjectNamedHooksGetNamedHooks(t *testing.T) {
 		PreRemove: []config.NamedHook{
 			{Name: "cleanup", Command: "npm run cleanup"},
 		},
+		PostRemove: []config.NamedHook{
+			{Name: "notify", Command: "echo removed"},
+		},
 		PostSwitch: []config.NamedHook{
 			{Name: "switch", Command: "npm run switch"},
 		},
@@ -259,6 +265,7 @@ func TestProjectNamedHooksGetNamedHooks(t *testing.T) {
 		{config.HookPreMerge, 1},
 		{config.HookPostMerge, 1},
 		{config.HookPreRemove, 1},
+		{config.HookPostRemove, 1},
 		{config.HookPostSwitch, 1},
 		{config.HookPostStart, 1},
 		{config.HookType("unknown"), 0},
@@ -549,5 +556,60 @@ func TestHookContext(t *testing.T) {
 	}
 	if ctx.ExecuteCmd != "npm run dev" {
 		t.Errorf("HookContext.ExecuteCmd = %q, want %q", ctx.ExecuteCmd, "npm run dev")
+	}
+}
+
+func TestPostRemoveHookJSONContext(t *testing.T) {
+	// post-remove hook should include hook_type = "post-remove"
+	ctx := HookJSONContext{
+		HookType:     "post-remove",
+		Branch:       "feature/auth",
+		Worktree:     "/path/to/removed/worktree",
+		WorktreeName: "feature-auth",
+		Repo:         "my-repo",
+		RepoRoot:     "/path/to/repo",
+	}
+
+	data, err := json.Marshal(ctx)
+	if err != nil {
+		t.Fatalf("json.Marshal() error: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("json.Unmarshal() error: %v", err)
+	}
+
+	if result["hook_type"] != "post-remove" {
+		t.Errorf("hook_type = %q, want %q", result["hook_type"], "post-remove")
+	}
+	if result["branch"] != "feature/auth" {
+		t.Errorf("branch = %q, want %q", result["branch"], "feature/auth")
+	}
+	if result["repo_root"] != "/path/to/repo" {
+		t.Errorf("repo_root = %q, want %q", result["repo_root"], "/path/to/repo")
+	}
+}
+
+func TestPostRemoveHookIsNotFailFast(t *testing.T) {
+	// post-remove should not be in the fail-fast list.
+	// Fail-fast hooks are pre-remove and pre-merge: if they fail, the operation is aborted.
+	// post-remove runs after the worktree is already gone, so failure should not matter.
+	failFastHooks := []config.HookType{
+		config.HookPreRemove,
+		config.HookPreMerge,
+	}
+
+	for _, ht := range failFastHooks {
+		if ht == config.HookPostRemove {
+			t.Error("post-remove should not be a fail-fast hook")
+		}
+	}
+
+	// Verify post-remove is NOT in the fail-fast list
+	for _, ht := range failFastHooks {
+		if ht == config.HookPostRemove {
+			t.Errorf("HookPostRemove (%s) should not be fail-fast", config.HookPostRemove)
+		}
 	}
 }
