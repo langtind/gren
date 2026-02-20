@@ -1684,12 +1684,12 @@ func TestHandleListUnknownFormatReturnsError(t *testing.T) {
 // --- for-each tests ---
 
 // setupForEachRepo creates a real git repo with two worktrees for for-each testing.
-// Returns the repo root path and a cleanup function.
-func setupForEachRepo(t *testing.T) (repoRoot string, cleanup func()) {
+// Returns the repo root path. Cleanup is handled automatically by t.TempDir().
+func setupForEachRepo(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
 
-	repoRoot = filepath.Join(tmpDir, "repo")
+	repoRoot := filepath.Join(tmpDir, "repo")
 	if err := os.MkdirAll(repoRoot, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1717,15 +1717,11 @@ func setupForEachRepo(t *testing.T) (repoRoot string, cleanup func()) {
 	wtPath := filepath.Join(tmpDir, "feature-wt")
 	run(repoRoot, "git", "worktree", "add", "-b", "feature/test", wtPath)
 
-	cleanup = func() {
-		// worktrees are in tmpDir which t.TempDir() cleans up automatically
-	}
-	return repoRoot, cleanup
+	return repoRoot
 }
 
 func TestForEachRunsCommandInAllWorktrees(t *testing.T) {
-	repoRoot, cleanup := setupForEachRepo(t)
-	defer cleanup()
+	repoRoot := setupForEachRepo(t)
 
 	origDir, _ := os.Getwd()
 	defer func() { _ = os.Chdir(origDir) }()
@@ -1775,8 +1771,7 @@ func TestForEachEmptyCommandReturnsError(t *testing.T) {
 }
 
 func TestForEachSkipMain(t *testing.T) {
-	repoRoot, cleanup := setupForEachRepo(t)
-	defer cleanup()
+	repoRoot := setupForEachRepo(t)
 
 	origDir, _ := os.Getwd()
 	defer func() { _ = os.Chdir(origDir) }()
@@ -1801,8 +1796,7 @@ func TestForEachSkipMain(t *testing.T) {
 }
 
 func TestForEachFailFastStopsAfterFirstFailure(t *testing.T) {
-	repoRoot, cleanup := setupForEachRepo(t)
-	defer cleanup()
+	repoRoot := setupForEachRepo(t)
 
 	origDir, _ := os.Getwd()
 	defer func() { _ = os.Chdir(origDir) }()
@@ -1810,20 +1804,30 @@ func TestForEachFailFastStopsAfterFirstFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mockRepo := newMockRepository()
-	configManager := config.NewManager()
-	c := NewCLI(mockRepo, configManager)
+	var out string
+	out = captureStdout(t, func() {
+		mockRepo := newMockRepository()
+		configManager := config.NewManager()
+		c := NewCLI(mockRepo, configManager)
 
-	// Command that always fails — with --fail-fast only 1 worktree should run
-	err := c.ParseAndExecute([]string{"gren", "for-each", "--fail-fast", "--", "sh", "-c", "exit 1"})
-	if err == nil {
-		t.Fatal("expected error when command fails with --fail-fast, got nil")
+		// Command that always fails — with --fail-fast only 1 worktree should run
+		err := c.ParseAndExecute([]string{"gren", "for-each", "--fail-fast", "--", "sh", "-c", "exit 1"})
+		if err == nil {
+			t.Fatal("expected error when command fails with --fail-fast, got nil")
+		}
+	})
+
+	// Should report exactly 1 failure (stopped after first)
+	if !strings.Contains(out, "1 failed") {
+		t.Errorf("expected '1 failed' with --fail-fast, got:\n%s", out)
+	}
+	if strings.Contains(out, "2 failed") {
+		t.Errorf("expected only 1 failure with --fail-fast, but got 2:\n%s", out)
 	}
 }
 
 func TestForEachWithoutFailFastContinuesOnFailure(t *testing.T) {
-	repoRoot, cleanup := setupForEachRepo(t)
-	defer cleanup()
+	repoRoot := setupForEachRepo(t)
 
 	origDir, _ := os.Getwd()
 	defer func() { _ = os.Chdir(origDir) }()
@@ -1849,8 +1853,7 @@ func TestForEachWithoutFailFastContinuesOnFailure(t *testing.T) {
 }
 
 func TestForEachExitCodeOnFailure(t *testing.T) {
-	repoRoot, cleanup := setupForEachRepo(t)
-	defer cleanup()
+	repoRoot := setupForEachRepo(t)
 
 	origDir, _ := os.Getwd()
 	defer func() { _ = os.Chdir(origDir) }()

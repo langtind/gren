@@ -569,7 +569,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 
 		result := h.Run("unknown-command")
 		result.AssertFailed(t)
-		result.AssertStdoutContains(t, "unknown command")
+		result.AssertStderrContains(t, "unknown command")
 	})
 }
 
