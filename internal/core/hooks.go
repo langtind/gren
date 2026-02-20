@@ -163,7 +163,13 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		cmdDesc = hookCmd
 	}
 
-	cmd.Dir = ctx.WorktreePath
+	// Use worktree path as working directory, but fall back to repo root if it
+	// no longer exists (e.g. for post-remove hooks that run after deletion).
+	if _, statErr := os.Stat(ctx.WorktreePath); statErr == nil {
+		cmd.Dir = ctx.WorktreePath
+	} else {
+		cmd.Dir = ctx.RepoRoot
+	}
 
 	// Build JSON context
 	jsonCtx := buildJSONContext(hookType, ctx, wm)

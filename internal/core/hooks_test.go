@@ -592,24 +592,15 @@ func TestPostRemoveHookJSONContext(t *testing.T) {
 }
 
 func TestPostRemoveHookIsNotFailFast(t *testing.T) {
-	// post-remove should not be in the fail-fast list.
+	// post-remove should not be in the fail-fast set.
 	// Fail-fast hooks are pre-remove and pre-merge: if they fail, the operation is aborted.
 	// post-remove runs after the worktree is already gone, so failure should not matter.
-	failFastHooks := []config.HookType{
-		config.HookPreRemove,
-		config.HookPreMerge,
+	failFastHooks := map[config.HookType]bool{
+		config.HookPreRemove: true,
+		config.HookPreMerge:  true,
 	}
 
-	for _, ht := range failFastHooks {
-		if ht == config.HookPostRemove {
-			t.Error("post-remove should not be a fail-fast hook")
-		}
-	}
-
-	// Verify post-remove is NOT in the fail-fast list
-	for _, ht := range failFastHooks {
-		if ht == config.HookPostRemove {
-			t.Errorf("HookPostRemove (%s) should not be fail-fast", config.HookPostRemove)
-		}
+	if failFastHooks[config.HookPostRemove] {
+		t.Errorf("HookPostRemove (%s) should not be fail-fast", config.HookPostRemove)
 	}
 }
