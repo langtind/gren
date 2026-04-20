@@ -297,6 +297,7 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	mu.Lock()
 	eventsCopy := append([]events.Event(nil), collected...)
 	mu.Unlock()
+	eventsCopy = finalizeEvents(eventsCopy, err)
 
 	result := HookResult{
 		Ran:        true,
@@ -316,6 +317,40 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	}
 
 	return result
+}
+
+// finalizeEvents appends a synthetic interrupted event when the hook exited
+// non-zero and the last start phase has no matching ok/error for the same
+// phase+app pair. This surfaces SIGINT/SIGKILL deaths that the hook itself
+// couldn't observe and report.
+func finalizeEvents(evs []events.Event, hookErr error) []events.Event {
+	if hookErr == nil {
+		return evs
+	}
+	type key struct{ phase, app string }
+	closed := map[key]bool{}
+	for _, e := range evs {
+		if e.Status == events.StatusOK || e.Status == events.StatusError {
+			closed[key{e.Phase, e.App}] = true
+		}
+	}
+	for i := len(evs) - 1; i >= 0; i-- {
+		e := evs[i]
+		if e.Status != events.StatusStart {
+			continue
+		}
+		if closed[key{e.Phase, e.App}] {
+			continue
+		}
+		return append(evs, events.Event{
+			TS:     time.Now().UTC(),
+			Phase:  e.Phase,
+			App:    e.App,
+			Status: events.StatusInterrupted,
+			Detail: "hook exited before phase completed",
+		})
+	}
+	return evs
 }
 
 // buildJSONContext creates the JSON context for hooks.

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/events"
 )
 
 // mkRepo initializes a git repo in a fresh tempdir and returns its path.
@@ -112,5 +113,66 @@ func TestExecuteHook_NoEventsForSilentHook(t *testing.T) {
 	}
 	if result.EventsFile == "" {
 		t.Errorf("expected EventsFile path set even without events")
+	}
+}
+
+func TestExecuteHook_MarksInterruptedOnNonzeroExit(t *testing.T) {
+	repo := mkRepo(t)
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("HOME", stateDir)
+
+	// Hook completes phase 1, opens phase 2, then exits non-zero without closing it.
+	script := filepath.Join(repo, "hook.sh")
+	body := `#!/bin/sh
+emit() { printf '{"ts":"%s","phase":"%s","status":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >> "$GREN_EVENTS_FILE"; }
+emit install start
+emit install ok
+emit migrate start
+exit 130
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	wm := &WorktreeManager{}
+	ctx := HookContext{WorktreePath: repo, BranchName: "main", RepoRoot: repo}
+	result := wm.executeHook(config.HookPostCreate, "./hook.sh", ctx, "", false)
+
+	if result.Err == nil {
+		t.Fatal("expected non-nil Err for exit 130")
+	}
+	if len(result.Events) != 4 {
+		t.Fatalf("expected 4 events (3 real + synthetic interrupted), got %d: %+v", len(result.Events), result.Events)
+	}
+	last := result.Events[3]
+	if last.Phase != "migrate" || last.Status != events.StatusInterrupted {
+		t.Errorf("expected last event migrate/interrupted, got %s/%s", last.Phase, last.Status)
+	}
+}
+
+func TestExecuteHook_NoSyntheticInterruptedWhenClean(t *testing.T) {
+	repo := mkRepo(t)
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("HOME", stateDir)
+
+	script := filepath.Join(repo, "hook.sh")
+	body := `#!/bin/sh
+emit() { printf '{"ts":"%s","phase":"%s","status":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >> "$GREN_EVENTS_FILE"; }
+emit install start
+emit install ok
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wm := &WorktreeManager{}
+	ctx := HookContext{WorktreePath: repo, BranchName: "main", RepoRoot: repo}
+	result := wm.executeHook(config.HookPostCreate, "./hook.sh", ctx, "", false)
+	if result.Err != nil {
+		t.Fatalf("unexpected err: %v", result.Err)
+	}
+	if len(result.Events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(result.Events))
 	}
 }
