@@ -54,7 +54,7 @@ func ParseLine(line string) (Event, error) {
 	if raw.Status == "" {
 		return Event{}, fmt.Errorf("missing status")
 	}
-	ts, err := time.Parse(time.RFC3339, raw.TS)
+	ts, err := time.Parse(time.RFC3339Nano, raw.TS)
 	if err != nil {
 		return Event{}, fmt.Errorf("invalid ts: %w", err)
 	}

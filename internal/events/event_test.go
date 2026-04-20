@@ -76,4 +76,46 @@ func TestParseLine_HugeDetail(t *testing.T) {
 	if len(ev.Detail) != len(big) {
 		t.Errorf("detail truncated")
 	}
+	if ev.Detail != string(big) {
+		t.Errorf("detail content corrupted")
+	}
+}
+
+func TestParseLine_TimestampFormats(t *testing.T) {
+	cases := []struct {
+		name string
+		ts   string
+	}{
+		{"plain RFC3339 UTC", "2026-04-20T22:51:52Z"},
+		{"sub-second millis", "2026-04-20T22:51:52.123Z"},
+		{"nanoseconds", "2026-04-20T22:51:52.000000123Z"},
+		{"timezone offset", "2026-04-20T22:51:52+02:00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line := `{"ts":"` + tc.ts + `","phase":"x","status":"ok"}`
+			ev, err := ParseLine(line)
+			if err != nil {
+				t.Fatalf("unexpected error parsing %q: %v", tc.ts, err)
+			}
+			want, err := time.Parse(time.RFC3339Nano, tc.ts)
+			if err != nil {
+				t.Fatalf("reference parse failed for %q: %v", tc.ts, err)
+			}
+			if !ev.TS.Equal(want) {
+				t.Errorf("ts mismatch for %q: got %v want %v", tc.ts, ev.TS, want)
+			}
+		})
+	}
+}
+
+func TestParseLine_TrimsSurroundingWhitespace(t *testing.T) {
+	line := "  {\"ts\":\"2026-04-20T22:51:52Z\",\"phase\":\"x\",\"status\":\"ok\"}  \n"
+	ev, err := ParseLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ev.Phase != "x" || ev.Status != StatusOK {
+		t.Errorf("unexpected event: %+v", ev)
+	}
 }
