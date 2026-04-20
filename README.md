@@ -345,6 +345,54 @@ For security, gren requires explicit approval for hook commands. When a new hook
 
 This prevents malicious config files from executing arbitrary commands.
 
+### Hook Event Protocol
+
+Hook scripts can emit structured phase events so gren can show step-by-step progress and make silent failures visible. When gren spawns a hook, it creates a per-run NDJSON file and exports its path as `GREN_EVENTS_FILE`. Hooks that don't write to it work exactly as before — the protocol is additive.
+
+**Writing events from a hook:**
+
+```bash
+emit_event() {
+  local phase="$1" status="$2" detail="${3:-}"
+  [ -z "${GREN_EVENTS_FILE:-}" ] && return 0
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  detail=${detail//\\/\\\\}; detail=${detail//\"/\\\"}
+  printf '{"ts":"%s","phase":"%s","status":"%s"%s}\n' \
+    "$ts" "$phase" "$status" \
+    "${detail:+,\"detail\":\"$detail\"}" \
+    >> "$GREN_EVENTS_FILE"
+}
+
+emit_event install start
+bun install
+emit_event install ok
+```
+
+The generated `.gren/post-create.sh` from `gren init` includes this helper plus a `trap` on `INT`/`TERM` out of the box.
+
+**Event schema (one JSON object per line):**
+
+| Field    | Required | Description                                                                 |
+|----------|----------|-----------------------------------------------------------------------------|
+| `ts`     | yes      | RFC 3339 timestamp (with or without sub-second precision)                   |
+| `phase`  | yes      | Free-form phase name. Convention: `lowercase-kebab`                         |
+| `status` | yes      | `start`, `ok`, or `error`                                                   |
+| `app`    | no       | Sub-target within a phase (e.g. `referat` vs `vidd` for a multi-app repo)   |
+| `detail` | no       | Human-readable description                                                  |
+
+**`interrupted`** is a fourth status synthesized by gren itself: if the hook exits non-zero while a phase is still `start` with no matching `ok`/`error`, gren appends a synthetic `interrupted` event. This catches `SIGINT`/`SIGKILL` deaths the hook couldn't observe — the exact failure mode the incident that motivated this feature exhibited.
+
+**Where event files live:**
+
+- Linux: `$XDG_STATE_HOME/gren/events/` (honored if set), otherwise `~/.local/state/gren/events/`
+- macOS: `~/Library/Application Support/gren/events/`
+- Other: `$TMPDIR/gren/events/`
+
+**Retention:** On each hook spawn, gren prunes files older than 7 days down to the 20 newest (whichever rule keeps fewer — i.e. the age rule is always applied; count only kicks in over the cap).
+
+**Troubleshooting silent failures:** If a worktree setup seems to have finished but something is broken, check the last `.ndjson` file in the events directory. The last line tells you which phase was open when the hook stopped reporting. An `interrupted` entry means the hook died before completing that phase — likely what you're looking for.
+
 ## LLM Commit Messages
 
 Generate commit messages using an LLM (like `llm` CLI or similar tools):
