@@ -362,23 +362,57 @@ func (m Model) generateSetupScript() string {
 	script.WriteString("# This script runs after creating a new worktree\n\n")
 	script.WriteString("set -e  # Exit on any error\n\n")
 
+	// emit_event helper: writes one NDJSON line to $GREN_EVENTS_FILE if set,
+	// letting gren show phase-level progress. No-op when run manually.
+	script.WriteString(`# gren structured-event helper. No-op if GREN_EVENTS_FILE is unset.
+emit_event() {
+  local phase="$1"
+  local status="$2"
+  local detail="${3:-}"
+  local app="${4:-}"
+  [ -z "${GREN_EVENTS_FILE:-}" ] && return 0
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  detail=${detail//\\/\\\\}
+  detail=${detail//\"/\\\"}
+  # Telemetry is best-effort: never let a write failure abort the hook.
+  { printf '{"ts":"%s","phase":"%s","status":"%s"%s%s}\n' \
+    "$ts" "$phase" "$status" \
+    "${app:+,\"app\":\"$app\"}" \
+    "${detail:+,\"detail\":\"$detail\"}" \
+    >> "$GREN_EVENTS_FILE"; } 2>/dev/null || true
+}
+
+# If the hook catches INT/TERM, report error for the current phase so the
+# interrupt is visible. The Go side also synthesizes an 'interrupted' event
+# post-hoc when the exit code is non-zero and a phase is still open, so
+# uncaught signals are covered too.
+trap 'emit_event "${GREN_CURRENT_PHASE:-unknown}" error "trapped signal"; exit 130' INT TERM
+
+`)
+
 	script.WriteString("echo 'Setting up worktree...'\n\n")
 
 	// Symlink environment files
 	if m.initState != nil && len(m.initState.detectedFiles) > 0 {
+		script.WriteString("GREN_CURRENT_PHASE=symlink\n")
+		script.WriteString("emit_event symlink start\n")
 		script.WriteString("# Symlink configuration files\n")
 		for _, file := range m.initState.detectedFiles {
 			script.WriteString(fmt.Sprintf("ln -sf \"$REPO_ROOT/%s\" . 2>/dev/null || true\n", file.Path))
 		}
-		script.WriteString("\n")
+		script.WriteString("emit_event symlink ok\n\n")
 	}
 
 	// Install dependencies
 	installCmd := m.detectPostCreateCommand()
 	if installCmd != "" {
+		script.WriteString("GREN_CURRENT_PHASE=install\n")
+		script.WriteString("emit_event install start\n")
 		script.WriteString("# Install dependencies\n")
 		script.WriteString(fmt.Sprintf("echo 'Running: %s'\n", installCmd))
-		script.WriteString(fmt.Sprintf("%s\n\n", installCmd))
+		script.WriteString(fmt.Sprintf("%s\n", installCmd))
+		script.WriteString("emit_event install ok\n\n")
 	}
 
 	script.WriteString("echo 'Worktree setup complete!'\n")

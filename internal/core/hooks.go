@@ -2,14 +2,18 @@ package core
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/events"
 	"github.com/langtind/gren/internal/logging"
 )
 
@@ -41,11 +45,13 @@ type HookJSONContext struct {
 
 // HookResult contains the result of running a hook.
 type HookResult struct {
-	Ran     bool
-	Output  string
-	Err     error
-	Command string
-	Name    string // Hook name for named hooks
+	Ran        bool
+	Output     string
+	Err        error
+	Command    string
+	Name       string         // Hook name for named hooks
+	Events     []events.Event // structured phase events emitted by hook via $GREN_EVENTS_FILE
+	EventsFile string         // absolute path to NDJSON events file for post-mortem
 }
 
 // HookRunner handles hook execution with approval checking.
@@ -191,6 +197,85 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		"GREN_JSON_CONTEXT="+string(jsonData),
 	)
 
+	// Create a per-run NDJSON events file so hooks can emit structured
+	// progress. Additive: hooks that don't emit events are unaffected.
+	eventsPath, evErr := events.NewEventsFile(string(hookType), ctx.BranchName)
+	if evErr != nil {
+		logging.Warn("events: failed to create file, disabling for this run: %v", evErr)
+		eventsPath = ""
+	} else {
+		cmd.Env = append(cmd.Env, "GREN_EVENTS_FILE="+eventsPath)
+		// Best-effort retention sweep on every hook spawn.
+		if dir, err := events.EventsDir(); err == nil {
+			_ = events.Prune(dir, 20, 7*24*time.Hour)
+		}
+	}
+
+	// Start live tailer + collector in goroutines if we have a file.
+	var (
+		collected    []events.Event
+		invalidCount int
+		mu           sync.Mutex
+		tailCtx      context.Context
+		tailCancel   context.CancelFunc
+		tailerDone   chan struct{}
+		consumerDone chan struct{}
+	)
+	if eventsPath != "" {
+		tailCtx, tailCancel = context.WithCancel(context.Background())
+		defer tailCancel() // ensure tailer exits even on unexpected paths
+		evCh := make(chan events.Event, 256)
+		invCh := make(chan string, 64)
+		tailerDone = make(chan struct{})
+		consumerDone = make(chan struct{})
+		go func() {
+			defer close(tailerDone)
+			events.Tail(tailCtx, eventsPath, evCh, invCh)
+		}()
+		go func() {
+			defer close(consumerDone)
+			// Consume until both the tailer is done AND channels are drained.
+			for {
+				select {
+				case ev, ok := <-evCh:
+					if !ok {
+						return
+					}
+					mu.Lock()
+					collected = append(collected, ev)
+					mu.Unlock()
+				case line, ok := <-invCh:
+					if !ok {
+						return
+					}
+					invalidCount++
+					logging.Warn("events: skipped invalid line: %s", line)
+				case <-tailerDone:
+					// Final drain — tailer closed, grab any remaining.
+					for {
+						select {
+						case ev, ok := <-evCh:
+							if !ok {
+								return
+							}
+							mu.Lock()
+							collected = append(collected, ev)
+							mu.Unlock()
+						case line, ok := <-invCh:
+							if !ok {
+								return
+							}
+							invalidCount++
+							logging.Warn("events: skipped invalid line: %s", line)
+						default:
+							return
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	var output []byte
 	if interactive {
 		// Interactive mode: connect to terminal for user input
@@ -204,12 +289,24 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		output, err = cmd.CombinedOutput()
 	}
 
+	if eventsPath != "" {
+		tailCancel()
+		<-tailerDone
+		<-consumerDone
+	}
+	mu.Lock()
+	eventsCopy := append([]events.Event(nil), collected...)
+	mu.Unlock()
+	eventsCopy = finalizeEvents(eventsCopy, err)
+
 	result := HookResult{
-		Ran:     true,
-		Output:  string(output),
-		Command: cmdDesc,
-		Name:    hookName,
-		Err:     err,
+		Ran:        true,
+		Output:     string(output),
+		Command:    cmdDesc,
+		Name:       hookName,
+		Err:        err,
+		Events:     eventsCopy,
+		EventsFile: eventsPath,
 	}
 
 	if err != nil {
@@ -220,6 +317,46 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	}
 
 	return result
+}
+
+// finalizeEvents appends a synthetic interrupted event when the hook exited
+// non-zero and a phase is still open — i.e. the most recent event for a
+// phase+app pair is a start with no matching ok/error after it. Tracking
+// open state chronologically (rather than a "ever closed" set) correctly
+// handles re-opened phases like `start → ok → start → exit 1`.
+func finalizeEvents(evs []events.Event, hookErr error) []events.Event {
+	if hookErr == nil {
+		return evs
+	}
+	type key struct{ phase, app string }
+	open := map[key]int{} // key -> index of current open start event, -1 if closed
+	for i, e := range evs {
+		k := key{e.Phase, e.App}
+		switch e.Status {
+		case events.StatusStart:
+			open[k] = i
+		case events.StatusOK, events.StatusError:
+			open[k] = -1
+		}
+	}
+	// Find the latest open start.
+	openIdx := -1
+	for _, idx := range open {
+		if idx > openIdx {
+			openIdx = idx
+		}
+	}
+	if openIdx < 0 {
+		return evs
+	}
+	e := evs[openIdx]
+	return append(evs, events.Event{
+		TS:     time.Now().UTC(),
+		Phase:  e.Phase,
+		App:    e.App,
+		Status: events.StatusInterrupted,
+		Detail: "hook exited before phase completed",
+	})
 }
 
 // buildJSONContext creates the JSON context for hooks.

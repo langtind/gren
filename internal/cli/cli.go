@@ -256,7 +256,8 @@ func (c *CLI) handleCreate(args []string) error {
 	if branchName == "" {
 		branchName = *name
 	}
-	c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
+	postCreateResults := c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
+	printHookEvents(postCreateResults)
 
 	// Handle execute flag (-x)
 	if *execute != "" {
@@ -267,7 +268,8 @@ func (c *CLI) handleCreate(args []string) error {
 		}
 
 		// Run post-start hook with approval
-		c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, false)
+		postStartResults := c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, *autoYes)
+		printHookEvents(postStartResults)
 		// Don't print anything - shell wrapper will execute the command
 	} else {
 		// Print success output when not executing a command
@@ -2437,6 +2439,7 @@ func (c *CLI) handleHookRun(args []string) error {
 	switch ht {
 	case config.HookPostCreate:
 		results := c.worktreeManager.RunPostCreateHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
 				return fmt.Errorf("hook failed: %v", failed.Err)
@@ -2444,6 +2447,7 @@ func (c *CLI) handleHookRun(args []string) error {
 		}
 	case config.HookPreRemove:
 		results := c.worktreeManager.RunPreRemoveHookWithApproval(*worktreePath, *branchName, true)
+		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
 				return fmt.Errorf("hook failed: %v", failed.Err)
@@ -2451,9 +2455,11 @@ func (c *CLI) handleHookRun(args []string) error {
 		}
 	case config.HookPostRemove:
 		// post-remove is best-effort; errors are logged but not returned
-		c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, true)
+		results := c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, true)
+		printHookEvents(results)
 	case config.HookPreMerge:
 		results := c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
 				return fmt.Errorf("hook failed: %v", failed.Err)
@@ -2461,6 +2467,7 @@ func (c *CLI) handleHookRun(args []string) error {
 		}
 	case config.HookPostMerge:
 		results := c.worktreeManager.RunPostMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
 				return fmt.Errorf("hook failed: %v", failed.Err)
@@ -2468,6 +2475,7 @@ func (c *CLI) handleHookRun(args []string) error {
 		}
 	case config.HookPostSwitch:
 		results := c.worktreeManager.RunPostSwitchHookWithApproval(*worktreePath, *branchName, true)
+		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
 				return fmt.Errorf("hook failed: %v", failed.Err)
@@ -2475,6 +2483,7 @@ func (c *CLI) handleHookRun(args []string) error {
 		}
 	case config.HookPostStart:
 		results := c.worktreeManager.RunPostStartHookWithApproval(*worktreePath, *branchName, "", true)
+		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
 				return fmt.Errorf("hook failed: %v", failed.Err)
