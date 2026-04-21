@@ -46,12 +46,29 @@ type HookJSONContext struct {
 // HookResult contains the result of running a hook.
 type HookResult struct {
 	Ran        bool
-	Output     string
+	Output     string // stdout captured in non-interactive mode (empty in interactive mode)
+	Stderr     string // stderr captured in non-interactive mode (empty in interactive mode)
 	Err        error
 	Command    string
 	Name       string         // Hook name for named hooks
 	Events     []events.Event // structured phase events emitted by hook via $GREN_EVENTS_FILE
 	EventsFile string         // absolute path to NDJSON events file for post-mortem
+}
+
+// FailureOutput returns a labeled combination of stderr and stdout for error
+// reporting. stderr comes first because runtime traces (e.g. bash
+// `bad substitution`, non-zero exit messages) land there — callers need to
+// surface *where* the hook broke, not just normal progress. Empty sections
+// are omitted so short error messages aren't padded with blank labels.
+func (r HookResult) FailureOutput() string {
+	var parts []string
+	if s := strings.TrimRight(r.Stderr, "\n"); s != "" {
+		parts = append(parts, "stderr:\n"+s)
+	}
+	if s := strings.TrimRight(r.Output, "\n"); s != "" {
+		parts = append(parts, "stdout:\n"+s)
+	}
+	return strings.Join(parts, "\n")
 }
 
 // HookRunner handles hook execution with approval checking.
@@ -244,6 +261,7 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 					mu.Lock()
 					collected = append(collected, ev)
 					mu.Unlock()
+					wm.emitEvent(ev)
 				case line, ok := <-invCh:
 					if !ok {
 						return
@@ -261,6 +279,7 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 							mu.Lock()
 							collected = append(collected, ev)
 							mu.Unlock()
+							wm.emitEvent(ev)
 						case line, ok := <-invCh:
 							if !ok {
 								return
@@ -276,7 +295,11 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		}()
 	}
 
-	var output []byte
+	// Capture stdout and stderr separately in non-interactive mode so the UI
+	// can distinguish a normal progress stream (stdout) from an error trace
+	// (stderr) — critical when a hook exits non-zero and we need to surface
+	// *where* it failed, not just that it failed.
+	var stdoutBuf, stderrBuf strings.Builder
 	if interactive {
 		// Interactive mode: connect to terminal for user input
 		cmd.Stdin = os.Stdin
@@ -284,9 +307,10 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		cmd.Stderr = os.Stderr
 		err = cmd.Run()
 	} else {
-		// Non-interactive mode: send JSON to stdin, capture output
 		cmd.Stdin = strings.NewReader(string(jsonData))
-		output, err = cmd.CombinedOutput()
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+		err = cmd.Run()
 	}
 
 	if eventsPath != "" {
@@ -297,11 +321,19 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	mu.Lock()
 	eventsCopy := append([]events.Event(nil), collected...)
 	mu.Unlock()
+	beforeLen := len(eventsCopy)
 	eventsCopy = finalizeEvents(eventsCopy, err)
+	// Observer must see the synthetic interrupted event too; live UIs need it
+	// to mark a still-running phase as failed when the hook exits without a
+	// terminal status.
+	for _, synth := range eventsCopy[beforeLen:] {
+		wm.emitEvent(synth)
+	}
 
 	result := HookResult{
 		Ran:        true,
-		Output:     string(output),
+		Output:     stdoutBuf.String(),
+		Stderr:     stderrBuf.String(),
 		Command:    cmdDesc,
 		Name:       hookName,
 		Err:        err,
@@ -310,10 +342,16 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	}
 
 	if err != nil {
-		logging.Error("%s hook failed: %v, output: %s", hookType, err, result.Output)
+		// Log stdout + stderr separately so the failure trace (typically in
+		// stderr, e.g. `bad substitution`) isn't lost in a merged blob.
+		logging.Error("%s hook failed: %v\nstdout: %s\nstderr: %s",
+			hookType, err, result.Output, result.Stderr)
 	} else {
 		logging.Info("%s hook completed successfully", hookType)
 		logging.Debug("%s hook output: %s", hookType, result.Output)
+		if result.Stderr != "" {
+			logging.Debug("%s hook stderr: %s", hookType, result.Stderr)
+		}
 	}
 
 	return result

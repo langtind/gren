@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -199,17 +200,44 @@ func runHookByType(wm *core.WorktreeManager, hookType config.HookType, worktreeP
 	}
 }
 
-// showHookApproval shows the hook approval overlay for pending hooks
-func (m *Model) showHookApproval(hookType config.HookType, worktreePath, branchName, baseBranch string) {
+// showHookApproval opens the approval modal for pending hooks. If every
+// hook is already approved, the modal is skipped and a non-interactive run
+// is started asynchronously via the live hook-running modal; the returned
+// tea.Cmd must be threaded through the caller's Update loop so Bubble Tea
+// can stream events back into the UI.
+//
+// Interactive hooks in the pre-approved path are not streamed (they need a
+// real terminal and are handled via tea.ExecProcess in approveAndRunHooks);
+// here we fall back to the old synchronous runHookByType for them.
+func (m *Model) showHookApproval(hookType config.HookType, worktreePath, branchName, baseBranch string) tea.Cmd {
 	wm := core.NewWorktreeManager(m.gitRepo, m.configManager)
 	unapproved := wm.GetUnapprovedHooks(hookType)
 	hasInteractive := wm.HasInteractiveHooks(hookType)
 
 	if len(unapproved) == 0 {
-		// All hooks already approved, run them directly
-		// Note: If interactive, we still need to suspend TUI - handled by caller
-		runHookByType(wm, hookType, worktreePath, branchName, baseBranch, true)
-		return
+		if hasInteractive {
+			// Interactive + pre-approved: no TUI suspension machinery here,
+			// fall back to synchronous run. Rare path — user has previously
+			// approved an interactive hook, so terminal control is expected.
+			runHookByType(wm, hookType, worktreePath, branchName, baseBranch, true)
+			return nil
+		}
+		// Non-interactive + pre-approved: run via the async pipeline so the
+		// live modal shows phase events as they happen.
+		hookCtx := core.HookContext{
+			WorktreePath: worktreePath,
+			BranchName:   branchName,
+			BaseBranch:   baseBranch,
+			RepoRoot:     m.repoRoot(),
+		}
+		stream, firstCmd := startHookRun(wm, hookType, hookCtx, true)
+		m.hookRunningState = &HookRunningState{
+			visible:  true,
+			hookType: hookType,
+			stream:   stream,
+			started:  time.Now(),
+		}
+		return firstCmd
 	}
 
 	// Show approval modal
@@ -223,6 +251,7 @@ func (m *Model) showHookApproval(hookType config.HookType, worktreePath, branchN
 		selectedIndex:  0, // Default to "Approve"
 		hasInteractive: hasInteractive,
 	}
+	return nil
 }
 
 // approveAndRunHooks approves all pending hooks and runs them.
@@ -255,11 +284,36 @@ func (m Model) approveAndRunHooks() (tea.Model, tea.Cmd) {
 		)
 	}
 
-	// For non-interactive hooks, run directly
+	// Non-interactive hooks: run in a goroutine and stream phase events
+	// back into the Bubble Tea loop so the UI stays responsive and shows
+	// live progress. The HookRunningState modal holds the events and the
+	// user-visible summary.
 	wm := core.NewWorktreeManager(m.gitRepo, m.configManager)
-	runHookByType(wm, config.HookType(state.hookType), state.worktreePath, state.branchName, state.baseBranch, true)
+	hookCtx := core.HookContext{
+		WorktreePath: state.worktreePath,
+		BranchName:   state.branchName,
+		BaseBranch:   state.baseBranch,
+		RepoRoot:     m.repoRoot(),
+	}
+	stream, firstCmd := startHookRun(wm, config.HookType(state.hookType), hookCtx, true)
+	m.hookRunningState = &HookRunningState{
+		visible:  true,
+		hookType: config.HookType(state.hookType),
+		stream:   stream,
+		started:  time.Now(),
+	}
+	return m, firstCmd
+}
 
-	return m, nil
+// repoRoot returns the repo root path, falling back to cwd.
+func (m Model) repoRoot() string {
+	if m.repoInfo != nil && m.repoInfo.Path != "" {
+		return m.repoInfo.Path
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return ""
 }
 
 // hookExecutionCompleteMsg is sent when hook execution completes

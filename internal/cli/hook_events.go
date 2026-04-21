@@ -2,10 +2,53 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/events"
 )
+
+// eventGlyph returns the single-rune status indicator for an event.
+// Kept identical between live streaming and batch summary rendering so the
+// user sees the same glyph in both places.
+func eventGlyph(s events.Status) string {
+	switch s {
+	case events.StatusStart:
+		return "…"
+	case events.StatusOK:
+		return "✓"
+	case events.StatusError:
+		return "✗"
+	case events.StatusInterrupted:
+		return "⊘"
+	default:
+		return "?"
+	}
+}
+
+// RenderEventLine formats a single event into the indented display line used
+// by both the batch summary (printHookEvents) and the live streaming
+// observer. Shape: "  <glyph> [<app> / ]<phase>[  — <detail>]".
+func RenderEventLine(e events.Event) string {
+	name := e.Phase
+	if e.App != "" {
+		name = e.App + " / " + e.Phase
+	}
+	line := fmt.Sprintf("  %s %s", eventGlyph(e.Status), name)
+	if e.Detail != "" {
+		line += "  — " + e.Detail
+	}
+	return line
+}
+
+// streamEventsTo returns an observer callback that writes each event to w as
+// a newline-terminated line. Flushes on every write so piped consumers see
+// phases land as they happen.
+func streamEventsTo(w io.Writer) func(events.Event) {
+	return func(e events.Event) {
+		fmt.Fprintln(w, RenderEventLine(e))
+	}
+}
 
 // printHookEvents writes a phase summary to stdout whenever any hook in
 // results produced events. Always runs — on success so the user sees what
@@ -27,26 +70,7 @@ func printHookEvents(results []core.HookResult) {
 		fmt.Println()
 		fmt.Println("Hook phases:")
 		for _, e := range all {
-			glyph := "?"
-			switch e.Status {
-			case events.StatusStart:
-				glyph = "…"
-			case events.StatusOK:
-				glyph = "✓"
-			case events.StatusError:
-				glyph = "✗"
-			case events.StatusInterrupted:
-				glyph = "⊘"
-			}
-			name := e.Phase
-			if e.App != "" {
-				name = e.App + " / " + e.Phase
-			}
-			line := fmt.Sprintf("  %s %s", glyph, name)
-			if e.Detail != "" {
-				line += "  — " + e.Detail
-			}
-			fmt.Println(line)
+			fmt.Println(RenderEventLine(e))
 		}
 	}
 	if failed && len(files) > 0 {

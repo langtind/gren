@@ -403,6 +403,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshWorktrees()
 		return m, nil
 
+	case hookPhaseEventMsg:
+		// Live phase event from a running non-interactive hook. Append and
+		// reissue the stream-wait cmd to pull the next message.
+		if m.hookRunningState != nil {
+			m.hookRunningState.events = append(m.hookRunningState.events, msg.ev)
+			return m, waitForHookStream(m.hookRunningState.stream)
+		}
+		return m, nil
+
+	case hookExecutionDoneMsg:
+		// Non-interactive hook finished. Mark done, record results, and
+		// schedule auto-dismiss on success. Failure persists until keypress.
+		if m.hookRunningState != nil {
+			m.hookRunningState.done = true
+			m.hookRunningState.results = msg.results
+			m.hookRunningState.hookErr = firstFailedErr(msg.results)
+		}
+		m.refreshWorktrees()
+		if m.hookRunningState != nil && m.hookRunningState.hookErr == nil {
+			return m, tea.Tick(1500*time.Millisecond, func(t time.Time) tea.Msg {
+				return hookRunningDismissMsg{}
+			})
+		}
+		return m, nil
+
+	case hookRunningDismissMsg:
+		if m.hookRunningState != nil && m.hookRunningState.done {
+			m.hookRunningState = nil
+		}
+		return m, nil
+
 	case worktreeCreatedMsg:
 		if m.createState != nil {
 			if msg.err != nil {
@@ -417,9 +448,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createState.createWarning = msg.warning // Store warning for display
 				m.initializeActionsList()
 
-				// Check for unapproved post-create hooks
+				// Check for unapproved post-create hooks. Pre-approved hooks
+				// start running immediately (non-interactive) — the returned
+				// Cmd is the stream-wait that feeds live events into the UI.
 				worktreePath := m.getWorktreePath(m.createState.branchName)
-				m.showHookApproval(config.HookPostCreate, worktreePath, m.createState.branchName, m.createState.baseBranch)
+				cmd := m.showHookApproval(config.HookPostCreate, worktreePath, m.createState.branchName, m.createState.baseBranch)
+				return m, cmd
 			}
 		}
 		return m, nil
@@ -580,6 +614,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle hook approval modal
 		if m.hookApprovalState != nil && m.hookApprovalState.visible {
 			return m.handleHookApprovalKeys(keyMsg)
+		}
+
+		// Handle hook-running modal. While the hook runs, keys are swallowed
+		// (no mid-run cancel). After it finishes, any key dismisses.
+		if m.hookRunningState != nil && m.hookRunningState.visible {
+			return m.handleHookRunningKeys(keyMsg)
 		}
 
 		if m.currentView == InitView {
@@ -746,7 +786,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the current view
+// View returns the current UI render. The hook-running overlay wraps every
+// view because hooks can fire from many contexts (post-create, pre/post-
+// remove, pre/post-merge, post-switch). Rendering the overlay after the
+// base view built by buildBaseView keeps that orthogonal to currentView.
 func (m Model) View() string {
+	view := m.buildBaseView()
+	if m.hookRunningState != nil && m.hookRunningState.visible {
+		return m.renderHookRunningOverlay(view)
+	}
+	return view
+}
+
+func (m Model) buildBaseView() string {
 	var baseView string
 
 	switch m.currentView {

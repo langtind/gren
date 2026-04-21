@@ -251,12 +251,16 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 	logging.Info("CLI create succeeded: %s at %s", *name, worktreePath)
 
-	// Run post-create hook with approval checking
+	// Run post-create hook with approval checking.
+	// Stream events live to stderr so long-running hooks show phase progress
+	// instead of going silent until the batch summary at the end.
 	branchName := *branch
 	if branchName == "" {
 		branchName = *name
 	}
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	postCreateResults := c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
+	c.worktreeManager.SetEventObserver(nil)
 	printHookEvents(postCreateResults)
 
 	// Handle execute flag (-x)
@@ -267,8 +271,10 @@ func (c *CLI) handleCreate(args []string) error {
 			return fmt.Errorf("worktree created but failed to set up execute command: %w", err)
 		}
 
-		// Run post-start hook with approval
+		// Run post-start hook with approval (also streamed live)
+		c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 		postStartResults := c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, *autoYes)
+		c.worktreeManager.SetEventObserver(nil)
 		printHookEvents(postStartResults)
 		// Don't print anything - shell wrapper will execute the command
 	} else {
@@ -554,10 +560,15 @@ func (c *CLI) handleDelete(args []string) error {
 		return fmt.Errorf("worktree '%s' not found", worktreeName)
 	}
 
-	// Run pre-remove hooks with approval (interactive prompt)
+	// Run pre-remove hooks with approval (interactive prompt). Stream phase
+	// events live to stderr so long-running hooks show progress instead of
+	// going silent until the batch summary.
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	results := c.worktreeManager.RunPreRemoveHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(results)
 	if failed := core.FirstFailedHook(results); failed != nil {
-		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.Output)
+		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.FailureOutput())
 	}
 
 	worktreePath := targetWorktree.Path
@@ -570,7 +581,10 @@ func (c *CLI) handleDelete(args []string) error {
 
 	logging.Info("CLI delete succeeded: %s", worktreeName)
 	// Run post-remove hooks (best-effort: failures are logged but don't affect outcome)
-	c.worktreeManager.RunPostRemoveHookWithApproval(worktreePath, worktreeBranch, false)
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	postResults := c.worktreeManager.RunPostRemoveHookWithApproval(worktreePath, worktreeBranch, false)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(postResults)
 	return nil
 }
 
@@ -849,8 +863,11 @@ func (c *CLI) handleNavigate(args []string) error {
 		return fmt.Errorf("failed to write navigation command: %w", err)
 	}
 
-	// Run post-switch hook with approval
-	c.worktreeManager.RunPostSwitchHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	// Run post-switch hook with approval; stream phases live to stderr.
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	switchResults := c.worktreeManager.RunPostSwitchHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(switchResults)
 
 	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
 
@@ -2435,6 +2452,12 @@ func (c *CLI) handleHookRun(args []string) error {
 	}
 
 	ht := config.HookType(*hookType)
+
+	// Stream phase events live to stderr as they're emitted by the hook.
+	// The printHookEvents batch summary still runs at the end for post-mortem
+	// visibility; live streaming just means users don't sit in silence.
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	defer c.worktreeManager.SetEventObserver(nil)
 
 	switch ht {
 	case config.HookPostCreate:

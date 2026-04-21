@@ -357,6 +357,7 @@ type Model struct {
 	forEachState      *ForEachState
 	stepCommitState   *StepCommitState
 	hookApprovalState *HookApprovalState
+	hookRunningState  *HookRunningState
 
 	// Screen dimensions
 	width  int
