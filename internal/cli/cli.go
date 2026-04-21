@@ -268,7 +268,7 @@ func (c *CLI) handleCreate(args []string) error {
 		}
 
 		// Run post-start hook with approval
-		postStartResults := c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, false)
+		postStartResults := c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, *autoYes)
 		printHookEvents(postStartResults)
 		// Don't print anything - shell wrapper will execute the command
 	} else {

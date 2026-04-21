@@ -375,11 +375,12 @@ emit_event() {
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   detail=${detail//\\/\\\\}
   detail=${detail//\"/\\\"}
-  printf '{"ts":"%s","phase":"%s","status":"%s"%s%s}\n' \
+  # Telemetry is best-effort: never let a write failure abort the hook.
+  { printf '{"ts":"%s","phase":"%s","status":"%s"%s%s}\n' \
     "$ts" "$phase" "$status" \
     "${app:+,\"app\":\"$app\"}" \
     "${detail:+,\"detail\":\"$detail\"}" \
-    >> "$GREN_EVENTS_FILE"
+    >> "$GREN_EVENTS_FILE"; } 2>/dev/null || true
 }
 
 # If the hook catches INT/TERM, report error for the current phase so the

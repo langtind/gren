@@ -320,37 +320,43 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 }
 
 // finalizeEvents appends a synthetic interrupted event when the hook exited
-// non-zero and the last start phase has no matching ok/error for the same
-// phase+app pair. This surfaces SIGINT/SIGKILL deaths that the hook itself
-// couldn't observe and report.
+// non-zero and a phase is still open — i.e. the most recent event for a
+// phase+app pair is a start with no matching ok/error after it. Tracking
+// open state chronologically (rather than a "ever closed" set) correctly
+// handles re-opened phases like `start → ok → start → exit 1`.
 func finalizeEvents(evs []events.Event, hookErr error) []events.Event {
 	if hookErr == nil {
 		return evs
 	}
 	type key struct{ phase, app string }
-	closed := map[key]bool{}
-	for _, e := range evs {
-		if e.Status == events.StatusOK || e.Status == events.StatusError {
-			closed[key{e.Phase, e.App}] = true
+	open := map[key]int{} // key -> index of current open start event, -1 if closed
+	for i, e := range evs {
+		k := key{e.Phase, e.App}
+		switch e.Status {
+		case events.StatusStart:
+			open[k] = i
+		case events.StatusOK, events.StatusError:
+			open[k] = -1
 		}
 	}
-	for i := len(evs) - 1; i >= 0; i-- {
-		e := evs[i]
-		if e.Status != events.StatusStart {
-			continue
+	// Find the latest open start.
+	openIdx := -1
+	for _, idx := range open {
+		if idx > openIdx {
+			openIdx = idx
 		}
-		if closed[key{e.Phase, e.App}] {
-			continue
-		}
-		return append(evs, events.Event{
-			TS:     time.Now().UTC(),
-			Phase:  e.Phase,
-			App:    e.App,
-			Status: events.StatusInterrupted,
-			Detail: "hook exited before phase completed",
-		})
 	}
-	return evs
+	if openIdx < 0 {
+		return evs
+	}
+	e := evs[openIdx]
+	return append(evs, events.Event{
+		TS:     time.Now().UTC(),
+		Phase:  e.Phase,
+		App:    e.App,
+		Status: events.StatusInterrupted,
+		Detail: "hook exited before phase completed",
+	})
 }
 
 // buildJSONContext creates the JSON context for hooks.

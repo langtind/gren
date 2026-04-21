@@ -9,9 +9,9 @@ import (
 )
 
 // Tail reads NDJSON events from path as they are appended. Valid events are
-// sent to events; lines that fail ParseLine are sent to invalid (non-blocking
-// drop if the channel is full). Exits when ctx is cancelled. Designed to be
-// run in a goroutine.
+// sent to events (blocking, ctx-aware — never drops). Lines that fail
+// ParseLine are sent to invalid as a best-effort non-blocking send. Exits
+// when ctx is cancelled. Designed to be run in a goroutine.
 //
 // Partial lines (no trailing newline) are buffered until the newline arrives,
 // both during the live run and across reads. Emit only on newline.
@@ -20,7 +20,7 @@ func Tail(ctx context.Context, path string, events chan<- Event, invalid chan<- 
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var buf bytes.Buffer
 	chunk := make([]byte, 4096)
@@ -33,7 +33,9 @@ func Tail(ctx context.Context, path string, events chan<- Event, invalid chan<- 
 			n, err := f.Read(chunk)
 			if n > 0 {
 				buf.Write(chunk[:n])
-				drainLines(&buf, events, invalid)
+				if !drainLines(ctx, &buf, events, invalid) {
+					return
+				}
 			}
 			if err == io.EOF || n == 0 {
 				break
@@ -44,7 +46,10 @@ func Tail(ctx context.Context, path string, events chan<- Event, invalid chan<- 
 		}
 		select {
 		case <-ctx.Done():
-			// Final drain — catch anything written since last read.
+			// Final drain — catch anything written since last read. We've
+			// been cancelled, so drain with a fresh background ctx (we still
+			// want to deliver remaining events to the consumer) but keep
+			// sends best-effort: the consumer is expected to be winding up too.
 			for {
 				n, _ := f.Read(chunk)
 				if n == 0 {
@@ -52,21 +57,24 @@ func Tail(ctx context.Context, path string, events chan<- Event, invalid chan<- 
 				}
 				buf.Write(chunk[:n])
 			}
-			drainLines(&buf, events, invalid)
+			drainLines(context.Background(), &buf, events, invalid)
 			return
 		case <-ticker.C:
 		}
 	}
 }
 
-// drainLines splits buf on \n, parses complete lines, leaves any trailing
-// partial line in buf for later.
-func drainLines(buf *bytes.Buffer, events chan<- Event, invalid chan<- string) {
+// drainLines splits buf on \n, parses complete lines, and leaves any trailing
+// partial line in buf for later. Returns false if ctx was cancelled mid-drain
+// (caller should exit). Valid events use a blocking ctx-aware send to avoid
+// silently dropping phase data; invalid lines are best-effort (they're
+// diagnostic, not load-bearing).
+func drainLines(ctx context.Context, buf *bytes.Buffer, events chan<- Event, invalid chan<- string) bool {
 	for {
 		data := buf.Bytes()
 		i := bytes.IndexByte(data, '\n')
 		if i < 0 {
-			return
+			return true
 		}
 		line := string(data[:i])
 		buf.Next(i + 1)
@@ -78,14 +86,14 @@ func drainLines(buf *bytes.Buffer, events chan<- Event, invalid chan<- string) {
 			select {
 			case invalid <- line:
 			default:
-				// Caller's invalid buffer full — drop.
+				// invalid channel full — drop; this is diagnostic.
 			}
 			continue
 		}
 		select {
 		case events <- ev:
-		default:
-			// Caller's event buffer full — drop to keep hook execution unblocked.
+		case <-ctx.Done():
+			return false
 		}
 	}
 }

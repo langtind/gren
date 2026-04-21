@@ -19,34 +19,37 @@ func printHookEvents(results []core.HookResult) {
 			files = append(files, r.EventsFile)
 		}
 	}
-	if len(all) == 0 {
+	failed := core.HooksFailed(results)
+	if len(all) == 0 && !failed {
 		return
 	}
-	fmt.Println()
-	fmt.Println("Hook phases:")
-	for _, e := range all {
-		glyph := "?"
-		switch e.Status {
-		case events.StatusStart:
-			glyph = "…"
-		case events.StatusOK:
-			glyph = "✓"
-		case events.StatusError:
-			glyph = "✗"
-		case events.StatusInterrupted:
-			glyph = "⊘"
+	if len(all) > 0 {
+		fmt.Println()
+		fmt.Println("Hook phases:")
+		for _, e := range all {
+			glyph := "?"
+			switch e.Status {
+			case events.StatusStart:
+				glyph = "…"
+			case events.StatusOK:
+				glyph = "✓"
+			case events.StatusError:
+				glyph = "✗"
+			case events.StatusInterrupted:
+				glyph = "⊘"
+			}
+			name := e.Phase
+			if e.App != "" {
+				name = e.App + " / " + e.Phase
+			}
+			line := fmt.Sprintf("  %s %s", glyph, name)
+			if e.Detail != "" {
+				line += "  — " + e.Detail
+			}
+			fmt.Println(line)
 		}
-		name := e.Phase
-		if e.App != "" {
-			name = e.App + " / " + e.Phase
-		}
-		line := fmt.Sprintf("  %s %s", glyph, name)
-		if e.Detail != "" {
-			line += "  — " + e.Detail
-		}
-		fmt.Println(line)
 	}
-	if core.HooksFailed(results) {
+	if failed && len(files) > 0 {
 		fmt.Println()
 		fmt.Println("Hook failed. Event log for post-mortem:")
 		for _, f := range files {

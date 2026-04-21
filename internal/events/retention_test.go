@@ -7,19 +7,17 @@ import (
 	"time"
 )
 
-func TestPruneOldFiles_KeepsNewest(t *testing.T) {
+func TestPruneOldFiles_KeepsNewestAgeCapTrumpsCount(t *testing.T) {
+	// 25 files staggered 1 day apart. Age cap (7d) is stricter than count
+	// cap (20) for this arrangement — files older than 7 days are pruned
+	// even though they'd fit under the count cap. File i has mtime
+	// (25-i) days ago; i=19..24 are strictly within 7 days → 6 survivors.
 	dir := t.TempDir()
-	// Create 25 files, stagger mtimes backwards so oldest are beyond "keep 20" window.
 	for i := 0; i < 25; i++ {
 		p := filepath.Join(dir, "20260101T000000Z-post-create-"+itoa(i)+".ndjson")
 		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		// Oldest gets mtime 25 days ago; each newer one is 1 day newer.
-		// So files 0-17 are older than 7 days, files 18-24 are within 7 days.
-		// With keepCount=20 rule: keep newest 20 (indices 5..24).
-		// With maxAge=7d rule: keep 7 newest (indices 18..24).
-		// Union: keep newest 20 (wins). Expect 20 files.
 		mtime := time.Now().Add(-time.Duration(25-i) * 24 * time.Hour)
 		_ = os.Chtimes(p, mtime, mtime)
 	}
@@ -27,27 +25,30 @@ func TestPruneOldFiles_KeepsNewest(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 20 {
-		t.Errorf("expected 20 files after prune, got %d", len(entries))
+	if len(entries) != 6 {
+		t.Errorf("expected 6 files strictly within 7-day window, got %d", len(entries))
 	}
 }
 
-func TestPruneOldFiles_KeepsRecentEvenIfOverCount(t *testing.T) {
-	// If all 25 files are within retention window, keep all — rule is
-	// "keep newest N OR files newer than age, whichever keeps more".
+func TestPruneOldFiles_HardCapAppliesEvenWhenAllRecent(t *testing.T) {
+	// Both caps apply independently: hard keepCount cap still trims even
+	// when every file is within the age window.
 	dir := t.TempDir()
 	for i := 0; i < 25; i++ {
 		p := filepath.Join(dir, "20260101T000000Z-post-create-"+itoa(i)+".ndjson")
 		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		// Stagger mtimes so newest-first order is deterministic.
+		mtime := time.Now().Add(-time.Duration(25-i) * time.Second)
+		_ = os.Chtimes(p, mtime, mtime)
 	}
 	if err := Prune(dir, 20, 7*24*time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 25 {
-		t.Errorf("expected 25 files (all within window), got %d", len(entries))
+	if len(entries) != 20 {
+		t.Errorf("expected 20 files after hard cap, got %d", len(entries))
 	}
 }
 

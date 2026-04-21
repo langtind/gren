@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// Prune deletes old event files. Keeps the newest `keepCount` files OR any
-// file newer than `maxAge` — whichever rule keeps more. Best-effort: errors
-// on individual removes are ignored (caller may log if it cares).
-// Returns nil for a nonexistent dir (normal startup case).
+// Prune deletes old event files. Both caps apply independently: no file
+// older than `maxAge` is kept, and at most `keepCount` files are kept
+// overall (newest wins). Best-effort: errors on individual removes are
+// ignored. Returns nil for a nonexistent dir (normal startup case).
 func Prune(dir string, keepCount int, maxAge time.Duration) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -42,12 +42,15 @@ func Prune(dir string, keepCount int, maxAge time.Duration) error {
 	})
 
 	cutoff := time.Now().Add(-maxAge)
-	overCount := len(files) > keepCount
 	keep := make(map[string]bool)
 	for i, f := range files {
-		if f.mtime.After(cutoff) || (overCount && i < keepCount) {
-			keep[f.path] = true
+		if i >= keepCount {
+			continue // exceeds hard count cap
 		}
+		if !f.mtime.After(cutoff) {
+			continue // older than age cap
+		}
+		keep[f.path] = true
 	}
 	for _, f := range files {
 		if !keep[f.path] {

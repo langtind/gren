@@ -9,15 +9,22 @@ import (
 	"time"
 )
 
-// EventsDir returns the directory where NDJSON event files are stored.
-// Linux: $XDG_STATE_HOME/gren/events or ~/.local/state/gren/events
-// macOS: ~/Library/Application Support/gren/events
-// Other: /tmp/gren/events
+// EventsDir returns the absolute directory where NDJSON event files are
+// stored. Linux: $XDG_STATE_HOME/gren/events or ~/.local/state/gren/events
+// (a relative $XDG_STATE_HOME is resolved against cwd so the returned path
+// is always absolute — hooks run in their own working directories and a
+// relative $GREN_EVENTS_FILE would land elsewhere than the tailer reads).
+// macOS: ~/Library/Application Support/gren/events.
+// Other: $TMPDIR/gren/events.
 func EventsDir() (string, error) {
 	switch runtime.GOOS {
 	case "linux":
 		if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
-			return filepath.Join(xdg, "gren", "events"), nil
+			abs, err := filepath.Abs(xdg)
+			if err != nil {
+				return "", err
+			}
+			return filepath.Join(abs, "gren", "events"), nil
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -36,25 +43,37 @@ func EventsDir() (string, error) {
 }
 
 // NewEventsFile creates a fresh empty events file for a hook run and
-// returns its absolute path. Filename: <ts>-<hookType>-<safeLabel>.ndjson.
+// returns its absolute path. Filename includes nanosecond precision plus a
+// process-scoped counter so two spawns in the same second don't collide on
+// O_EXCL. Perms are user-private (0700 dir, 0600 file): events may contain
+// project paths or hook command context.
 func NewEventsFile(hookType, label string) (string, error) {
 	dir, err := EventsDir()
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create events dir: %w", err)
 	}
 	safe := sanitizeLabel(label)
-	ts := time.Now().UTC().Format("20060102T150405Z")
-	name := fmt.Sprintf("%s-%s-%s.ndjson", ts, hookType, safe)
-	path := filepath.Join(dir, name)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
-	if err != nil {
-		return "", err
+	ts := time.Now().UTC().Format("20060102T150405.000000000Z")
+	for attempt := 0; attempt < 8; attempt++ {
+		suffix := ""
+		if attempt > 0 {
+			suffix = fmt.Sprintf("-%d", attempt)
+		}
+		name := fmt.Sprintf("%s-%s-%s%s.ndjson", ts, hookType, safe, suffix)
+		path := filepath.Join(dir, name)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+		if err == nil {
+			_ = f.Close()
+			return path, nil
+		}
+		if !os.IsExist(err) {
+			return "", err
+		}
 	}
-	_ = f.Close()
-	return path, nil
+	return "", fmt.Errorf("could not create unique events file in %s", dir)
 }
 
 func sanitizeLabel(s string) string {

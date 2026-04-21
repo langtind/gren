@@ -17,7 +17,7 @@ func mkRepo(t *testing.T) string {
 	dir := t.TempDir()
 	for _, args := range [][]string{
 		{"init", "-b", "main"},
-		{"commit", "--allow-empty", "-m", "initial"},
+		{"-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial"},
 	} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
@@ -148,6 +148,40 @@ exit 130
 	last := result.Events[3]
 	if last.Phase != "migrate" || last.Status != events.StatusInterrupted {
 		t.Errorf("expected last event migrate/interrupted, got %s/%s", last.Phase, last.Status)
+	}
+}
+
+func TestExecuteHook_InterruptedOnReopenedPhase(t *testing.T) {
+	// start → ok → start → exit: the second start is still open, must get
+	// a synthetic interrupted despite the first start/ok closure.
+	repo := mkRepo(t)
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
+	t.Setenv("HOME", stateDir)
+
+	script := filepath.Join(repo, "hook.sh")
+	body := `#!/bin/sh
+emit() { printf '{"ts":"%s","phase":"%s","status":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" >> "$GREN_EVENTS_FILE"; }
+emit install start
+emit install ok
+emit install start
+exit 1
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wm := &WorktreeManager{}
+	ctx := HookContext{WorktreePath: repo, BranchName: "main", RepoRoot: repo}
+	result := wm.executeHook(config.HookPostCreate, "./hook.sh", ctx, "", false)
+	if result.Err == nil {
+		t.Fatal("expected non-nil Err")
+	}
+	if len(result.Events) != 4 {
+		t.Fatalf("expected 4 events, got %d: %+v", len(result.Events), result.Events)
+	}
+	last := result.Events[3]
+	if last.Status != events.StatusInterrupted || last.Phase != "install" {
+		t.Errorf("expected install/interrupted synthesized after re-open, got %+v", last)
 	}
 }
 
