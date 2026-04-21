@@ -71,7 +71,24 @@ func startHookRun(wm *core.WorktreeManager, hookType config.HookType, ctx core.H
 		})
 		defer wm.SetEventObserver(nil)
 
+		// Guarantee a Done msg lands in the channel even if a hook runner
+		// panics. Without this the channel closes silently, waitForHookStream
+		// returns nil (a no-op in Bubble Tea), st.done stays false, and the
+		// modal's key handler swallows every keypress — leaving the user
+		// stuck with no escape. Deferred send ordering: this runs BEFORE the
+		// outer close(ch), so the Done reaches the UI first.
 		var results []core.HookResult
+		defer func() {
+			if r := recover(); r != nil && len(results) == 0 {
+				results = []core.HookResult{{
+					Ran:     true,
+					Err:     fmt.Errorf("hook runner panicked: %v", r),
+					Command: string(hookType),
+				}}
+			}
+			ch <- hookExecutionDoneMsg{results: results}
+		}()
+
 		switch hookType {
 		case config.HookPostCreate:
 			results = wm.RunPostCreateHookWithApproval(ctx.WorktreePath, ctx.BranchName, ctx.BaseBranch, autoYes)
@@ -88,7 +105,6 @@ func startHookRun(wm *core.WorktreeManager, hookType config.HookType, ctx core.H
 		case config.HookPostStart:
 			results = wm.RunPostStartHookWithApproval(ctx.WorktreePath, ctx.BranchName, ctx.ExecuteCmd, autoYes)
 		}
-		ch <- hookExecutionDoneMsg{results: results}
 	}()
 	return ch, waitForHookStream(ch)
 }

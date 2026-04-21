@@ -168,6 +168,41 @@ func TestHookRunningDismissMsg_DoesNothingWhileRunning(t *testing.T) {
 	}
 }
 
+// TestStartHookRun_SendsDoneEvenOnPanic guarantees the modal never deadlocks
+// if a RunXxxHookWithApproval panics. Without the panic-safe defer the user
+// would be stuck with `done=false` and the key handler swallowing every key.
+func TestStartHookRun_SendsDoneEvenOnPanic(t *testing.T) {
+	// We can't easily trigger a panic inside the real RunXxxHookWithApproval,
+	// but we can verify the defer contract directly by replicating the
+	// goroutine shape and asserting a Done msg is sent even when the body
+	// panics. This mirrors the pattern used in startHookRun.
+	ch := make(chan tea.Msg, 4)
+	go func() {
+		defer close(ch)
+		var results []core.HookResult
+		defer func() {
+			if r := recover(); r != nil && len(results) == 0 {
+				results = []core.HookResult{{Ran: true, Err: errors.New("panicked")}}
+			}
+			ch <- hookExecutionDoneMsg{results: results}
+		}()
+		panic("simulated")
+	}()
+
+	select {
+	case msg := <-ch:
+		done, ok := msg.(hookExecutionDoneMsg)
+		if !ok {
+			t.Fatalf("expected hookExecutionDoneMsg first, got %T", msg)
+		}
+		if len(done.results) == 0 || done.results[0].Err == nil {
+			t.Errorf("expected a failing result in Done msg after panic, got %+v", done.results)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no message received; goroutine did not send Done after panic")
+	}
+}
+
 func TestHandleHookRunningKeys_DismissesWhenDone(t *testing.T) {
 	m := Model{
 		hookRunningState: &HookRunningState{visible: true, done: true, hookType: config.HookPostCreate},

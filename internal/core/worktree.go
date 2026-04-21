@@ -39,8 +39,10 @@ func NewWorktreeManager(gitRepo git.Repository, configManager *config.Manager) *
 // parsed live. Pass nil to clear. The callback must not block the caller;
 // forward events to a buffered channel if downstream work is slow.
 func (wm *WorktreeManager) SetEventObserver(fn func(events.Event)) {
-	// atomic.Value requires concrete type consistency, so store a typed nil.
-	var v func(events.Event) = fn
+	// atomic.Value requires concrete type consistency; wrap fn in a typed
+	// local so a nil fn becomes a typed-nil func, not an untyped-nil interface
+	// (Store would panic on the latter).
+	var v = fn
 	wm.eventObserver.Store(v)
 }
 
@@ -1378,7 +1380,7 @@ func (wm *WorktreeManager) Merge(ctx context.Context, opts MergeOptions) (*Merge
 		// Run pre-merge hooks with approval (autoYes=true since merge already confirmed)
 		results := wm.RunPreMergeHookWithApproval(currentPath, currentBranch, targetBranch, true)
 		if failed := FirstFailedHook(results); failed != nil {
-			return nil, fmt.Errorf("pre-merge hook failed: %s\n%s", failed.Err, failed.Output)
+			return nil, fmt.Errorf("pre-merge hook failed: %s\n%s", failed.Err, failed.FailureOutput())
 		}
 	}
 

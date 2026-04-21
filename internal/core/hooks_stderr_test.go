@@ -50,6 +50,41 @@ exit 1
 	}
 }
 
+// TestHookResult_FailureOutput_LabelsAndOrdering verifies the shared
+// error-formatter: stderr first (where failure traces land), then stdout,
+// empty sections omitted so short messages stay short.
+func TestHookResult_FailureOutput_LabelsAndOrdering(t *testing.T) {
+	cases := []struct {
+		name string
+		r    HookResult
+		want string
+	}{
+		{
+			name: "both",
+			r:    HookResult{Output: "progress a\nprogress b\n", Stderr: "boom\n"},
+			want: "stderr:\nboom\nstdout:\nprogress a\nprogress b",
+		},
+		{
+			name: "stderr only",
+			r:    HookResult{Stderr: "boom"},
+			want: "stderr:\nboom",
+		},
+		{
+			name: "stdout only",
+			r:    HookResult{Output: "progress"},
+			want: "stdout:\nprogress",
+		},
+		{name: "empty", r: HookResult{}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.r.FailureOutput(); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestExecuteHook_BashErrorLandsInStderr mirrors the flyt repro: a bash
 // parse-time failure (bad substitution) must land in Stderr so the UI can
 // show it as the failure cause instead of silently swallowing it.
@@ -75,8 +110,10 @@ echo "${app^^}_DB"
 	if result.Err == nil {
 		t.Fatal("expected hook to fail on bash-ism")
 	}
-	if !strings.Contains(result.Stderr, "bad substitution") {
-		t.Errorf("expected 'bad substitution' trace in Stderr, got stdout=%q stderr=%q",
+	// dash and bash differ on capitalization ("Bad substitution" vs
+	// "bad substitution"), so match case-insensitively on the shared suffix.
+	if !strings.Contains(strings.ToLower(result.Stderr), "substitution") {
+		t.Errorf("expected substitution trace in Stderr, got stdout=%q stderr=%q",
 			result.Output, result.Stderr)
 	}
 }

@@ -55,6 +55,22 @@ type HookResult struct {
 	EventsFile string         // absolute path to NDJSON events file for post-mortem
 }
 
+// FailureOutput returns a labeled combination of stderr and stdout for error
+// reporting. stderr comes first because runtime traces (e.g. bash
+// `bad substitution`, non-zero exit messages) land there — callers need to
+// surface *where* the hook broke, not just normal progress. Empty sections
+// are omitted so short error messages aren't padded with blank labels.
+func (r HookResult) FailureOutput() string {
+	var parts []string
+	if s := strings.TrimRight(r.Stderr, "\n"); s != "" {
+		parts = append(parts, "stderr:\n"+s)
+	}
+	if s := strings.TrimRight(r.Output, "\n"); s != "" {
+		parts = append(parts, "stdout:\n"+s)
+	}
+	return strings.Join(parts, "\n")
+}
+
 // HookRunner handles hook execution with approval checking.
 type HookRunner struct {
 	configManager   *config.Manager

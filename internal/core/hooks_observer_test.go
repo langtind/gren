@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,9 +128,13 @@ printf '{"ts":"2026-01-01T00:00:00Z","phase":"p","status":"ok"}\n' >> "$GREN_EVE
 	}
 
 	wm := &WorktreeManager{}
-	var called int32 = 0
+	// Atomic because the observer callback runs on the consumer goroutine;
+	// a non-atomic counter + unsynchronized read would be a race (flagged by
+	// -race) if the "nil clears" contract ever regressed — exactly the
+	// behaviour this test is meant to catch.
+	var called atomic.Int32
 	wm.SetEventObserver(func(e events.Event) {
-		called++
+		called.Add(1)
 	})
 	wm.SetEventObserver(nil)
 
@@ -138,8 +143,8 @@ printf '{"ts":"2026-01-01T00:00:00Z","phase":"p","status":"ok"}\n' >> "$GREN_EVE
 	if result.Err != nil {
 		t.Fatalf("hook failed: %v", result.Err)
 	}
-	if called != 0 {
-		t.Errorf("expected observer calls=0 after nil clear, got %d", called)
+	if n := called.Load(); n != 0 {
+		t.Errorf("expected observer calls=0 after nil clear, got %d", n)
 	}
 }
 

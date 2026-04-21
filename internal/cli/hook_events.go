@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/langtind/gren/internal/core"
 	"github.com/langtind/gren/internal/events"
@@ -81,14 +80,4 @@ func printHookEvents(results []core.HookResult) {
 			fmt.Println("  " + f)
 		}
 	}
-}
-
-// withStderrEventStream registers a live-streaming observer on wm that
-// writes each event to stderr, runs fn, then clears the observer. Returns
-// whatever fn returns. stderr is chosen so captured stdout from the hook
-// body is not polluted by event lines.
-func withStderrEventStream(wm *core.WorktreeManager, fn func()) {
-	wm.SetEventObserver(streamEventsTo(os.Stderr))
-	defer wm.SetEventObserver(nil)
-	fn()
 }

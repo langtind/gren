@@ -560,10 +560,15 @@ func (c *CLI) handleDelete(args []string) error {
 		return fmt.Errorf("worktree '%s' not found", worktreeName)
 	}
 
-	// Run pre-remove hooks with approval (interactive prompt)
+	// Run pre-remove hooks with approval (interactive prompt). Stream phase
+	// events live to stderr so long-running hooks show progress instead of
+	// going silent until the batch summary.
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	results := c.worktreeManager.RunPreRemoveHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(results)
 	if failed := core.FirstFailedHook(results); failed != nil {
-		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.Output)
+		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.FailureOutput())
 	}
 
 	worktreePath := targetWorktree.Path
@@ -576,7 +581,10 @@ func (c *CLI) handleDelete(args []string) error {
 
 	logging.Info("CLI delete succeeded: %s", worktreeName)
 	// Run post-remove hooks (best-effort: failures are logged but don't affect outcome)
-	c.worktreeManager.RunPostRemoveHookWithApproval(worktreePath, worktreeBranch, false)
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	postResults := c.worktreeManager.RunPostRemoveHookWithApproval(worktreePath, worktreeBranch, false)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(postResults)
 	return nil
 }
 
@@ -855,8 +863,11 @@ func (c *CLI) handleNavigate(args []string) error {
 		return fmt.Errorf("failed to write navigation command: %w", err)
 	}
 
-	// Run post-switch hook with approval
-	c.worktreeManager.RunPostSwitchHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	// Run post-switch hook with approval; stream phases live to stderr.
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	switchResults := c.worktreeManager.RunPostSwitchHookWithApproval(targetWorktree.Path, targetWorktree.Branch, false)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(switchResults)
 
 	logging.Info("CLI navigate: wrote navigation directive for path %s", targetWorktree.Path)
 
