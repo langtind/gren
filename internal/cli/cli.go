@@ -251,12 +251,16 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 	logging.Info("CLI create succeeded: %s at %s", *name, worktreePath)
 
-	// Run post-create hook with approval checking
+	// Run post-create hook with approval checking.
+	// Stream events live to stderr so long-running hooks show phase progress
+	// instead of going silent until the batch summary at the end.
 	branchName := *branch
 	if branchName == "" {
 		branchName = *name
 	}
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	postCreateResults := c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
+	c.worktreeManager.SetEventObserver(nil)
 	printHookEvents(postCreateResults)
 
 	// Handle execute flag (-x)
@@ -267,8 +271,10 @@ func (c *CLI) handleCreate(args []string) error {
 			return fmt.Errorf("worktree created but failed to set up execute command: %w", err)
 		}
 
-		// Run post-start hook with approval
+		// Run post-start hook with approval (also streamed live)
+		c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 		postStartResults := c.worktreeManager.RunPostStartHookWithApproval(worktreePath, branchName, *execute, *autoYes)
+		c.worktreeManager.SetEventObserver(nil)
 		printHookEvents(postStartResults)
 		// Don't print anything - shell wrapper will execute the command
 	} else {
@@ -2435,6 +2441,12 @@ func (c *CLI) handleHookRun(args []string) error {
 	}
 
 	ht := config.HookType(*hookType)
+
+	// Stream phase events live to stderr as they're emitted by the hook.
+	// The printHookEvents batch summary still runs at the end for post-mortem
+	// visibility; live streaming just means users don't sit in silence.
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	defer c.worktreeManager.SetEventObserver(nil)
 
 	switch ht {
 	case config.HookPostCreate:

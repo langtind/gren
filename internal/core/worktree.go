@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/langtind/gren/internal/config"
+	"github.com/langtind/gren/internal/events"
 	"github.com/langtind/gren/internal/git"
 	"github.com/langtind/gren/internal/logging"
 )
@@ -18,6 +20,10 @@ import (
 type WorktreeManager struct {
 	gitRepo       git.Repository
 	configManager *config.Manager
+	// eventObserver is an optional callback invoked for each hook phase event
+	// as it is parsed from the NDJSON stream. Stored via atomic.Value so
+	// Set/Get don't race with the consumer goroutine. Callback must not block.
+	eventObserver atomic.Value // func(events.Event)
 }
 
 // NewWorktreeManager creates a new WorktreeManager
@@ -26,6 +32,29 @@ func NewWorktreeManager(gitRepo git.Repository, configManager *config.Manager) *
 		gitRepo:       gitRepo,
 		configManager: configManager,
 	}
+}
+
+// SetEventObserver registers a callback that fires for each hook phase event
+// (including the synthetic interrupted event on non-zero exit) as it is
+// parsed live. Pass nil to clear. The callback must not block the caller;
+// forward events to a buffered channel if downstream work is slow.
+func (wm *WorktreeManager) SetEventObserver(fn func(events.Event)) {
+	// atomic.Value requires concrete type consistency, so store a typed nil.
+	var v func(events.Event) = fn
+	wm.eventObserver.Store(v)
+}
+
+// emitEvent forwards an event to the registered observer, if any.
+func (wm *WorktreeManager) emitEvent(e events.Event) {
+	v := wm.eventObserver.Load()
+	if v == nil {
+		return
+	}
+	fn, ok := v.(func(events.Event))
+	if !ok || fn == nil {
+		return
+	}
+	fn(e)
 }
 
 // CreateWorktreeRequest contains parameters for creating a worktree
