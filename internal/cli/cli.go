@@ -267,8 +267,20 @@ func (c *CLI) handleCreate(args []string) error {
 	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	preCreateResults := c.worktreeManager.RunPreCreateHookWithApproval(preBranchName, effectiveBaseBranch, *autoYes)
 	c.worktreeManager.SetEventObserver(nil)
-	printHookEvents(preCreateResults)
+	if !jsonMode {
+		printHookEvents(preCreateResults)
+	}
 	if core.HooksFailed(preCreateResults) {
+		if jsonMode {
+			out := CreateJSON{
+				Name:   *name,
+				Branch: preBranchName,
+				Hooks:  hookResultsToJSON(preCreateResults),
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(out)
+		}
 		return fmt.Errorf("pre-create hook failed; worktree not created")
 	}
 
@@ -305,11 +317,13 @@ func (c *CLI) handleCreate(args []string) error {
 	// prompt — callers (CI, AI agents) get a parseable result they can
 	// query for hook success/failure without scraping output.
 	if jsonMode {
+		allHooks := append([]core.HookResult{}, preCreateResults...)
+		allHooks = append(allHooks, postCreateResults...)
 		out := CreateJSON{
 			Name:   *name,
 			Branch: branchName,
 			Path:   worktreePath,
-			Hooks:  hookResultsToJSON(postCreateResults),
+			Hooks:  hookResultsToJSON(allHooks),
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -363,7 +377,7 @@ func (c *CLI) handleCreate(args []string) error {
 type CreateJSON struct {
 	Name   string     `json:"name"`
 	Branch string     `json:"branch"`
-	Path   string     `json:"path"`
+	Path   string     `json:"path,omitempty"`
 	Hooks  []HookJSON `json:"hooks,omitempty"`
 }
 
