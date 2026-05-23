@@ -43,11 +43,36 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
+  # Pull commits + PR/author metadata from GitHub so release notes link
+  # back to the PR that introduced each change. Falls back to plain git
+  # log if the GitHub API isn't reachable from the runner.
+  use: github
   sort: asc
+  groups:
+    - title: "🚀 Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: "🐛 Bugfixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: "🧹 Refactoring"
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: "📚 Docs"
+      regexp: '^.*?docs(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: "🧪 Tests"
+      regexp: '^.*?test(\([[:word:]]+\))??!?:.+$'
+      order: 4
+    - title: "🏗️ Build / chore / CI"
+      regexp: '^.*?(build|chore|ci)(\([[:word:]]+\))??!?:.+$'
+      order: 5
+    - title: "Andre endringar"
+      order: 999
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
+      - "^Merge pull request"
+      - "^Merge branch"
 
 brews:
   - repository:
