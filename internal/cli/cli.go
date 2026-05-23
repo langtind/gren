@@ -163,6 +163,7 @@ func (c *CLI) handleCreate(args []string) error {
 	worktreeDir := fs.String("dir", "", "Directory to create worktrees in")
 	execute := fs.String("x", "", "Command to run after creating worktree (e.g., -x claude)")
 	autoYes := fs.Bool("y", false, "Auto-approve hooks without prompting")
+	format := fs.String("format", "", "Output format: json (machine-readable, suppresses prompts)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren create -n <name> [options]\n")
@@ -180,10 +181,24 @@ func (c *CLI) handleCreate(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-auth -x claude        # Create and start Claude\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-ui -x \"npm run dev\"   # Create and start dev server\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-api -y                # Auto-approve hooks\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-x --format=json -y    # Machine-readable, no prompts\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	var jsonMode bool
+	switch *format {
+	case "":
+		jsonMode = false
+	case "json":
+		jsonMode = true
+	default:
+		return fmt.Errorf("unsupported format %q; supported formats: json", *format)
+	}
+	if jsonMode && *execute != "" {
+		return fmt.Errorf("--format=json and -x are mutually exclusive: -x writes a shell directive (interactive only)")
 	}
 
 	// Support positional pr:/mr: syntax: gren create pr:42
@@ -261,7 +276,28 @@ func (c *CLI) handleCreate(args []string) error {
 	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	postCreateResults := c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
 	c.worktreeManager.SetEventObserver(nil)
-	printHookEvents(postCreateResults)
+	// In JSON mode the human-readable phase summary would corrupt stdout —
+	// hook results land in the JSON payload instead. Live stderr streaming
+	// above is still useful as a progress signal for log consumers.
+	if !jsonMode {
+		printHookEvents(postCreateResults)
+	}
+
+	// JSON mode: emit one machine-readable object on stdout and return.
+	// Suppresses both the human "Worktree created" banner and the navigate
+	// prompt — callers (CI, AI agents) get a parseable result they can
+	// query for hook success/failure without scraping output.
+	if jsonMode {
+		out := CreateJSON{
+			Name:   *name,
+			Branch: branchName,
+			Path:   worktreePath,
+			Hooks:  hookResultsToJSON(postCreateResults),
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
 
 	// Handle execute flag (-x)
 	if *execute != "" {
@@ -302,6 +338,53 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 
 	return nil
+}
+
+// CreateJSON is the machine-readable shape returned by `gren create --format=json`.
+// Hooks slice captures whether configured hooks ran, succeeded, and any error
+// detail — so callers don't have to parse stderr to know if setup worked.
+type CreateJSON struct {
+	Name   string     `json:"name"`
+	Branch string     `json:"branch"`
+	Path   string     `json:"path"`
+	Hooks  []HookJSON `json:"hooks,omitempty"`
+}
+
+// HookJSON is the per-hook entry inside CreateJSON.Hooks. Command and Name are
+// both optional because hooks can be defined as either an anonymous command
+// string or a named hook block in config.toml.
+type HookJSON struct {
+	Name    string `json:"name,omitempty"`
+	Command string `json:"command,omitempty"`
+	Ran     bool   `json:"ran"`
+	Ok      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Output  string `json:"output,omitempty"`
+	Stderr  string `json:"stderr,omitempty"`
+}
+
+// hookResultsToJSON projects core.HookResult into the JSON wire shape.
+func hookResultsToJSON(results []core.HookResult) []HookJSON {
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]HookJSON, len(results))
+	for i, r := range results {
+		errMsg := ""
+		if r.Err != nil {
+			errMsg = r.Err.Error()
+		}
+		out[i] = HookJSON{
+			Name:    r.Name,
+			Command: r.Command,
+			Ran:     r.Ran,
+			Ok:      r.Ran && r.Err == nil,
+			Error:   errMsg,
+			Output:  r.Output,
+			Stderr:  r.Stderr,
+		}
+	}
+	return out
 }
 
 // WorktreeJSON is the JSON representation of a worktree for --format=json output.
