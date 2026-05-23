@@ -281,16 +281,22 @@ func (c *CLI) handleCreate(args []string) error {
 		// Print success output when not executing a command
 		output.WorktreeCreated(*name, branchName, worktreePath)
 
-		// Ask user if they want to navigate to the worktree
-		fmt.Print("\nNavigate to worktree? [Y/n]: ")
-		var response string
-		fmt.Scanln(&response)
-		response = strings.ToLower(strings.TrimSpace(response))
+		// Ask user if they want to navigate to the worktree, but only when
+		// stdin is a terminal. Non-interactive callers (CI, AI agents,
+		// scripts) would otherwise hang on Scanln waiting for input that
+		// never comes. Same pattern as the delete-confirmation guard
+		// further down in this file.
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Print("\nNavigate to worktree? [Y/n]: ")
+			var response string
+			fmt.Scanln(&response)
+			response = strings.ToLower(strings.TrimSpace(response))
 
-		// Default is yes (empty, "y", or "yes")
-		if response == "" || response == "y" || response == "yes" {
-			if err := directive.WriteCD(worktreePath); err != nil {
-				logging.Error("Failed to set up navigation: %v", err)
+			// Default is yes (empty, "y", or "yes")
+			if response == "" || response == "y" || response == "yes" {
+				if err := directive.WriteCD(worktreePath); err != nil {
+					logging.Error("Failed to set up navigation: %v", err)
+				}
 			}
 		}
 	}
