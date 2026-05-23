@@ -2,18 +2,29 @@
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-05-23
+
 ### Added
 
-- Live hook phase reporting in the TUI. When a non-interactive post-create (or any) hook runs, a modal now shows each `emit_event` phase landing with its glyph — `…` while running, `✓`/`✗`/`⊘` once resolved — instead of freezing the TUI until the hook exits. The modal auto-dismisses 1.5s after a clean run; on failure it persists with the error, a stderr tail, a stdout tail, and the path to the NDJSON event log so users can see *where* the hook broke without digging through `gren.log`.
-- Live phase streaming in the CLI too. `gren create`, `gren hook-run`, and every other hook-triggering command now stream phase events to stderr as they happen. The batch summary still prints at the end for post-mortem.
+- **`pre-create` lifecycle hook** (#40). Runs before the worktree directory is created. Non-zero exit aborts the create — fail-fast like `pre-remove` and `pre-merge` — so preflight checks (docker stack up, secrets present, migrations clean) no longer leave an orphan worktree behind when they fail. Wired through all three layers: `config.HookPreCreate`, `WorktreeManager.RunPreCreateHookWithApproval`, and the CLI create-flow. `gren help hooks` lists it.
+- **`--format=json` on `gren create`** (#39). Emits a single machine-readable object on stdout with `name`, `branch`, `path`, and a `hooks[]` array reporting `ran` / `ok` / captured `output` / `stderr` for each configured hook. Suppresses the human "Worktree created" banner and the navigate prompt (machine-mode signal). Mutually exclusive with `-x` (which writes a shell directive — interactive only). Mirrors the existing `gren list --format=json` shape so AI agents and CI scripts can branch on `.hooks[].ok` instead of scraping emoji-laden stdout.
+- Live hook phase reporting in the TUI (#37). When a non-interactive post-create (or any) hook runs, a modal now shows each `emit_event` phase landing with its glyph — `…` while running, `✓`/`✗`/`⊘` once resolved — instead of freezing the TUI until the hook exits. The modal auto-dismisses 1.5s after a clean run; on failure it persists with the error, a stderr tail, a stdout tail, and the path to the NDJSON event log so users can see *where* the hook broke without digging through `gren.log`.
+- Live phase streaming in the CLI too (#37). `gren create`, `gren hook-run`, and every other hook-triggering command now stream phase events to stderr as they happen. The batch summary still prints at the end for post-mortem.
+
+### Fixed
+
+- **`gren create` no longer hangs when stdin is not a TTY** (#38). Previously `Scanln` on the "Navigate to worktree?" prompt blocked indefinitely under piped stdin (CI, AI agents, scripts) — the worktree was created on disk but the process never returned. Now the prompt is guarded with `term.IsTerminal`, matching the pattern already used in the delete-confirmation flow. Interactive sessions are unaffected.
 
 ### Changed
 
-- `HookResult.Output` is now stdout only; stderr is captured separately in the new `HookResult.Stderr` field. Previously `CombinedOutput` merged the two, which buried runtime failure traces (e.g. bash `bad substitution`) inside normal progress output. The split lets the TUI highlight stderr as the failure cause and keeps the gren log readable.
+- `HookResult.Output` is now stdout only; stderr is captured separately in the new `HookResult.Stderr` field (#37). Previously `CombinedOutput` merged the two, which buried runtime failure traces (e.g. bash `bad substitution`) inside normal progress output. The split lets the TUI highlight stderr as the failure cause and keeps the gren log readable.
+- Release notes are now auto-grouped by Conventional Commit prefix (#41). The GitHub release for each tag now categorises entries under 🚀 Features / 🐛 Bugfixes / 🧹 Refactoring / 📚 Docs / 🧪 Tests / 🏗️ Build·chore·CI, links each item back to its PR, and credits the author.
 
 ### Added (API)
 
 - `WorktreeManager.SetEventObserver(func(events.Event))` — register a callback invoked for every parsed phase event (including the synthetic `interrupted` event on non-zero exit). Used by the TUI's live modal and the CLI's stderr streamer.
+- `WorktreeManager.RunPreCreateHookWithApproval(branchName, baseBranch, autoYes)` — new entry point for the pre-create lifecycle. Fail-fast (`Err != nil` on any result aborts the caller's lifecycle operation).
+- `config.HookPreCreate`, `Hooks.PreCreate`, `ProjectNamedHooks.PreCreate` — new hook type wired into `Hooks.Get` and `GetNamedHooks` switches.
 
 ## [0.9.0] — 2026-04-21
 
