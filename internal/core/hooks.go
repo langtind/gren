@@ -160,8 +160,10 @@ func (wm *WorktreeManager) RunHooksWithApproval(hookType config.HookType, ctx Ho
 		result := wm.executeHook(hookType, hook.Command, ctx, hook.Name, hook.Interactive)
 		results = append(results, result)
 
-		// For fail-fast hooks (pre-remove, pre-merge), stop on first failure
-		if result.Err != nil && (hookType == config.HookPreRemove || hookType == config.HookPreMerge) {
+		// For fail-fast hooks (pre-create, pre-remove, pre-merge),
+		// stop on first failure — the caller treats Err on any of these
+		// as a signal to abort the lifecycle operation entirely.
+		if result.Err != nil && (hookType == config.HookPreCreate || hookType == config.HookPreRemove || hookType == config.HookPreMerge) {
 			break
 		}
 	}
@@ -618,6 +620,28 @@ func (wm *WorktreeManager) HasInteractiveHooks(hookType config.HookType) bool {
 	}
 
 	return false
+}
+
+// RunPreCreateHookWithApproval runs the pre-create hook with approval checking.
+// Returns the hook results. If autoYes is true, hooks are auto-approved.
+//
+// Pre-create runs BEFORE the worktree directory exists, so WorktreePath in
+// the context is the path that WILL be created — useful for environment
+// preflight (docker up, env vars present, etc) but the script can't `cd`
+// into it. Failure (Err != nil on any hook) aborts the create.
+func (wm *WorktreeManager) RunPreCreateHookWithApproval(branchName, baseBranch string, autoYes bool) []HookResult {
+	repoRoot, _ := wm.getRepoRoot()
+
+	ctx := HookContext{
+		// Pre-create has no worktree path yet — keep field set to repo root
+		// so scripts that do `cd "$1"` still land somewhere sensible.
+		WorktreePath: repoRoot,
+		BranchName:   branchName,
+		BaseBranch:   baseBranch,
+		RepoRoot:     repoRoot,
+	}
+
+	return wm.RunHooksWithApproval(config.HookPreCreate, ctx, autoYes)
 }
 
 // RunPostCreateHookWithApproval runs the post-create hook with approval checking.

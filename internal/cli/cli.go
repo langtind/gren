@@ -240,6 +240,23 @@ func (c *CLI) handleCreate(args []string) error {
 	}
 
 	ctx := context.Background()
+
+	// Run pre-create hook before any worktree state lands on disk.
+	// Fail-fast: a non-zero exit here aborts the create entirely so no
+	// half-built worktree is left behind for the caller to clean up.
+	// Branch name resolved early so the hook gets it in context.
+	preBranchName := *branch
+	if preBranchName == "" {
+		preBranchName = *name
+	}
+	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+	preCreateResults := c.worktreeManager.RunPreCreateHookWithApproval(preBranchName, effectiveBaseBranch, *autoYes)
+	c.worktreeManager.SetEventObserver(nil)
+	printHookEvents(preCreateResults)
+	if core.HooksFailed(preCreateResults) {
+		return fmt.Errorf("pre-create hook failed; worktree not created")
+	}
+
 	worktreePath, warning, err := c.worktreeManager.CreateWorktree(ctx, req)
 	if err != nil {
 		logging.Error("CLI create failed: %v", err)

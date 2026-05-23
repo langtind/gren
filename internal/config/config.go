@@ -29,6 +29,7 @@ const (
 type HookType string
 
 const (
+	HookPreCreate  HookType = "pre-create"
 	HookPostCreate HookType = "post-create"
 	HookPreRemove  HookType = "pre-remove"
 	HookPostRemove HookType = "post-remove"
@@ -41,6 +42,10 @@ const (
 // Hooks represents the lifecycle hooks configuration.
 // Each hook can be either a simple command string or a path to a script.
 type Hooks struct {
+	// PreCreate runs before worktree creation (blocking, fail-fast).
+	// Non-zero exit aborts the create. Use for environment preflight
+	// checks (docker up, env files present, etc).
+	PreCreate string `json:"pre_create,omitempty" toml:"pre-create,omitempty"`
 	// PostCreate runs after worktree creation (blocking)
 	PostCreate string `json:"post_create,omitempty" toml:"post-create,omitempty"`
 	// PreRemove runs before worktree removal (blocking, fail-fast)
@@ -59,6 +64,7 @@ type Hooks struct {
 
 // ProjectNamedHooks holds named hooks for project configuration.
 type ProjectNamedHooks struct {
+	PreCreate  []NamedHook `toml:"pre-create,omitempty"`
 	PostCreate []NamedHook `toml:"post-create,omitempty"`
 	PreRemove  []NamedHook `toml:"pre-remove,omitempty"`
 	PostRemove []NamedHook `toml:"post-remove,omitempty"`
@@ -77,6 +83,8 @@ type CommitGenerator struct {
 // Get returns the hook command for the given hook type.
 func (h *Hooks) Get(hookType HookType) string {
 	switch hookType {
+	case HookPreCreate:
+		return h.PreCreate
 	case HookPostCreate:
 		return h.PostCreate
 	case HookPreRemove:
@@ -99,6 +107,8 @@ func (h *Hooks) Get(hookType HookType) string {
 // GetNamedHooks returns the named hooks for a given hook type.
 func (pnh *ProjectNamedHooks) GetNamedHooks(hookType HookType) []NamedHook {
 	switch hookType {
+	case HookPreCreate:
+		return pnh.PreCreate
 	case HookPostCreate:
 		return pnh.PostCreate
 	case HookPreRemove:
@@ -264,12 +274,13 @@ func (m *Manager) Save(config *Config) error {
 #
 # Available hooks (uncomment to use):
 # [hooks]
-# post-create = ".gren/post-create.sh"  # After creating worktree
-# post-switch = "npm run dev"            # After switching worktree
-# pre-merge = "npm test"                 # Before merging (blocks on failure)
-# post-merge = "echo 'Merged!'"          # After successful merge
-# pre-remove = "npm run cleanup"         # Before deleting worktree (blocks on failure)
-# post-remove = "echo 'Removed!'"        # After deleting worktree (best-effort, runs from repo root)
+# pre-create = "docker compose ps -q db"  # Before creating worktree (blocks on failure)
+# post-create = ".gren/post-create.sh"   # After creating worktree
+# post-switch = "npm run dev"             # After switching worktree
+# pre-merge = "npm test"                  # Before merging (blocks on failure)
+# post-merge = "echo 'Merged!'"           # After successful merge
+# pre-remove = "npm run cleanup"          # Before deleting worktree (blocks on failure)
+# post-remove = "echo 'Removed!'"         # After deleting worktree (best-effort, runs from repo root)
 #
 # For named hooks with branch filtering, see: gren help hooks
 

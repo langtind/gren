@@ -308,11 +308,12 @@ func showHooksHelp() {
 
 	fmt.Println(bold("AVAILABLE HOOKS"))
 	fmt.Println()
+	fmt.Println("  " + cyan("pre-create") + "    " + dim("Before creating a worktree (blocks on failure)"))
 	fmt.Println("  " + cyan("post-create") + "   " + dim("After creating a new worktree"))
 	fmt.Println("  " + cyan("post-switch") + "   " + dim("After switching to a worktree"))
 	fmt.Println("  " + cyan("pre-merge") + "     " + dim("Before merging (blocks on failure)"))
 	fmt.Println("  " + cyan("post-merge") + "    " + dim("After successful merge"))
-	fmt.Println("  " + cyan("pre-remove") + "    " + dim("Before deleting a worktree"))
+	fmt.Println("  " + cyan("pre-remove") + "    " + dim("Before deleting a worktree (blocks on failure)"))
 	fmt.Println("  " + cyan("post-start") + "    " + dim("After starting command with -x flag"))
 	fmt.Println()
 
