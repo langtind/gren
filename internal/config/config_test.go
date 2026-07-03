@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -143,7 +144,7 @@ func TestManagerLoadSave(t *testing.T) {
 		}
 	})
 
-	t.Run("load missing config", func(t *testing.T) {
+	t.Run("load missing config returns defaults", func(t *testing.T) {
 		// Create a new temp dir without config
 		emptyDir, err := os.MkdirTemp("", "gren-empty-*")
 		if err != nil {
@@ -157,9 +158,12 @@ func TestManagerLoadSave(t *testing.T) {
 		defer os.Chdir(tempDir)
 
 		newManager := NewManager()
-		_, err = newManager.Load()
-		if err == nil {
-			t.Error("Load() expected error for missing config, got nil")
+		cfg, err := newManager.Load()
+		if err != nil {
+			t.Errorf("Load() missing config = error %v, want defaults with no error", err)
+		}
+		if cfg == nil || cfg.PackageManager != "auto" {
+			t.Errorf("Load() missing config = %+v, want default config", cfg)
 		}
 	})
 
@@ -227,6 +231,86 @@ func TestLoadInvalidJSON(t *testing.T) {
 	_, err = manager.Load()
 	if err == nil {
 		t.Error("Load() expected error for invalid JSON, got nil")
+	}
+}
+
+// TestLoadWithoutConfigReturnsDefaults verifies that a repo with no .gren config
+// loads sensible defaults instead of erroring, so gren works on any git repo
+// without `gren init` (init only persists customization).
+func TestLoadWithoutConfigReturnsDefaults(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gren-noconfig-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(tempDir)
+
+	manager := NewManager()
+
+	cfg, err := manager.Load()
+	if err != nil {
+		t.Fatalf("Load() without config = error %v, want defaults with no error", err)
+	}
+	if cfg == nil {
+		t.Fatal("Load() without config returned nil config")
+	}
+	if cfg.PackageManager != "auto" {
+		t.Errorf("PackageManager = %q, want %q", cfg.PackageManager, "auto")
+	}
+	if cfg.Version != DefaultVersion {
+		t.Errorf("Version = %q, want %q", cfg.Version, DefaultVersion)
+	}
+	// WorktreeDir is intentionally empty: consumers resolve it to ../<repo>-worktrees.
+	if cfg.WorktreeDir != "" {
+		t.Errorf("WorktreeDir = %q, want empty (resolved by consumers)", cfg.WorktreeDir)
+	}
+	// No hooks are configured by default.
+	if got := cfg.GetAllHooks(HookPostCreate); len(got) != 0 {
+		t.Errorf("GetAllHooks(post-create) = %d hooks, want 0", len(got))
+	}
+}
+
+// TestLoadErrorNamesConfigFile verifies that when an existing config file is
+// broken (unparseable or invalid), the error names the offending file so the
+// user knows what to fix — not a generic "config file" message.
+func TestLoadErrorNamesConfigFile(t *testing.T) {
+	wantPath := filepath.Join(ConfigDir, ConfigFileTOML)
+
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"malformed TOML", "worktree_dir = \"/x\ninvalid line"},
+		// Valid TOML but empty worktree_dir (e.g. a typo'd key) → validation error.
+		{"invalid config", "version = \"1.0.0\"\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tempDir, err := os.MkdirTemp("", "gren-errpath-*")
+			if err != nil {
+				t.Fatalf("failed to create temp dir: %v", err)
+			}
+			defer os.RemoveAll(tempDir)
+
+			originalDir, _ := os.Getwd()
+			defer os.Chdir(originalDir)
+			os.Chdir(tempDir)
+
+			os.MkdirAll(ConfigDir, 0755)
+			os.WriteFile(wantPath, []byte(tc.content), 0644)
+
+			_, err = NewManager().Load()
+			if err == nil {
+				t.Fatalf("Load() with %s = nil error, want error", tc.name)
+			}
+			if !strings.Contains(err.Error(), wantPath) {
+				t.Errorf("error %q does not name the config file %q", err, wantPath)
+			}
+		})
 	}
 }
 

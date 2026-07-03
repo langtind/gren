@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,40 @@ func TestCreateWorktreeWithCustomDir(t *testing.T) {
 	})
 
 	_ = dir // keep reference for cleanup
+}
+
+// TestCreateWorktreeWithoutGrenInit verifies that gren create works on a git
+// repository that was never `gren init`-ed: it falls back to default settings
+// (no hooks) and places the worktree under the default ../<repo>-worktrees
+// directory instead of failing with "run 'gren init' first".
+func TestCreateWorktreeWithoutGrenInit(t *testing.T) {
+	dir, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	// Simulate a repo that was never initialized by removing the config.
+	if err := os.RemoveAll(filepath.Join(dir, ".gren")); err != nil {
+		t.Fatalf("failed to remove .gren: %v", err)
+	}
+
+	worktreePath, _, err := manager.CreateWorktree(context.Background(), CreateWorktreeRequest{
+		Name:        "feature-x",
+		IsNewBranch: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree() without gren init = error %v, want success", err)
+	}
+
+	// Resolve to an absolute path for cleanup while cwd is still the repo dir.
+	if absRoot, aerr := filepath.Abs(filepath.Dir(worktreePath)); aerr == nil {
+		defer os.RemoveAll(absRoot)
+	}
+
+	if !strings.Contains(worktreePath, "-worktrees") {
+		t.Errorf("worktree path = %q, want default ../<repo>-worktrees location", worktreePath)
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Errorf("worktree not created at %q: %v", worktreePath, err)
+	}
 }
 
 func TestCreateWorktreeWithBaseBranch(t *testing.T) {

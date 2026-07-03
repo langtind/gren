@@ -197,21 +197,37 @@ func NewDefaultConfig(projectName, repoRoot string) (*Config, error) {
 	}, nil
 }
 
+// DefaultRuntimeConfig returns the configuration used when a repository has no
+// .gren config file. "Uninitialized" means "all defaults": no hooks, package
+// manager auto-detected, and an empty WorktreeDir that consumers resolve to
+// ../<repo>-worktrees at use time. This lets gren work on any git repository
+// without `gren init`; init only persists customization (hooks, custom paths).
+//
+// Unlike NewDefaultConfig, this does not point PostCreateHook at a hook script,
+// because an uninitialized repo has none — create simply runs no hooks.
+func DefaultRuntimeConfig() *Config {
+	return &Config{
+		WorktreeDir:    "", // empty → consumers default to ../<repo>-worktrees
+		PackageManager: "auto",
+		Version:        DefaultVersion,
+	}
+}
+
 // Load reads the configuration from the config file.
 // Tries TOML first (config.toml), then falls back to JSON (config.json).
 func (m *Manager) Load() (*Config, error) {
 	var config Config
 	var data []byte
 	var err error
-	var usedTOML bool
+	var usedPath string
 
 	// Try TOML first (preferred format)
 	tomlPath := filepath.Join(m.configDir, ConfigFileTOML)
 	data, err = os.ReadFile(tomlPath)
 	if err == nil {
-		usedTOML = true
+		usedPath = tomlPath
 		if err := toml.Unmarshal(data, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse TOML config file: %w", err)
+			return nil, fmt.Errorf("failed to parse %s: %w", tomlPath, err)
 		}
 	} else if os.IsNotExist(err) {
 		// Fall back to JSON
@@ -219,26 +235,30 @@ func (m *Manager) Load() (*Config, error) {
 		data, err = os.ReadFile(jsonPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("configuration not found: run 'gren init' first")
+				// No config file: uninitialized repos use runtime defaults
+				// instead of erroring, so gren works on any git repo (like
+				// `git worktree`). `gren init` remains available to persist
+				// hooks and custom settings.
+				return DefaultRuntimeConfig(), nil
 			}
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+			return nil, fmt.Errorf("failed to read %s: %w", jsonPath, err)
 		}
+		usedPath = jsonPath
 		if err := json.Unmarshal(data, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse JSON config file: %w", err)
+			return nil, fmt.Errorf("failed to parse %s: %w", jsonPath, err)
 		}
 	} else {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read %s: %w", tomlPath, err)
 	}
 
 	// Note: MainWorktree from old configs is ignored - now detected dynamically
-	_ = usedTOML // Can be used for logging/debugging
 
 	if config.PostCreateHook != "" && config.Hooks.PostCreate == "" {
 		config.Hooks.PostCreate = config.PostCreateHook
 	}
 
 	if err := m.validateConfig(&config); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %w", err)
+		return nil, fmt.Errorf("invalid configuration in %s: %w", usedPath, err)
 	}
 
 	return &config, nil
