@@ -2,10 +2,16 @@
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-04
+
 ### Changed
 
 - **`gren` now works without `gren init`.** A repository with no `.gren/config.toml` falls back to sensible defaults — worktrees under `../<repo>-worktrees`, package manager auto-detected, no hooks — instead of failing with `configuration not found: run 'gren init' first`. `config.Load()` now returns `DefaultRuntimeConfig()` when no config file exists; parse/validation errors on an *existing* file still surface as before. `gren init` remains for persisting customization (hooks, custom worktree dir). This matches how `git worktree` and worktrunk behave, so `gren create` (and tooling like the herdr plugin) works in any git repo.
 - Config load errors now name the offending file — e.g. `invalid configuration in .gren/config.toml: worktree_dir cannot be empty` and `failed to parse .gren/config.toml: ...` — instead of a generic "config file" message, so a malformed or mistyped config is faster to locate and fix.
+
+### Fixed
+
+- `gren create --format=json` now reports **pre-create** hook results (#42). The JSON output previously carried only post-create hooks, and the pre-create-failure path returned a bare error with no JSON at all. Pre- and post-create results are now concatenated in lifecycle order, and a `CreateJSON` document is emitted even when a pre-create hook aborts the create — so machine-readable callers always see which hooks ran and why a create failed. The non-zero exit code is preserved.
 
 ### Added (API)
 
