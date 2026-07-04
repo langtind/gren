@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-07-04
+
+### Fixed
+
+- **The config-migration prompt no longer runs for CLI/tooling commands.** It ran in `main()` before command dispatch, so *any* invocation — including `gren shell-init zsh` — could print the interactive prompt. Since shells do `eval "$(gren shell-init zsh)"`, the prompt text was eval'd and produced `zsh: unknown file attribute: v` / `zsh: no matches found: config?`, and could hang or (under a concurrent gren race) panic with a nil-pointer dereference in `checkAndPromptMigration`. The prompt now runs only immediately before the interactive TUI, and `Migrate()`'s `(nil, nil)` "nothing to do" return is nil-checked.
+
 ## [0.16.0] — 2026-07-04
 
 ### Fixed
