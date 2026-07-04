@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-07-04
+
 ### Fixed
 
 - **Hooks run from inside a worktree now get the main repo as `RepoRoot`.** `getRepoRoot()` used `git rev-parse --show-toplevel`, which returns the *current* checkout — so when `gren hook-run` runs from a linked worktree (e.g. a herdr plugin's bootstrap pane), a hook's `$REPO_ROOT` (arg `$4`) and JSON `repo_root` pointed at the worktree instead of the main checkout. Hooks that reference shared, gitignored files there (symlinking a main-repo `.env`, reading shared config) silently no-op'd. It now resolves the main worktree via `git --git-common-dir`, so `RepoRoot`, `repo_root`, `{{ repo_root }}`, and relative `worktree_dir` are correct from any worktree. In a non-worktree repo the result is unchanged.
