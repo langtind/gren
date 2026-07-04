@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-07-04
+
 ### Added
 
 - **`gren hook-run --interactive` (alias `--tty`).** Forces every hook to inherit the terminal (a real TTY) regardless of its own `interactive` setting, so an external tool — e.g. a terminal-multiplexer plugin — can run a repo's normal hooks in a pane where TTY-dependent setup works (1Password `op`, `make seed`). Unlike plain `hook-run` (auto-approve, used internally by the TUI), `--interactive` prompts for hook approval — persisted per project, so it's a one-time prompt — because a human is at the terminal. This runs the full hook config (inline, script, named, branch-filtered, and user-level hooks) instead of a single bootstrap script, so per-worktree template values like `{{ branch | hash_port }}` reach that flow too.
