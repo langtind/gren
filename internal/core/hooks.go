@@ -188,8 +188,13 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		cmd = exec.Command(fullPath, ctx.WorktreePath, ctx.BranchName, ctx.BaseBranch, ctx.RepoRoot)
 		cmdDesc = fmt.Sprintf("%s %s %s %s %s", fullPath, ctx.WorktreePath, ctx.BranchName, ctx.BaseBranch, ctx.RepoRoot)
 	} else {
-		cmd = exec.Command("sh", "-c", hookCmd)
-		cmdDesc = hookCmd
+		// Expand template variables (e.g. {{ branch | hash_port }}) in inline
+		// commands so hooks can derive per-worktree ports/DB names. Values are
+		// shell-quoted so a branch name with shell metacharacters can't inject
+		// commands. Script-file hooks receive context via args + env, unchanged.
+		expandedCmd := expandTemplateShellQuoted(hookCmd, wm.templateContextFromHook(ctx))
+		cmd = exec.Command("sh", "-c", expandedCmd)
+		cmdDesc = expandedCmd
 	}
 
 	// Use worktree path as working directory, but fall back to repo root if it
@@ -438,6 +443,38 @@ func buildJSONContext(hookType config.HookType, ctx HookContext, wm *WorktreeMan
 		TargetBranch:  ctx.TargetBranch,
 		BaseBranch:    ctx.BaseBranch,
 		ExecuteCmd:    ctx.ExecuteCmd,
+	}
+}
+
+// templateContextFromHook builds the TemplateContext used to expand inline
+// hook commands. It mirrors buildJSONContext so inline `{{ ... }}` variables
+// resolve to the same values hooks receive via GREN_JSON_CONTEXT.
+func (wm *WorktreeManager) templateContextFromHook(ctx HookContext) TemplateContext {
+	commit := ""
+	shortCommit := ""
+	if ctx.WorktreePath != "" {
+		cmd := exec.Command("git", "rev-parse", "HEAD")
+		cmd.Dir = ctx.WorktreePath
+		if output, err := cmd.Output(); err == nil {
+			commit = strings.TrimSpace(string(output))
+			if len(commit) > 7 {
+				shortCommit = commit[:7]
+			}
+		}
+	}
+
+	defaultBranch, _ := wm.getDefaultBranch()
+
+	return TemplateContext{
+		Branch:          ctx.BranchName,
+		BranchSanitized: sanitizeBranch(ctx.BranchName),
+		Worktree:        ctx.WorktreePath,
+		WorktreeName:    filepath.Base(ctx.WorktreePath),
+		Repo:            filepath.Base(ctx.RepoRoot),
+		RepoRoot:        ctx.RepoRoot,
+		Commit:          commit,
+		ShortCommit:     shortCommit,
+		DefaultBranch:   defaultBranch,
 	}
 }
 

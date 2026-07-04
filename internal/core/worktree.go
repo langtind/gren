@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -1610,6 +1612,44 @@ func (wm *WorktreeManager) ForEach(ctx context.Context, opts ForEachOptions) ([]
 	return results, nil
 }
 
+// EvalTemplate expands a template string against the current worktree's
+// context and returns the result. It powers `gren step eval`, exposing the
+// same engine hooks and for-each use so scripts can derive per-worktree ports,
+// database names, and paths.
+func (wm *WorktreeManager) EvalTemplate(template string) (string, error) {
+	repoRoot, err := wm.getRepoRoot()
+	if err != nil {
+		return "", err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	branch, _ := wm.getCurrentBranch()
+	defaultBranch, _ := wm.getDefaultBranch()
+	commit := wm.getCommitSHA(cwd)
+	shortCommit := commit
+	if len(commit) > 7 {
+		shortCommit = commit[:7]
+	}
+
+	ctx := TemplateContext{
+		Branch:          branch,
+		BranchSanitized: sanitizeBranch(branch),
+		Worktree:        cwd,
+		WorktreeName:    filepath.Base(cwd),
+		Repo:            filepath.Base(repoRoot),
+		RepoRoot:        repoRoot,
+		Commit:          commit,
+		ShortCommit:     shortCommit,
+		DefaultBranch:   defaultBranch,
+	}
+
+	return expandTemplate(template, ctx), nil
+}
+
 func (wm *WorktreeManager) buildTemplateContext(wt *WorktreeInfo, repoRoot, repoName, defaultBranch string) TemplateContext {
 	commit := wm.getCommitSHA(wt.Path)
 	shortCommit := commit
@@ -1646,6 +1686,35 @@ func sanitizeBranch(branch string) string {
 	return result
 }
 
+// hashPort deterministically maps a string (typically a branch name) to a port
+// in the range 10000-19999, so parallel worktrees get stable, collision-averse
+// ports without any shared state. Uses FNV-1a for a fast, stable hash.
+func hashPort(s string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return 10000 + int(h.Sum32()%10000)
+}
+
+// sanitizeDB turns a string (typically a branch name) into a safe SQL/database
+// identifier: lowercased, every non-alphanumeric rune replaced with an
+// underscore, and a leading underscore prepended when the result would start
+// with a digit (many databases reject identifiers that start with a digit).
+func sanitizeDB(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	result := b.String()
+	if result != "" && result[0] >= '0' && result[0] <= '9' {
+		result = "_" + result
+	}
+	return result
+}
+
 func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) []string {
 	expanded := make([]string, len(command))
 	for i, arg := range command {
@@ -1654,33 +1723,67 @@ func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) 
 	return expanded
 }
 
-func expandTemplate(template string, ctx TemplateContext) string {
-	replacements := map[string]string{
-		"{{ branch }}":            ctx.Branch,
-		"{{branch}}":              ctx.Branch,
-		"{{ branch | sanitize }}": ctx.BranchSanitized,
-		"{{branch|sanitize}}":     ctx.BranchSanitized,
-		"{{ worktree }}":          ctx.Worktree,
-		"{{worktree}}":            ctx.Worktree,
-		"{{ worktree_name }}":     ctx.WorktreeName,
-		"{{worktree_name}}":       ctx.WorktreeName,
-		"{{ repo }}":              ctx.Repo,
-		"{{repo}}":                ctx.Repo,
-		"{{ repo_root }}":         ctx.RepoRoot,
-		"{{repo_root}}":           ctx.RepoRoot,
-		"{{ commit }}":            ctx.Commit,
-		"{{commit}}":              ctx.Commit,
-		"{{ short_commit }}":      ctx.ShortCommit,
-		"{{short_commit}}":        ctx.ShortCommit,
-		"{{ default_branch }}":    ctx.DefaultBranch,
-		"{{default_branch}}":      ctx.DefaultBranch,
+// templateReplacements builds the pattern→value map for template expansion.
+// transform is applied to every substituted value (pass nil for identity); the
+// inline-hook path passes shellQuote so shell metacharacters in a branch name
+// or path can't inject commands. Filter outputs (hash_port, sanitize_db) are
+// always computed from the real, untransformed branch so they stay correct.
+func templateReplacements(ctx TemplateContext, transform func(string) string) map[string]string {
+	if transform == nil {
+		transform = func(s string) string { return s }
 	}
+	t := transform
+	return map[string]string{
+		"{{ branch }}":               t(ctx.Branch),
+		"{{branch}}":                 t(ctx.Branch),
+		"{{ branch | sanitize }}":    t(ctx.BranchSanitized),
+		"{{branch|sanitize}}":        t(ctx.BranchSanitized),
+		"{{ branch | hash_port }}":   t(strconv.Itoa(hashPort(ctx.Branch))),
+		"{{branch|hash_port}}":       t(strconv.Itoa(hashPort(ctx.Branch))),
+		"{{ branch | sanitize_db }}": t(sanitizeDB(ctx.Branch)),
+		"{{branch|sanitize_db}}":     t(sanitizeDB(ctx.Branch)),
+		"{{ worktree }}":             t(ctx.Worktree),
+		"{{worktree}}":               t(ctx.Worktree),
+		"{{ worktree_name }}":        t(ctx.WorktreeName),
+		"{{worktree_name}}":          t(ctx.WorktreeName),
+		"{{ repo }}":                 t(ctx.Repo),
+		"{{repo}}":                   t(ctx.Repo),
+		"{{ repo_root }}":            t(ctx.RepoRoot),
+		"{{repo_root}}":              t(ctx.RepoRoot),
+		"{{ commit }}":               t(ctx.Commit),
+		"{{commit}}":                 t(ctx.Commit),
+		"{{ short_commit }}":         t(ctx.ShortCommit),
+		"{{short_commit}}":           t(ctx.ShortCommit),
+		"{{ default_branch }}":       t(ctx.DefaultBranch),
+		"{{default_branch}}":         t(ctx.DefaultBranch),
+	}
+}
 
+func applyTemplateReplacements(template string, replacements map[string]string) string {
 	result := template
 	for pattern, value := range replacements {
 		result = strings.ReplaceAll(result, pattern, value)
 	}
 	return result
+}
+
+func expandTemplate(template string, ctx TemplateContext) string {
+	return applyTemplateReplacements(template, templateReplacements(ctx, nil))
+}
+
+// expandTemplateShellQuoted expands like expandTemplate but shell-quotes every
+// substituted value, so an inline hook command run via `sh -c` cannot be
+// hijacked by shell metacharacters (`$()`, backticks, `;`, …) in a branch name
+// or path. Template variables are therefore pre-quoted: inline hook commands
+// must NOT wrap them in their own quotes.
+func expandTemplateShellQuoted(template string, ctx TemplateContext) string {
+	return applyTemplateReplacements(template, templateReplacements(ctx, shellQuote))
+}
+
+// shellQuote wraps s in single quotes for safe interpolation into a `sh -c`
+// command string, escaping any embedded single quote as '\”.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 type StepCommitOptions struct {
