@@ -78,6 +78,38 @@ func TestCreateWorktreeWithoutGrenInit(t *testing.T) {
 	}
 }
 
+// TestCreateWorktreeExpandsWorktreeDirTemplate verifies that a templated
+// worktree_dir (which gren's own config help advertises, e.g.
+// "../{{ repo }}-worktrees") is expanded, not used literally.
+func TestCreateWorktreeExpandsWorktreeDirTemplate(t *testing.T) {
+	dir, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
+	cfgToml := "worktree_dir = \"../{{ repo }}-tmplwt\"\npackage_manager = \"auto\"\nversion = \"1.0.0\"\n"
+	if err := os.WriteFile(".gren/config.toml", []byte(cfgToml), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	worktreePath, _, err := manager.CreateWorktree(context.Background(), CreateWorktreeRequest{
+		Name:        "feat",
+		IsNewBranch: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	if absRoot, aerr := filepath.Abs(filepath.Dir(worktreePath)); aerr == nil {
+		defer os.RemoveAll(absRoot)
+	}
+
+	if strings.Contains(worktreePath, "{{") {
+		t.Errorf("worktree_dir template not expanded: %q", worktreePath)
+	}
+	if !strings.Contains(worktreePath, "-tmplwt") {
+		t.Errorf("expanded worktree path %q lost the template suffix", worktreePath)
+	}
+	_ = dir
+}
+
 func TestCreateWorktreeWithBaseBranch(t *testing.T) {
 	dir, manager, cleanup := setupTestEnvironment(t)
 	defer cleanup()
