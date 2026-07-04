@@ -55,11 +55,6 @@ func main() {
 	gitRepo := git.NewLocalRepository()
 	configManager := config.NewManager()
 
-	// Check for config migration (only if we're in an initialized project)
-	if configManager.Exists() {
-		checkAndPromptMigration(configManager)
-	}
-
 	// Check if we have CLI commands (anything beyond flags)
 	args := os.Args
 	cliArgs := []string{}
@@ -91,6 +86,15 @@ func main() {
 	}
 
 	// Default to TUI mode
+
+	// Offer config migration only here, right before the interactive TUI. The
+	// prompt writes to stdout and reads stdin, so running it for CLI/tooling
+	// commands (shell-init, completion, hook-run) would corrupt captured output —
+	// e.g. `eval "$(gren shell-init zsh)"` would eval the prompt text.
+	if configManager.Exists() {
+		checkAndPromptMigration(configManager)
+	}
+
 	// Create the model with dependencies
 	m := ui.NewModel(gitRepo, configManager, version)
 
@@ -153,6 +157,13 @@ func checkAndPromptMigration(configManager *config.Manager) {
 		if err != nil {
 			fmt.Printf("❌ Migration failed: %v\n", err)
 			logging.Error("Config migration failed: %v", err)
+			return
+		}
+		if migrationResult == nil {
+			// Nothing was migrated — e.g. a concurrent gren process already did
+			// it between our NeedsMigration check and Migrate(). Not an error;
+			// Migrate() returns (nil, nil) when there's nothing to do, so don't
+			// dereference it.
 			return
 		}
 
