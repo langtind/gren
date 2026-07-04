@@ -72,6 +72,34 @@ gren create -n <name> --branch <remote-branch-name>
 
 Remote branches are shown with 🌐 icon and automatically create local tracking branches.
 
+### When working inside herdr (register the worktree in the sidebar)
+
+If you're running inside herdr — the `HERDR_ENV` environment variable is `1` — a
+worktree you create with `gren create` is invisible to the human's herdr UI until
+you register it. After a successful create, open it in herdr's sidebar:
+
+```bash
+result=$(gren create -n "<name>" --format=json)
+wt=$(echo "$result" | jq -r '.path')
+
+if [ "${HERDR_ENV:-}" = "1" ] && command -v herdr >/dev/null 2>&1; then
+  herdr worktree open --path "$wt" --cwd "$PWD" --no-focus
+fi
+```
+
+- Use `--no-focus` so you don't yank the human's current view; use `--focus` only
+  if they asked to jump into the new worktree.
+- This emits herdr's `worktree.opened` event (not `worktree.created`), so the
+  gren-herdr plugin's setup pane does **not** re-run — no double setup.
+
+**Interactive-setup caveat:** `gren create` runs the post-create hooks in this
+(non-interactive) invocation, so hooks that need a human at a terminal — 1Password
+`op` (TouchID), `make seed` prompts — will hang or fail. For such repos, either
+create with `--no-hooks` and let the human run setup, or tell them to create via
+herdr's picker (`prefix+shift+g`), which runs setup in a real TTY pane. For
+non-interactive setups (dependency install, env symlinks, port derivation) the
+flow above is complete on its own.
+
 ### When user asks: "Generate/create post-create setup script"
 
 **Option 1: Use gren init (AI-powered, recommended)**
