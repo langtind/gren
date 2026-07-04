@@ -26,6 +26,10 @@ type WorktreeManager struct {
 	// as it is parsed from the NDJSON stream. Stored via atomic.Value so
 	// Set/Get don't race with the consumer goroutine. Callback must not block.
 	eventObserver atomic.Value // func(events.Event)
+	// forceInteractive, when set, makes every hook run with inherited stdio
+	// (a real TTY) regardless of its own `interactive` setting. Used by
+	// `gren hook-run --interactive` so a caller can run normal hooks in a pane.
+	forceInteractive atomic.Bool
 }
 
 // NewWorktreeManager creates a new WorktreeManager
@@ -46,6 +50,14 @@ func (wm *WorktreeManager) SetEventObserver(fn func(events.Event)) {
 	// (Store would panic on the latter).
 	var v = fn
 	wm.eventObserver.Store(v)
+}
+
+// SetForceInteractive toggles whether all hooks run with inherited stdio (a
+// real TTY) regardless of their own `interactive` setting. `gren hook-run
+// --interactive` sets it so normal, non-interactive hooks can run in a
+// terminal pane (e.g. herdr's bootstrap pane) for setup that needs a TTY.
+func (wm *WorktreeManager) SetForceInteractive(on bool) {
+	wm.forceInteractive.Store(on)
 }
 
 // emitEvent forwards an event to the registered observer, if any.
