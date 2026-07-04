@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-04
+
 ### Added
 
 - **`gren create --no-hooks`** — create the worktree but skip the pre/post-create hooks, so a caller can run setup itself. This lets tooling (e.g. the herdr plugin) create at gren's configured `worktree_dir` and then run the post-create hook in a pane with a real TTY, so interactive setup (1Password `op`, `make seed`) works.
