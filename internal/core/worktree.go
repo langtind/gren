@@ -191,19 +191,33 @@ func (wm *WorktreeManager) CreateWorktree(ctx context.Context, req CreateWorktre
 	// Determine worktree path
 	worktreeDir := req.WorktreeDir
 	if worktreeDir == "" {
-		if cfg.WorktreeDir != "" {
-			worktreeDir = cfg.WorktreeDir
-			logging.Debug("Using worktree_dir from config: %s", worktreeDir)
-		} else {
-			// Default to ../repo-worktrees
-			repoInfo, err := wm.gitRepo.GetRepoInfo(ctx)
-			if err != nil {
-				logging.Error("Failed to get repo info: %v", err)
-				return "", "", fmt.Errorf("failed to get repo info: %w", err)
-			}
+		worktreeDir = cfg.WorktreeDir
+	}
+	// An empty dir needs the repo name for the default; a templated dir needs it
+	// to expand (e.g. worktree_dir = "../{{ repo }}-worktrees").
+	if worktreeDir == "" || strings.Contains(worktreeDir, "{{") {
+		repoInfo, err := wm.gitRepo.GetRepoInfo(ctx)
+		if err != nil {
+			logging.Error("Failed to get repo info: %v", err)
+			return "", "", fmt.Errorf("failed to get repo info: %w", err)
+		}
+		if worktreeDir == "" {
 			worktreeDir = fmt.Sprintf("../%s-worktrees", repoInfo.Name)
 			logging.Debug("Using default worktree_dir: %s", worktreeDir)
+		} else {
+			branchForTmpl := req.Branch
+			if branchForTmpl == "" {
+				branchForTmpl = req.Name
+			}
+			worktreeDir = expandTemplate(worktreeDir, TemplateContext{
+				Repo:            repoInfo.Name,
+				Branch:          branchForTmpl,
+				BranchSanitized: sanitizeBranch(branchForTmpl),
+			})
+			logging.Debug("Using worktree_dir from config (expanded): %s", worktreeDir)
 		}
+	} else {
+		logging.Debug("Using worktree_dir from config: %s", worktreeDir)
 	}
 
 	// Sanitize worktree name: replace / with - to avoid nested directories

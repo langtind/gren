@@ -119,7 +119,11 @@ func (wm *WorktreeManager) RunHooksWithApproval(hookType config.HookType, ctx Ho
 		return nil
 	}
 
-	hooks := cfg.GetAllHooks(hookType)
+	// User-level named hooks (best-effort) run for all repos, before project
+	// hooks. CollectHooks also honors each hook's optional branch globs and
+	// skips disabled hooks — so branch-filtered and global hooks now work.
+	userCfg, _ := config.NewUserConfigManager().Load()
+	hooks := config.CollectHooks(cfg, userCfg, hookType, ctx.BranchName)
 	if len(hooks) == 0 {
 		logging.Debug("RunHooksWithApproval: no %s hooks configured", hookType)
 		return nil

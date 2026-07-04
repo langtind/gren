@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`worktree_dir` templates now expand.** gren's config help advertises `worktree_dir = "../{{ repo }}-worktrees"`, but the value was used literally — you got a directory literally named `{{ repo }}`. It now runs through the template engine (`{{ repo }}`, `{{ branch }}`, `{{ branch | sanitize }}`).
+- **Named-hook `branches` globs are now honored.** `[[named-hooks.post-create]] branches = ["feature/*"]` was documented but never read, so the hook ran on every branch. Hooks are now filtered by their branch globs (`filepath.Match`).
+- **User-level named hooks now run.** Named hooks defined in the user config (`[[named-hooks.*]]`) were loaded but never merged into execution, so global hooks never fired. They now run for all repos, before project hooks.
+
+### Added (API)
+
+- `config.CollectHooks(project, user, hookType, branch)` and `config.BranchMatches(patterns, branch)` — assemble the hooks to run (user + project, branch-filtered, disabled-skipped) in one place.
+
 ## [0.12.0] — 2026-07-04
 
 ### Added
