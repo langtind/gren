@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -1610,6 +1612,44 @@ func (wm *WorktreeManager) ForEach(ctx context.Context, opts ForEachOptions) ([]
 	return results, nil
 }
 
+// EvalTemplate expands a template string against the current worktree's
+// context and returns the result. It powers `gren step eval`, exposing the
+// same engine hooks and for-each use so scripts can derive per-worktree ports,
+// database names, and paths.
+func (wm *WorktreeManager) EvalTemplate(template string) (string, error) {
+	repoRoot, err := wm.getRepoRoot()
+	if err != nil {
+		return "", err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	branch, _ := wm.getCurrentBranch()
+	defaultBranch, _ := wm.getDefaultBranch()
+	commit := wm.getCommitSHA(cwd)
+	shortCommit := commit
+	if len(commit) > 7 {
+		shortCommit = commit[:7]
+	}
+
+	ctx := TemplateContext{
+		Branch:          branch,
+		BranchSanitized: sanitizeBranch(branch),
+		Worktree:        cwd,
+		WorktreeName:    filepath.Base(cwd),
+		Repo:            filepath.Base(repoRoot),
+		RepoRoot:        repoRoot,
+		Commit:          commit,
+		ShortCommit:     shortCommit,
+		DefaultBranch:   defaultBranch,
+	}
+
+	return expandTemplate(template, ctx), nil
+}
+
 func (wm *WorktreeManager) buildTemplateContext(wt *WorktreeInfo, repoRoot, repoName, defaultBranch string) TemplateContext {
 	commit := wm.getCommitSHA(wt.Path)
 	shortCommit := commit
@@ -1646,6 +1686,35 @@ func sanitizeBranch(branch string) string {
 	return result
 }
 
+// hashPort deterministically maps a string (typically a branch name) to a port
+// in the range 10000-19999, so parallel worktrees get stable, collision-averse
+// ports without any shared state. Uses FNV-1a for a fast, stable hash.
+func hashPort(s string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return 10000 + int(h.Sum32()%10000)
+}
+
+// sanitizeDB turns a string (typically a branch name) into a safe SQL/database
+// identifier: lowercased, every non-alphanumeric rune replaced with an
+// underscore, and a leading underscore prepended when the result would start
+// with a digit (many databases reject identifiers that start with a digit).
+func sanitizeDB(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	result := b.String()
+	if result != "" && result[0] >= '0' && result[0] <= '9' {
+		result = "_" + result
+	}
+	return result
+}
+
 func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) []string {
 	expanded := make([]string, len(command))
 	for i, arg := range command {
@@ -1656,24 +1725,28 @@ func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) 
 
 func expandTemplate(template string, ctx TemplateContext) string {
 	replacements := map[string]string{
-		"{{ branch }}":            ctx.Branch,
-		"{{branch}}":              ctx.Branch,
-		"{{ branch | sanitize }}": ctx.BranchSanitized,
-		"{{branch|sanitize}}":     ctx.BranchSanitized,
-		"{{ worktree }}":          ctx.Worktree,
-		"{{worktree}}":            ctx.Worktree,
-		"{{ worktree_name }}":     ctx.WorktreeName,
-		"{{worktree_name}}":       ctx.WorktreeName,
-		"{{ repo }}":              ctx.Repo,
-		"{{repo}}":                ctx.Repo,
-		"{{ repo_root }}":         ctx.RepoRoot,
-		"{{repo_root}}":           ctx.RepoRoot,
-		"{{ commit }}":            ctx.Commit,
-		"{{commit}}":              ctx.Commit,
-		"{{ short_commit }}":      ctx.ShortCommit,
-		"{{short_commit}}":        ctx.ShortCommit,
-		"{{ default_branch }}":    ctx.DefaultBranch,
-		"{{default_branch}}":      ctx.DefaultBranch,
+		"{{ branch }}":               ctx.Branch,
+		"{{branch}}":                 ctx.Branch,
+		"{{ branch | sanitize }}":    ctx.BranchSanitized,
+		"{{branch|sanitize}}":        ctx.BranchSanitized,
+		"{{ branch | hash_port }}":   strconv.Itoa(hashPort(ctx.Branch)),
+		"{{branch|hash_port}}":       strconv.Itoa(hashPort(ctx.Branch)),
+		"{{ branch | sanitize_db }}": sanitizeDB(ctx.Branch),
+		"{{branch|sanitize_db}}":     sanitizeDB(ctx.Branch),
+		"{{ worktree }}":             ctx.Worktree,
+		"{{worktree}}":               ctx.Worktree,
+		"{{ worktree_name }}":        ctx.WorktreeName,
+		"{{worktree_name}}":          ctx.WorktreeName,
+		"{{ repo }}":                 ctx.Repo,
+		"{{repo}}":                   ctx.Repo,
+		"{{ repo_root }}":            ctx.RepoRoot,
+		"{{repo_root}}":              ctx.RepoRoot,
+		"{{ commit }}":               ctx.Commit,
+		"{{commit}}":                 ctx.Commit,
+		"{{ short_commit }}":         ctx.ShortCommit,
+		"{{short_commit}}":           ctx.ShortCommit,
+		"{{ default_branch }}":       ctx.DefaultBranch,
+		"{{default_branch}}":         ctx.DefaultBranch,
 	}
 
 	result := template

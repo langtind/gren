@@ -1900,6 +1900,7 @@ func (c *CLI) handleStep(args []string) error {
 		fmt.Println("  squash     Squash commits since target branch")
 		fmt.Println("  push       Push current branch to local target branch")
 		fmt.Println("  rebase     Rebase current branch onto target")
+		fmt.Println("  eval       Expand a template string for the current worktree")
 		fmt.Println("\nExamples:")
 		fmt.Println("  gren step commit")
 		fmt.Println("  gren step commit -m \"feat: add feature\"")
@@ -1908,6 +1909,7 @@ func (c *CLI) handleStep(args []string) error {
 		fmt.Println("  gren step squash main")
 		fmt.Println("  gren step push")
 		fmt.Println("  gren step rebase main")
+		fmt.Println("  gren step eval '{{ branch | hash_port }}'")
 		fmt.Println("\nUse 'gren step <subcommand> --help' for more information.")
 	}
 
@@ -1926,11 +1928,13 @@ func (c *CLI) handleStep(args []string) error {
 		return c.handleStepPush(args[1:])
 	case "rebase":
 		return c.handleStepRebase(args[1:])
+	case "eval":
+		return c.handleStepEval(args[1:])
 	case "--help", "-h", "help":
 		showStepHelp()
 		return nil
 	default:
-		return fmt.Errorf("unknown step subcommand: %s (use: commit, squash, push, rebase)", subcommand)
+		return fmt.Errorf("unknown step subcommand: %s (use: commit, squash, push, rebase, eval)", subcommand)
 	}
 }
 
@@ -2069,6 +2073,48 @@ func (c *CLI) handleStepRebase(args []string) error {
 	}
 
 	output.Success("Rebased onto target branch")
+	return nil
+}
+
+func (c *CLI) handleStepEval(args []string) error {
+	fs := flag.NewFlagSet("step eval", flag.ExitOnError)
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: gren step eval <template>\n")
+		fmt.Fprintf(fs.Output(), "\nExpand template variables against the current worktree and print the result.\n\n")
+		fmt.Fprintf(fs.Output(), "Template variables:\n")
+		fmt.Fprintf(fs.Output(), "  {{ branch }}              Branch name\n")
+		fmt.Fprintf(fs.Output(), "  {{ branch | sanitize }}   Branch with / replaced by -\n")
+		fmt.Fprintf(fs.Output(), "  {{ branch | hash_port }}  Deterministic port (10000-19999) from the branch\n")
+		fmt.Fprintf(fs.Output(), "  {{ branch | sanitize_db }} Branch as a safe database identifier\n")
+		fmt.Fprintf(fs.Output(), "  {{ worktree }}            Absolute path to worktree\n")
+		fmt.Fprintf(fs.Output(), "  {{ worktree_name }}       Worktree directory name\n")
+		fmt.Fprintf(fs.Output(), "  {{ repo }}                Repository name\n")
+		fmt.Fprintf(fs.Output(), "  {{ repo_root }}           Absolute path to main repo\n")
+		fmt.Fprintf(fs.Output(), "  {{ commit }}              Full HEAD commit SHA\n")
+		fmt.Fprintf(fs.Output(), "  {{ short_commit }}        Short HEAD commit SHA\n")
+		fmt.Fprintf(fs.Output(), "  {{ default_branch }}      Default branch (main/master)\n\n")
+		fmt.Fprintf(fs.Output(), "Examples:\n")
+		fmt.Fprintf(fs.Output(), "  gren step eval '{{ branch | hash_port }}'\n")
+		fmt.Fprintf(fs.Output(), "  PORT=$(gren step eval '{{ branch | hash_port }}') npm run dev\n")
+		fmt.Fprintf(fs.Output(), "  createdb \"$(gren step eval '{{ branch | sanitize_db }}')\"\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if fs.NArg() < 1 {
+		fs.Usage()
+		return fmt.Errorf("no template provided")
+	}
+
+	result, err := c.worktreeManager.EvalTemplate(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(result)
 	return nil
 }
 
