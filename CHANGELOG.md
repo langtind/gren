@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.16.2] — 2026-07-04
+
+### Fixed
+
+- **Hook approvals now persist across worktrees.** `GetProjectID()` returned the current directory instead of a stable project identifier (its comment promised the git remote URL with a repo-root fallback, but that was never implemented). So a hook run from inside a linked worktree — e.g. the herdr plugin's bootstrap pane running `gren hook-run` in the worktree's cwd — got the worktree path as its project ID, and every new worktree re-prompted to approve the same commands. It now resolves the git remote URL, falling back to the main worktree root (identical from every linked worktree) and finally the current directory, so a hook approved once stays approved for all of the repo's worktrees.
+
 ## [0.16.1] — 2026-07-04
 
 ### Fixed
