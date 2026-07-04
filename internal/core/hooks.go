@@ -311,7 +311,7 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	// (stderr) — critical when a hook exits non-zero and we need to surface
 	// *where* it failed, not just that it failed.
 	var stdoutBuf, stderrBuf strings.Builder
-	if interactive {
+	if interactive || wm.forceInteractive.Load() {
 		// Interactive mode: connect to terminal for user input
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout

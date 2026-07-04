@@ -2616,6 +2616,8 @@ func (c *CLI) handleHookRun(args []string) error {
 	worktreePath := fs.String("path", "", "Path to the worktree")
 	branchName := fs.String("branch", "", "Branch name")
 	baseBranch := fs.String("base", "", "Base branch")
+	interactive := fs.Bool("interactive", false, "Force all hooks to run with terminal access (inherited stdio) and prompt for approval")
+	tty := fs.Bool("tty", false, "Alias for --interactive")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -2627,6 +2629,18 @@ func (c *CLI) handleHookRun(args []string) error {
 
 	ht := config.HookType(*hookType)
 
+	// --interactive/--tty forces every hook to inherit stdio (a real TTY) so a
+	// caller like herdr's bootstrap pane can run normal hooks in a terminal.
+	// It also drops auto-approval: since a human is at the TTY, prompt for hook
+	// approval (persisted per project, so it's a one-time prompt). Non-interactive
+	// callers (e.g. the TUI) keep auto-approve.
+	forceInteractive := *interactive || *tty
+	if forceInteractive {
+		c.worktreeManager.SetForceInteractive(true)
+		defer c.worktreeManager.SetForceInteractive(false)
+	}
+	autoApprove := !forceInteractive
+
 	// Stream phase events live to stderr as they're emitted by the hook.
 	// The printHookEvents batch summary still runs at the end for post-mortem
 	// visibility; live streaming just means users don't sit in silence.
@@ -2635,7 +2649,7 @@ func (c *CLI) handleHookRun(args []string) error {
 
 	switch ht {
 	case config.HookPostCreate:
-		results := c.worktreeManager.RunPostCreateHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		results := c.worktreeManager.RunPostCreateHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
 		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
@@ -2643,7 +2657,7 @@ func (c *CLI) handleHookRun(args []string) error {
 			}
 		}
 	case config.HookPreRemove:
-		results := c.worktreeManager.RunPreRemoveHookWithApproval(*worktreePath, *branchName, true)
+		results := c.worktreeManager.RunPreRemoveHookWithApproval(*worktreePath, *branchName, autoApprove)
 		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
@@ -2652,10 +2666,10 @@ func (c *CLI) handleHookRun(args []string) error {
 		}
 	case config.HookPostRemove:
 		// post-remove is best-effort; errors are logged but not returned
-		results := c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, true)
+		results := c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, autoApprove)
 		printHookEvents(results)
 	case config.HookPreMerge:
-		results := c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		results := c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
 		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
@@ -2663,7 +2677,7 @@ func (c *CLI) handleHookRun(args []string) error {
 			}
 		}
 	case config.HookPostMerge:
-		results := c.worktreeManager.RunPostMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, true)
+		results := c.worktreeManager.RunPostMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
 		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
@@ -2671,7 +2685,7 @@ func (c *CLI) handleHookRun(args []string) error {
 			}
 		}
 	case config.HookPostSwitch:
-		results := c.worktreeManager.RunPostSwitchHookWithApproval(*worktreePath, *branchName, true)
+		results := c.worktreeManager.RunPostSwitchHookWithApproval(*worktreePath, *branchName, autoApprove)
 		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
@@ -2679,7 +2693,7 @@ func (c *CLI) handleHookRun(args []string) error {
 			}
 		}
 	case config.HookPostStart:
-		results := c.worktreeManager.RunPostStartHookWithApproval(*worktreePath, *branchName, "", true)
+		results := c.worktreeManager.RunPostStartHookWithApproval(*worktreePath, *branchName, "", autoApprove)
 		printHookEvents(results)
 		if core.HooksFailed(results) {
 			if failed := core.FirstFailedHook(results); failed != nil {
