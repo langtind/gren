@@ -22,12 +22,10 @@ echo "🚀 Setting up new worktree..."
 # Copy development configuration files
 echo "📋 Copying gitignored development files..."
 
-# Read main repo path from config
-MAIN_REPO_PATH=$(grep -o '"main_repo_path"[^,}]*' .gren/config.json | cut -d':' -f2 | tr -d '" ')
-if [ -z "$MAIN_REPO_PATH" ]; then
-    echo "Warning: Could not read main_repo_path from config, using fallback"
-    MAIN_REPO_PATH="../"
-fi
+# gren passes the main repo root as the 4th argument ($4). (Older versions of
+# this hook grepped a "main_repo_path" key out of .gren/config.json, which no
+# longer exists — config is now .gren/config.toml and the root is passed in.)
+MAIN_REPO_PATH="${4:-..}"
 
 [ -d "$MAIN_REPO_PATH/.vscode/" ] && cp -r "$MAIN_REPO_PATH/.vscode/" . 2>/dev/null || true
 [ -d "$MAIN_REPO_PATH/.idea/" ] && cp -r "$MAIN_REPO_PATH/.idea/" . 2>/dev/null || true

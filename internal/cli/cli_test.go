@@ -536,6 +536,37 @@ func TestHandleCreateSuccess(t *testing.T) {
 	_ = dir // worktree directory is based on config, success of create is sufficient
 }
 
+// TestHandleCreateNoHooksSkipsPostCreate verifies that `gren create --no-hooks`
+// creates the worktree but does not run the post-create hook — so a caller can
+// run setup itself (e.g. a herdr plugin running it in a pane with a TTY).
+func TestHandleCreateNoHooksSkipsPostCreate(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	// Replace the generated hook with one that leaves a marker if it runs.
+	marker := filepath.Join(dir, "HOOK_RAN")
+	hook := "#!/usr/bin/env bash\ntouch '" + marker + "'\n"
+	if err := os.WriteFile(".gren/post-create.sh", []byte(hook), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	cli := NewCLI(git.NewLocalRepository(), config.NewManager())
+
+	if err := cli.ParseAndExecute([]string{"gren", "create", "-n", "nohooks-test", "--no-hooks", "-y"}); err != nil {
+		t.Fatalf("create --no-hooks failed: %v", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("post-create hook ran despite --no-hooks")
+	}
+}
+
 func TestHandleCreateWithExistingBranch(t *testing.T) {
 	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
 	defer cleanup()
