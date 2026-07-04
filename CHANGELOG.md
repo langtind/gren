@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-07-04
+
 ### Fixed
 
 - **`worktree_dir` templates now expand.** gren's config help advertises `worktree_dir = "../{{ repo }}-worktrees"`, but the value was used literally — you got a directory literally named `{{ repo }}`. It now runs through the template engine (`{{ repo }}`, `{{ branch }}`, `{{ branch | sanitize }}`).
