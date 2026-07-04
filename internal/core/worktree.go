@@ -1723,37 +1723,67 @@ func (wm *WorktreeManager) expandCommand(command []string, ctx TemplateContext) 
 	return expanded
 }
 
-func expandTemplate(template string, ctx TemplateContext) string {
-	replacements := map[string]string{
-		"{{ branch }}":               ctx.Branch,
-		"{{branch}}":                 ctx.Branch,
-		"{{ branch | sanitize }}":    ctx.BranchSanitized,
-		"{{branch|sanitize}}":        ctx.BranchSanitized,
-		"{{ branch | hash_port }}":   strconv.Itoa(hashPort(ctx.Branch)),
-		"{{branch|hash_port}}":       strconv.Itoa(hashPort(ctx.Branch)),
-		"{{ branch | sanitize_db }}": sanitizeDB(ctx.Branch),
-		"{{branch|sanitize_db}}":     sanitizeDB(ctx.Branch),
-		"{{ worktree }}":             ctx.Worktree,
-		"{{worktree}}":               ctx.Worktree,
-		"{{ worktree_name }}":        ctx.WorktreeName,
-		"{{worktree_name}}":          ctx.WorktreeName,
-		"{{ repo }}":                 ctx.Repo,
-		"{{repo}}":                   ctx.Repo,
-		"{{ repo_root }}":            ctx.RepoRoot,
-		"{{repo_root}}":              ctx.RepoRoot,
-		"{{ commit }}":               ctx.Commit,
-		"{{commit}}":                 ctx.Commit,
-		"{{ short_commit }}":         ctx.ShortCommit,
-		"{{short_commit}}":           ctx.ShortCommit,
-		"{{ default_branch }}":       ctx.DefaultBranch,
-		"{{default_branch}}":         ctx.DefaultBranch,
+// templateReplacements builds the pattern→value map for template expansion.
+// transform is applied to every substituted value (pass nil for identity); the
+// inline-hook path passes shellQuote so shell metacharacters in a branch name
+// or path can't inject commands. Filter outputs (hash_port, sanitize_db) are
+// always computed from the real, untransformed branch so they stay correct.
+func templateReplacements(ctx TemplateContext, transform func(string) string) map[string]string {
+	if transform == nil {
+		transform = func(s string) string { return s }
 	}
+	t := transform
+	return map[string]string{
+		"{{ branch }}":               t(ctx.Branch),
+		"{{branch}}":                 t(ctx.Branch),
+		"{{ branch | sanitize }}":    t(ctx.BranchSanitized),
+		"{{branch|sanitize}}":        t(ctx.BranchSanitized),
+		"{{ branch | hash_port }}":   t(strconv.Itoa(hashPort(ctx.Branch))),
+		"{{branch|hash_port}}":       t(strconv.Itoa(hashPort(ctx.Branch))),
+		"{{ branch | sanitize_db }}": t(sanitizeDB(ctx.Branch)),
+		"{{branch|sanitize_db}}":     t(sanitizeDB(ctx.Branch)),
+		"{{ worktree }}":             t(ctx.Worktree),
+		"{{worktree}}":               t(ctx.Worktree),
+		"{{ worktree_name }}":        t(ctx.WorktreeName),
+		"{{worktree_name}}":          t(ctx.WorktreeName),
+		"{{ repo }}":                 t(ctx.Repo),
+		"{{repo}}":                   t(ctx.Repo),
+		"{{ repo_root }}":            t(ctx.RepoRoot),
+		"{{repo_root}}":              t(ctx.RepoRoot),
+		"{{ commit }}":               t(ctx.Commit),
+		"{{commit}}":                 t(ctx.Commit),
+		"{{ short_commit }}":         t(ctx.ShortCommit),
+		"{{short_commit}}":           t(ctx.ShortCommit),
+		"{{ default_branch }}":       t(ctx.DefaultBranch),
+		"{{default_branch}}":         t(ctx.DefaultBranch),
+	}
+}
 
+func applyTemplateReplacements(template string, replacements map[string]string) string {
 	result := template
 	for pattern, value := range replacements {
 		result = strings.ReplaceAll(result, pattern, value)
 	}
 	return result
+}
+
+func expandTemplate(template string, ctx TemplateContext) string {
+	return applyTemplateReplacements(template, templateReplacements(ctx, nil))
+}
+
+// expandTemplateShellQuoted expands like expandTemplate but shell-quotes every
+// substituted value, so an inline hook command run via `sh -c` cannot be
+// hijacked by shell metacharacters (`$()`, backticks, `;`, …) in a branch name
+// or path. Template variables are therefore pre-quoted: inline hook commands
+// must NOT wrap them in their own quotes.
+func expandTemplateShellQuoted(template string, ctx TemplateContext) string {
+	return applyTemplateReplacements(template, templateReplacements(ctx, shellQuote))
+}
+
+// shellQuote wraps s in single quotes for safe interpolation into a `sh -c`
+// command string, escaping any embedded single quote as '\”.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 type StepCommitOptions struct {

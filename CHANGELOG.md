@@ -5,7 +5,7 @@
 ### Added
 
 - **Hook & template filters `hash_port` and `sanitize_db`.** `{{ branch | hash_port }}` maps a branch deterministically to a port in `10000–19999` (FNV-1a), and `{{ branch | sanitize_db }}` turns a branch into a safe database identifier (lowercased, non-alphanumerics → `_`, leading digit prefixed with `_`). Two parallel worktrees get stable, collision-averse ports and DB names with no shared state — the core of running parallel dev servers/agents side by side.
-- **Inline hook commands now expand template variables.** Commands configured inline in `.gren/config.toml` (the `sh -c` path, e.g. `post-create = "echo PORT={{ branch | hash_port }} >> .env"`) run through the same template engine as `for-each` and `worktree_dir`. Script-file hooks are unchanged — they still receive context via args + `GREN_JSON_CONTEXT`.
+- **Inline hook commands now expand template variables.** Commands configured inline in `.gren/config.toml` (the `sh -c` path, e.g. `post-create = "echo PORT={{ branch | hash_port }} >> .env"`) run through the same template engine as `for-each` and `worktree_dir`. Substituted values are shell-quoted so a branch name containing shell metacharacters (git permits `$()`, backticks, `;`) can't inject commands — variables are therefore pre-quoted and hook commands must not wrap them in their own quotes. Script-file hooks are unchanged — they still receive context via args + `GREN_JSON_CONTEXT`.
 - **`gren step eval <template>`** — expand a template string against the current worktree and print the result, exposing the engine to scripts: `PORT=$(gren step eval '{{ branch | hash_port }}') npm run dev` or `createdb "$(gren step eval '{{ branch | sanitize_db }}')"`.
 
 ### Added (API)

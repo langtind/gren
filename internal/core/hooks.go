@@ -189,9 +189,10 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		cmdDesc = fmt.Sprintf("%s %s %s %s %s", fullPath, ctx.WorktreePath, ctx.BranchName, ctx.BaseBranch, ctx.RepoRoot)
 	} else {
 		// Expand template variables (e.g. {{ branch | hash_port }}) in inline
-		// commands so hooks can derive per-worktree ports/DB names. Script-file
-		// hooks already receive context via args + env, so they're left as-is.
-		expandedCmd := expandTemplate(hookCmd, wm.templateContextFromHook(ctx))
+		// commands so hooks can derive per-worktree ports/DB names. Values are
+		// shell-quoted so a branch name with shell metacharacters can't inject
+		// commands. Script-file hooks receive context via args + env, unchanged.
+		expandedCmd := expandTemplateShellQuoted(hookCmd, wm.templateContextFromHook(ctx))
 		cmd = exec.Command("sh", "-c", expandedCmd)
 		cmdDesc = expandedCmd
 	}
