@@ -1085,7 +1085,23 @@ func (wm *WorktreeManager) parseWorktreeList(output string) []WorktreeInfo {
 }
 
 func (wm *WorktreeManager) getRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	// Resolve the MAIN worktree's root, not the current linked worktree's
+	// toplevel. The main checkout is the parent of the shared git common dir,
+	// so this stays correct even when gren runs from inside a linked worktree
+	// (e.g. `gren hook-run` invoked by a plugin from the worktree's own pane) —
+	// hook RepoRoot / repo_root / worktree_dir then resolve against the main
+	// checkout, where shared gitignored files (a .env) live. In a non-worktree
+	// repo the common dir is <repo>/.git, so this equals --show-toplevel.
+	cmd := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if output, err := cmd.Output(); err == nil {
+		commonDir := strings.TrimSpace(string(output))
+		if commonDir != "" {
+			return filepath.Dir(filepath.Clean(commonDir)), nil
+		}
+	}
+
+	// Fallback for older git (< 2.31, no --path-format) or unexpected output.
+	cmd = exec.Command("git", "rev-parse", "--show-toplevel")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get repository root: %w", err)
