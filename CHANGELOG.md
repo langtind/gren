@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-07-04
+
 ### Added
 
 - **Hook & template filters `hash_port` and `sanitize_db`.** `{{ branch | hash_port }}` maps a branch deterministically to a port in `10000–19999` (FNV-1a), and `{{ branch | sanitize_db }}` turns a branch into a safe database identifier (lowercased, non-alphanumerics → `_`, leading digit prefixed with `_`). Two parallel worktrees get stable, collision-averse ports and DB names with no shared state — the core of running parallel dev servers/agents side by side.
