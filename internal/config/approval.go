@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // ApprovalManager handles persistent storage of approved hook commands.
@@ -164,20 +166,36 @@ func (am *ApprovalManager) ListApproved(projectID string) []string {
 	return commands
 }
 
-// GetProjectID returns a unique identifier for the current project.
+// GetProjectID returns a stable identifier for the whole project, shared by all
+// of its worktrees, so hook approvals persist across worktrees instead of being
+// re-prompted for each one.
+//
+// It prefers the git remote URL; failing that, the main worktree root (the
+// shared git common dir's parent, which is identical from every linked
+// worktree); and only as a last resort the current directory. The previous
+// implementation always used the current directory, so running from each
+// worktree produced a different ID and approvals never carried over.
 func GetProjectID() (string, error) {
-	// Use the git remote URL as a stable project identifier
-	// Fall back to the repository root path if no remote is configured
+	// 1. Git remote URL — stable across worktrees and machines.
+	if out, err := exec.Command("git", "remote", "get-url", "origin").Output(); err == nil {
+		if url := strings.TrimSpace(string(out)); url != "" {
+			return url, nil
+		}
+	}
+
+	// 2. Main worktree root (shared git common dir's parent). Identical from the
+	//    main checkout and every linked worktree, so approvals persist without a
+	//    remote.
+	if out, err := exec.Command("git", "rev-parse", "--path-format=absolute", "--git-common-dir").Output(); err == nil {
+		if commonDir := strings.TrimSpace(string(out)); commonDir != "" {
+			return filepath.Dir(filepath.Clean(commonDir)), nil
+		}
+	}
+
+	// 3. Last resort: the current directory (not a git repo).
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-
-	// Try to get the canonical path
-	absPath, err := filepath.Abs(cwd)
-	if err != nil {
-		absPath = cwd
-	}
-
-	return absPath, nil
+	return filepath.Clean(cwd), nil
 }
