@@ -164,6 +164,7 @@ func (c *CLI) handleCreate(args []string) error {
 	execute := fs.String("x", "", "Command to run after creating worktree (e.g., -x claude)")
 	autoYes := fs.Bool("y", false, "Auto-approve hooks without prompting")
 	format := fs.String("format", "", "Output format: json (machine-readable, suppresses prompts)")
+	noHooks := fs.Bool("no-hooks", false, "Create the worktree without running pre/post-create hooks")
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren create -n <name> [options]\n")
@@ -182,6 +183,7 @@ func (c *CLI) handleCreate(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-ui -x \"npm run dev\"   # Create and start dev server\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-api -y                # Auto-approve hooks\n")
 		fmt.Fprintf(fs.Output(), "  gren create -n feat-x --format=json -y    # Machine-readable, no prompts\n")
+		fmt.Fprintf(fs.Output(), "  gren create -n feat-x --no-hooks -y       # Create, skip hooks (run setup yourself)\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -264,24 +266,27 @@ func (c *CLI) handleCreate(args []string) error {
 	if preBranchName == "" {
 		preBranchName = *name
 	}
-	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
-	preCreateResults := c.worktreeManager.RunPreCreateHookWithApproval(preBranchName, effectiveBaseBranch, *autoYes)
-	c.worktreeManager.SetEventObserver(nil)
-	if !jsonMode {
-		printHookEvents(preCreateResults)
-	}
-	if core.HooksFailed(preCreateResults) {
-		if jsonMode {
-			out := CreateJSON{
-				Name:   *name,
-				Branch: preBranchName,
-				Hooks:  hookResultsToJSON(preCreateResults),
-			}
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(out)
+	var preCreateResults []core.HookResult
+	if !*noHooks {
+		c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+		preCreateResults = c.worktreeManager.RunPreCreateHookWithApproval(preBranchName, effectiveBaseBranch, *autoYes)
+		c.worktreeManager.SetEventObserver(nil)
+		if !jsonMode {
+			printHookEvents(preCreateResults)
 		}
-		return fmt.Errorf("pre-create hook failed; worktree not created")
+		if core.HooksFailed(preCreateResults) {
+			if jsonMode {
+				out := CreateJSON{
+					Name:   *name,
+					Branch: preBranchName,
+					Hooks:  hookResultsToJSON(preCreateResults),
+				}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				_ = enc.Encode(out)
+			}
+			return fmt.Errorf("pre-create hook failed; worktree not created")
+		}
 	}
 
 	worktreePath, warning, err := c.worktreeManager.CreateWorktree(ctx, req)
@@ -302,14 +307,17 @@ func (c *CLI) handleCreate(args []string) error {
 	if branchName == "" {
 		branchName = *name
 	}
-	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
-	postCreateResults := c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
-	c.worktreeManager.SetEventObserver(nil)
-	// In JSON mode the human-readable phase summary would corrupt stdout —
-	// hook results land in the JSON payload instead. Live stderr streaming
-	// above is still useful as a progress signal for log consumers.
-	if !jsonMode {
-		printHookEvents(postCreateResults)
+	var postCreateResults []core.HookResult
+	if !*noHooks {
+		c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
+		postCreateResults = c.worktreeManager.RunPostCreateHookWithApproval(worktreePath, branchName, effectiveBaseBranch, *autoYes)
+		c.worktreeManager.SetEventObserver(nil)
+		// In JSON mode the human-readable phase summary would corrupt stdout —
+		// hook results land in the JSON payload instead. Live stderr streaming
+		// above is still useful as a progress signal for log consumers.
+		if !jsonMode {
+			printHookEvents(postCreateResults)
+		}
 	}
 
 	// JSON mode: emit one machine-readable object on stdout and return.

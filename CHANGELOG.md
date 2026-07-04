@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`gren create --no-hooks`** — create the worktree but skip the pre/post-create hooks, so a caller can run setup itself. This lets tooling (e.g. the herdr plugin) create at gren's configured `worktree_dir` and then run the post-create hook in a pane with a real TTY, so interactive setup (1Password `op`, `make seed`) works.
+
+### Fixed
+
+- The repo's own `.gren/post-create.sh` read `main_repo_path` from `.gren/config.json`, which no longer exists (config is `.gren/config.toml`, and gren passes the repo root to hooks as `$4`). It now uses `$4`. Dev tooling only; does not affect the gren binary.
+
 ## [0.11.0] — 2026-07-04
 
 ### Changed
