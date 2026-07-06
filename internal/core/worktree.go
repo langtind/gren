@@ -973,11 +973,18 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		return fmt.Errorf("failed to list worktrees: %w", err)
 	}
 
+	// Callers pass a directory name, path, or branch (the CLI forwards the raw
+	// user argument; the merge flow passes the branch). Name/path matches win
+	// over a branch match so an exact name is never shadowed by another
+	// worktree's branch of the same spelling.
 	var targetWorktree *WorktreeInfo
 	for _, wt := range worktrees {
 		if wt.Name == identifier || wt.Path == identifier {
 			targetWorktree = &wt
 			break
+		}
+		if targetWorktree == nil && wt.Branch == identifier {
+			targetWorktree = &wt
 		}
 	}
 

@@ -357,6 +357,32 @@ func TestDeleteWorktree(t *testing.T) {
 		}
 	})
 
+	t.Run("delete worktree by branch name", func(t *testing.T) {
+		// A slash in the name gives a dash-sanitized directory but keeps the
+		// slash in the branch — deleting by branch must still resolve it
+		// (the CLI and merge flow both pass the branch as identifier).
+		req := CreateWorktreeRequest{
+			Name:        "feat/delete-by-branch",
+			IsNewBranch: true,
+		}
+		_, _, err := manager.CreateWorktree(ctx, req)
+		if err != nil {
+			t.Fatalf("failed to create worktree: %v", err)
+		}
+
+		err = manager.DeleteWorktree(ctx, "feat/delete-by-branch", false)
+		if err != nil {
+			t.Fatalf("DeleteWorktree() by branch error: %v", err)
+		}
+
+		worktrees, _ := manager.ListWorktrees(ctx)
+		for _, wt := range worktrees {
+			if wt.Name == "feat-delete-by-branch" {
+				t.Error("worktree 'feat-delete-by-branch' still exists after deletion by branch")
+			}
+		}
+	})
+
 	t.Run("fail to delete current worktree", func(t *testing.T) {
 		worktrees, _ := manager.ListWorktrees(ctx)
 		var currentWorktree string
