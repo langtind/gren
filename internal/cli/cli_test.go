@@ -567,6 +567,51 @@ func TestHandleCreateNoHooksSkipsPostCreate(t *testing.T) {
 	}
 }
 
+// TestHandleCreateJSONPathIsAbsolute guards that `gren create --format=json`
+// emits an absolute .path. The herdr picker passes this straight to
+// `herdr worktree open`, which resolves a relative path against the daemon's cwd
+// (not the repo) and errors — so a relative path silently breaks worktree
+// creation via the picker.
+func TestHandleCreateJSONPathIsAbsolute(t *testing.T) {
+	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	projectName := filepath.Base(dir)
+	config.Initialize(projectName, true)
+
+	// Force a RELATIVE worktree_dir. gren init writes an absolute worktree_dir,
+	// so a relative one must be set explicitly to reproduce the bug: it makes
+	// CreateWorktree return a relative path, which the herdr picker then hands to
+	// `herdr worktree open` unresolved.
+	relCfg := "version = \"" + config.CurrentConfigVersion + "\"\nworktree_dir = \"../" + projectName + "-worktrees\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gren", "config.toml"), []byte(relCfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cli := NewCLI(git.NewLocalRepository(), config.NewManager())
+
+	out := captureStdout(t, func() {
+		if err := cli.ParseAndExecute([]string{"gren", "create", "-n", "abs-path-test", "--no-hooks", "-y", "--format=json"}); err != nil {
+			t.Fatalf("create failed: %v", err)
+		}
+	})
+
+	var result CreateJSON
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("parse create JSON %q: %v", out, err)
+	}
+	if !filepath.IsAbs(result.Path) {
+		t.Errorf("create --format=json .path must be absolute, got %q", result.Path)
+	}
+	if _, err := os.Stat(result.Path); err != nil {
+		t.Errorf("the absolute .path should exist on disk: %v", err)
+	}
+}
+
 func TestHandleCreateWithExistingBranch(t *testing.T) {
 	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
 	defer cleanup()
