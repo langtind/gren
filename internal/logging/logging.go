@@ -136,6 +136,19 @@ func Error(format string, args ...interface{}) {
 	}
 }
 
+// LogPanic records a recovered panic (value + stack) to disk, best-effort.
+func LogPanic(recovered any, stack []byte) {
+	Error("panic: %v\n%s", recovered, stack)
+}
+
+// LogTermination records that the process is exiting because of a signal, then
+// closes the log so the line is flushed before the process goes away. Used from
+// a signal handler, since Go runs no deferred funcs on signal death.
+func LogTermination(sig os.Signal) {
+	Warn("terminating on signal: %v", sig)
+	Close()
+}
+
 // SetOutput sets additional output (e.g., for debugging to stderr)
 func SetOutput(w io.Writer) {
 	if logger != nil {

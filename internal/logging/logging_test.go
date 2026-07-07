@@ -321,3 +321,28 @@ func TestRotateIfLargeKeepsSmallFile(t *testing.T) {
 		t.Errorf("small file should be left in place: %v", err)
 	}
 }
+
+func TestLogPanicWritesStackToDisk(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFilePath := filepath.Join(tmpDir, "test.log")
+	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origLogger, origLogFile, origEnabled := logger, logFile, enabled
+	defer func() { logger, logFile, enabled = origLogger, origLogFile, origEnabled }()
+	logFile, logger, enabled = file, log.New(file, "", 0), true
+
+	LogPanic("boom", []byte("stackframe-xyz"))
+	file.Close()
+
+	data, err := os.ReadFile(logFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "panic: boom") || !strings.Contains(content, "stackframe-xyz") {
+		t.Errorf("log missing panic/stack, got: %s", content)
+	}
+}
