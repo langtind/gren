@@ -107,7 +107,7 @@ func (c *CLI) handleCompletionQuery(args []string) error {
 			"navigate", "switch", "cd", "nav",
 			"compare", "merge", "for-each", "step",
 			"marker", "statusline", "shell-init", "completion",
-			"setup-claude-plugin",
+			"logs", "setup-claude-plugin",
 		}
 		for _, cmd := range commands {
 			fmt.Println(cmd)
@@ -124,7 +124,7 @@ _gren_completions() {
     local cur prev words cword
     _init_completion || return
 
-    local commands="create list delete cleanup init navigate switch cd nav compare merge for-each step marker statusline shell-init completion setup-claude-plugin"
+    local commands="create list delete cleanup init navigate switch cd nav compare merge for-each step marker statusline shell-init completion logs setup-claude-plugin"
 
     case $cword in
         1)
@@ -241,6 +241,7 @@ _gren() {
         'statusline:Output status for shell prompts'
         'shell-init:Generate shell integration'
         'completion:Generate completion scripts'
+        'logs:Show gren log (--path, -f, --last, --hooks)'
         'setup-claude-plugin:Create Claude plugin hooks'
     )
 
@@ -380,6 +381,7 @@ complete -c gren -n '__fish_use_subcommand' -a marker -d 'Manage Claude activity
 complete -c gren -n '__fish_use_subcommand' -a statusline -d 'Output status for shell prompts'
 complete -c gren -n '__fish_use_subcommand' -a shell-init -d 'Generate shell integration'
 complete -c gren -n '__fish_use_subcommand' -a completion -d 'Generate completion scripts'
+complete -c gren -n '__fish_use_subcommand' -a logs -d 'Show gren log'
 complete -c gren -n '__fish_use_subcommand' -a setup-claude-plugin -d 'Create Claude plugin hooks'
 
 # Worktree completions for relevant commands
