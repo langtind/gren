@@ -2157,11 +2157,12 @@ args = ["-p", "Write a conventional commit message for this diff. Output only th
 # branches = ["feature/*", "fix/*"]
 `
 
-// Example project configuration file content
-const projectConfigExample = `# gren project configuration
+// Example project configuration file content. The version is injected from
+// config.CurrentConfigVersion so the example never drifts behind the schema.
+var projectConfigExample = fmt.Sprintf(`# gren project configuration
 # See https://github.com/langtind/gren for documentation
 
-version = "1.0.0"
+version = "%s"
 
 # Worktree directory (absolute or relative to repository root)
 worktree_dir = "../{{ repo }}-worktrees"
@@ -2188,7 +2189,7 @@ post-create = ".gren/post-create.sh"
 # name = "install-deps"
 # command = "npm install"
 # branches = ["feature/*"]
-`
+`, config.CurrentConfigVersion)
 
 func (c *CLI) handleConfig(args []string) error {
 	if len(args) == 0 {

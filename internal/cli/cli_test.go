@@ -2102,3 +2102,17 @@ func TestDiffUnknownBaseReturnsError(t *testing.T) {
 		t.Fatal("expected error for unknown base branch, got nil")
 	}
 }
+
+// TestProjectConfigExampleUsesCurrentVersion guards the `gren config create
+// --project` template against drifting behind the config schema. The version
+// is injected from config.CurrentConfigVersion, so this must always hold.
+func TestProjectConfigExampleUsesCurrentVersion(t *testing.T) {
+	want := fmt.Sprintf("version = %q", config.CurrentConfigVersion)
+	if !strings.Contains(projectConfigExample, want) {
+		t.Errorf("projectConfigExample missing %q; example config drifted from the schema version", want)
+	}
+	// Ensure no stale hardcoded version lingers (unless it happens to be current).
+	if config.CurrentConfigVersion != "1.0.0" && strings.Contains(projectConfigExample, `version = "1.0.0"`) {
+		t.Error("projectConfigExample still contains stale hardcoded version \"1.0.0\"")
+	}
+}

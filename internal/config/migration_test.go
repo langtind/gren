@@ -78,6 +78,45 @@ func TestNeedsMigration_CurrentVersion(t *testing.T) {
 	}
 }
 
+// TestDefaultVersionMatchesCurrent guards against DefaultVersion (stamped into
+// configs at init time) drifting behind CurrentConfigVersion. If they diverge,
+// gren nags the user to migrate a config it just wrote itself.
+func TestDefaultVersionMatchesCurrent(t *testing.T) {
+	if DefaultVersion != CurrentConfigVersion {
+		t.Errorf("DefaultVersion = %q, but CurrentConfigVersion = %q; a freshly initialized config must be at the current schema version", DefaultVersion, CurrentConfigVersion)
+	}
+}
+
+// TestNewDefaultConfig_NoMigrationNeeded ensures a config freshly created by the
+// current binary does not immediately report needing migration. This is the
+// end-to-end symptom of the DefaultVersion/CurrentConfigVersion drift: `gren
+// init` writes a config that gren then flags as outdated.
+func TestNewDefaultConfig_NoMigrationNeeded(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".gren")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := &Manager{configDir: configDir}
+
+	config, err := NewDefaultConfig("test-project", tmpDir)
+	if err != nil {
+		t.Fatalf("NewDefaultConfig() error = %v", err)
+	}
+	if err := manager.Save(config); err != nil {
+		t.Fatal(err)
+	}
+
+	needsMigration, _, err := manager.NeedsMigration()
+	if err != nil {
+		t.Fatalf("NeedsMigration() error = %v", err)
+	}
+	if needsMigration {
+		t.Errorf("freshly created config (version %q) reports needing migration to %q; init must stamp the current schema version", config.Version, CurrentConfigVersion)
+	}
+}
+
 func TestNeedsMigration_OldVersion(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, ".gren")
