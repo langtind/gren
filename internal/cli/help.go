@@ -103,6 +103,7 @@ func (c *CLI) ShowColoredHelp() {
 	printCommand("init", "", "Initialize gren in repository")
 	printCommand("shell-init", "<shell>", "Generate shell integration")
 	printCommand("completion", "<shell>", "Generate shell completions")
+	printCommand("logs", "[--path|-f|--last]", "Show gren's log")
 	printCommand("help", "<topic>", "Show detailed help (e.g. hooks)")
 	fmt.Println()
 
