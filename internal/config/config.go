@@ -188,8 +188,10 @@ func NewDefaultConfig(projectName, repoRoot string) (*Config, error) {
 		return nil, fmt.Errorf("repo root cannot be empty")
 	}
 
-	// Use absolute path for worktree directory, sibling to main worktree
-	worktreeDir := filepath.Join(filepath.Dir(repoRoot), projectName+"-worktrees")
+	// Relative to the main worktree (a sibling dir) so the committed config stays
+	// portable across machines and clones. Consumers resolve it against the repo
+	// at runtime, and `gren create` emits the resolved absolute path.
+	worktreeDir := filepath.Join("..", projectName+"-worktrees")
 
 	return &Config{
 		// MainWorktree intentionally not set - detected dynamically now

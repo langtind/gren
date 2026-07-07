@@ -20,14 +20,14 @@ func TestNewDefaultConfig(t *testing.T) {
 			projectName: "my-project",
 			repoRoot:    "/home/user/repos/my-project",
 			wantErr:     false,
-			wantDir:     "/home/user/repos/my-project-worktrees",
+			wantDir:     "../my-project-worktrees",
 		},
 		{
 			name:        "project with spaces preserved",
 			projectName: "  spaced-project  ",
 			repoRoot:    "/home/user/repos/spaced",
 			wantErr:     false,
-			wantDir:     "/home/user/repos/  spaced-project  -worktrees",
+			wantDir:     "../  spaced-project  -worktrees",
 		},
 		{
 			name:        "empty project name",
