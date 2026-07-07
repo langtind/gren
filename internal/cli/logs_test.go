@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/langtind/gren/internal/logging"
 )
 
 func TestTailLinesReturnsLastN(t *testing.T) {
@@ -33,5 +35,33 @@ func TestLastErrorBlockFindsLastWithContinuation(t *testing.T) {
 func TestLastErrorBlockNoErrors(t *testing.T) {
 	if got := lastErrorBlock("[2026-07-07 10:00:00.000] [INFO] fine"); !strings.Contains(got, "no [ERROR]") {
 		t.Errorf("lastErrorBlock = %q, want no-error message", got)
+	}
+}
+
+func TestHandleLogsPathLastHooks(t *testing.T) {
+	t.Setenv("GREN_LOG_DIR", t.TempDir())
+	if err := logging.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer logging.Close()
+	logging.Error("post-create hook failed: exit status 7")
+
+	c := &CLI{}
+	run := func(args ...string) string {
+		return captureStdout(t, func() {
+			if err := c.handleLogs(args); err != nil {
+				t.Errorf("handleLogs(%v): %v", args, err)
+			}
+		})
+	}
+
+	if pathOut := run("--path"); !strings.Contains(pathOut, "gren.log") {
+		t.Errorf("--path output = %q, want a gren.log path", pathOut)
+	}
+	if lastOut := run("--last"); !strings.Contains(lastOut, "exit status 7") {
+		t.Errorf("--last output = %q, want the seeded error", lastOut)
+	}
+	if hooksOut := run("--hooks"); !strings.Contains(hooksOut, "no hook logs") {
+		t.Errorf("--hooks output = %q, want the empty-state message", hooksOut)
 	}
 }
