@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-07-07
+
+### Fixed
+
+- **`gren delete` offers to force-remove worktrees git won't clean.** A plain `git worktree remove` fails with "Directory not empty" when the checkout still holds gitignored build output (`node_modules/`, `.venv/`) — i.e. any set-up worktree, and what the herdr `prefix+shift+d` flow hit as a dead-end error (the plugin can't pass force). Delete now lists the blocking content and prompts `Force remove (this discards the above)? [y/N]`; on yes it forces. The core force path also falls back to removing the checkout directory and running `git worktree prune` when git still refuses — e.g. a worktree left half-removed by a prior non-force attempt. The branch is always preserved.
+
 ## [0.17.0] — 2026-07-07
 
 ### Added
