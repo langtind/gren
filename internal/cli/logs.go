@@ -44,6 +44,15 @@ func (c *CLI) handleLogs(args []string) error {
 		return fmt.Errorf("read log: %w", err)
 	}
 	if *last {
+		// Prefer the full captured output of the last failed hook — that's the
+		// actual cause, not just a pointer to a file. Fall back to the last error
+		// block for non-hook errors (e.g. a bad CLI invocation).
+		if p := lastFailedHookLogPath(string(content)); p != "" {
+			if data, readErr := os.ReadFile(p); readErr == nil {
+				fmt.Printf("Last hook failure — captured output (%s):\n\n%s", p, string(data))
+				return nil
+			}
+		}
 		fmt.Println(lastErrorBlock(string(content)))
 		return nil
 	}
@@ -63,6 +72,20 @@ func tailLines(s string, n int) []string {
 		lines = lines[len(lines)-n:]
 	}
 	return lines
+}
+
+// lastFailedHookLogPath returns the per-run hook log path from the most recent
+// "hook full output → <path>" line (logged only when a hook fails), or "" if
+// there is none.
+func lastFailedHookLogPath(s string) string {
+	const marker = "full output → "
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if idx := strings.Index(lines[i], marker); idx != -1 {
+			return strings.TrimSpace(lines[i][idx+len(marker):])
+		}
+	}
+	return ""
 }
 
 // lastErrorBlock returns the last "[ERROR]" line plus any non-timestamped

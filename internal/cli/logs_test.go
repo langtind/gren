@@ -32,6 +32,20 @@ func TestLastErrorBlockFindsLastWithContinuation(t *testing.T) {
 	}
 }
 
+func TestLastFailedHookLogPath(t *testing.T) {
+	logText := strings.Join([]string{
+		"[2026-07-07 10:00:00.000] [INFO] started",
+		"[2026-07-07 10:00:01.000] [ERROR] post-create hook failed: exit status 1",
+		"[2026-07-07 10:00:01.000] [ERROR] post-create hook full output → /tmp/logs/hooks/post-create-x-123.log",
+	}, "\n")
+	if got := lastFailedHookLogPath(logText); got != "/tmp/logs/hooks/post-create-x-123.log" {
+		t.Errorf("lastFailedHookLogPath = %q, want the pointer path", got)
+	}
+	if got := lastFailedHookLogPath("[2026-07-07 10:00:00.000] [INFO] nothing failed"); got != "" {
+		t.Errorf("lastFailedHookLogPath = %q, want empty when no failure pointer", got)
+	}
+}
+
 func TestLastErrorBlockNoErrors(t *testing.T) {
 	if got := lastErrorBlock("[2026-07-07 10:00:00.000] [INFO] fine"); !strings.Contains(got, "no [ERROR]") {
 		t.Errorf("lastErrorBlock = %q, want no-error message", got)
