@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,29 @@ import (
 	"github.com/langtind/gren/internal/events"
 	"github.com/langtind/gren/internal/logging"
 )
+
+const (
+	hookTailLimit = 64 * 1024          // bytes of hook output kept in memory for logs/UI
+	hookLogKeep   = 20                 // per-run hook logs retained
+	hookLogMaxAge = 7 * 24 * time.Hour // per-run hook log max age
+)
+
+// cappedWriter keeps only the last `limit` bytes written — a bounded tail so
+// hook output can surface in logs/UI without unbounded memory.
+type cappedWriter struct {
+	buf   []byte
+	limit int
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.limit {
+		w.buf = w.buf[len(w.buf)-w.limit:]
+	}
+	return len(p), nil
+}
+
+func (w *cappedWriter) String() string { return string(w.buf) }
 
 // HookContext contains all information passed to hooks.
 type HookContext struct {
@@ -311,12 +335,28 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	// (stderr) — critical when a hook exits non-zero and we need to surface
 	// *where* it failed, not just that it failed.
 	var stdoutBuf, stderrBuf strings.Builder
+	var hookLogPath string
 	if interactive || wm.forceInteractive.Load() {
-		// Interactive mode: connect to terminal for user input
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
+		// Interactive: run against a real TTY (op / make seed / read all work),
+		// but tee the combined output to a per-run disk log and a capped tail so a
+		// failure leaves a trace even if the pane closes or gren is killed mid-run.
+		hookFile, path, logErr := logging.NewHookLog(string(hookType), ctx.BranchName)
+		if logErr != nil {
+			logging.Warn("could not open hook log, capture disabled: %v", logErr)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			err = cmd.Run()
+		} else {
+			hookLogPath = path
+			tail := &cappedWriter{limit: hookTailLimit}
+			sink := io.MultiWriter(hookFile, tail)
+			err = runInteractiveCaptured(cmd, os.Stdin, io.MultiWriter(os.Stdout, sink))
+			_ = hookFile.Close()
+			stdoutBuf.WriteString(tail.String())
+			logging.Info("%s hook output → %s", hookType, path)
+			logging.PruneHookLogs(hookLogKeep, hookLogMaxAge)
+		}
 	} else {
 		cmd.Stdin = strings.NewReader(string(jsonData))
 		cmd.Stdout = &stdoutBuf
@@ -357,6 +397,9 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		// stderr, e.g. `bad substitution`) isn't lost in a merged blob.
 		logging.Error("%s hook failed: %v\nstdout: %s\nstderr: %s",
 			hookType, err, result.Output, result.Stderr)
+		if hookLogPath != "" {
+			logging.Error("%s hook full output → %s", hookType, hookLogPath)
+		}
 	} else {
 		logging.Info("%s hook completed successfully", hookType)
 		logging.Debug("%s hook output: %s", hookType, result.Output)
