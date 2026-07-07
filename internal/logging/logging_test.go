@@ -287,3 +287,37 @@ func TestCloseWithNilFile(t *testing.T) {
 	logFile = nil
 	Close() // Should not panic
 }
+
+func TestGetLogDirHonorsEnvOverride(t *testing.T) {
+	t.Setenv("GREN_LOG_DIR", "/tmp/custom-gren-logs")
+	if got := getLogDir(); got != "/tmp/custom-gren-logs" {
+		t.Errorf("getLogDir() = %q, want /tmp/custom-gren-logs", got)
+	}
+}
+
+func TestRotateIfLargeRotatesWhenOverLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gren.log")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 20), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rotateIfLarge(path, 10, 3) // 20 bytes > 10 → rotate
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected %s to be rotated away", path)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Errorf("expected %s.1 to exist: %v", path, err)
+	}
+}
+
+func TestRotateIfLargeKeepsSmallFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gren.log")
+	if err := os.WriteFile(path, []byte("small"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rotateIfLarge(path, 1024, 3)
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("small file should be left in place: %v", err)
+	}
+}

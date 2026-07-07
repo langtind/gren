@@ -17,6 +17,26 @@ var (
 	enabled bool
 )
 
+const (
+	maxLogBytes = 5 * 1024 * 1024 // rotate gren.log past 5 MiB
+	logBackups  = 3               // keep gren.log.1 .. .3
+)
+
+// rotateIfLarge rotates path -> path.1 -> path.2 -> path.3 when it exceeds
+// maxBytes, keeping `backups` generations. Best-effort: on any error the
+// existing file is left in place and Init just appends to it.
+func rotateIfLarge(path string, maxBytes int64, backups int) {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() <= maxBytes {
+		return
+	}
+	_ = os.Remove(fmt.Sprintf("%s.%d", path, backups))
+	for i := backups - 1; i >= 1; i-- {
+		_ = os.Rename(fmt.Sprintf("%s.%d", path, i), fmt.Sprintf("%s.%d", path, i+1))
+	}
+	_ = os.Rename(path, path+".1")
+}
+
 // Init initializes the logger with the default log path for the OS
 func Init() error {
 	logDir := getLogDir()
@@ -25,6 +45,7 @@ func Init() error {
 	}
 
 	logPath = filepath.Join(logDir, "gren.log")
+	rotateIfLarge(logPath, maxLogBytes, logBackups)
 
 	// Open log file in append mode
 	var err error
@@ -44,6 +65,9 @@ func Init() error {
 
 // getLogDir returns the appropriate log directory for the OS
 func getLogDir() string {
+	if dir := os.Getenv("GREN_LOG_DIR"); dir != "" {
+		return dir
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		// macOS: ~/Library/Logs/gren/
