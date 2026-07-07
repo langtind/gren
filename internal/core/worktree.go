@@ -1010,11 +1010,12 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 		}
 	}
 
-	// 2. Remove worktree using git
-	// Note: --force is required for worktrees with submodules (even after deinit)
-	// or when force parameter is true (to ignore uncommitted changes)
+	// 2. Remove worktree using git. --force is required for submodules (even
+	// after deinit) or when the caller forces (to ignore uncommitted/leftover
+	// content).
+	forceRemove := hasSubmodules || force
 	var cmd *exec.Cmd
-	if hasSubmodules || force {
+	if forceRemove {
 		cmd = exec.Command("git", "worktree", "remove", "--force", targetWorktree.Path)
 		if hasSubmodules {
 			logging.Debug("DeleteWorktree: using --force flag (worktree has submodules)")
@@ -1027,6 +1028,25 @@ func (wm *WorktreeManager) DeleteWorktree(ctx context.Context, identifier string
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		outputStr := string(output)
+		// When force was requested, complete the removal even if git still
+		// refuses — e.g. leftover ignored content ("Directory not empty") or a
+		// worktree left half-removed by a prior non-force attempt. Remove the
+		// checkout directly and prune the now-stale registration.
+		if forceRemove {
+			logging.Warn("DeleteWorktree: 'git worktree remove --force' failed (%s); removing directory and pruning", strings.TrimSpace(outputStr))
+			if rmErr := os.RemoveAll(targetWorktree.Path); rmErr != nil {
+				return fmt.Errorf("failed to remove worktree '%s' directory: %w", targetWorktree.Name, rmErr)
+			}
+			pruneCmd := exec.Command("git", "worktree", "prune")
+			if repoRoot, rrErr := wm.getRepoRoot(); rrErr == nil {
+				pruneCmd.Dir = repoRoot
+			}
+			if pruneOut, pruneErr := pruneCmd.CombinedOutput(); pruneErr != nil {
+				logging.Warn("DeleteWorktree: 'git worktree prune' failed: %v (%s)", pruneErr, strings.TrimSpace(string(pruneOut)))
+			}
+			logging.Info("Deleted worktree '%s' via force fallback (branch '%s' is preserved)", targetWorktree.Name, targetWorktree.Branch)
+			return nil
+		}
 		var hint string
 		if strings.Contains(outputStr, "submodules") {
 			hint = "The worktree contains submodules. Try running:\n  git -C " + targetWorktree.Path + " submodule deinit --all --force\nThen try deleting again with force."
