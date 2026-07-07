@@ -295,6 +295,17 @@ func (c *CLI) handleCreate(args []string) error {
 		return err
 	}
 
+	// worktreePath is relative when worktree_dir is relative (e.g. a template
+	// default or a hand-written config). Resolve it to an absolute path here so
+	// every downstream consumer — the --format=json output, the execute
+	// directive, and the success log — gets a path that doesn't depend on the
+	// reader's cwd. The herdr picker in particular passes .path straight to
+	// `herdr worktree open`, which resolves a relative path against its own
+	// daemon cwd (not the repo) and errors.
+	if abs, absErr := filepath.Abs(worktreePath); absErr == nil {
+		worktreePath = abs
+	}
+
 	if warning != "" {
 		output.Warning(warning)
 	}
