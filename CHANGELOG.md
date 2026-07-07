@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-07-07
+
+### Added
+
+- **Interactive hook output is now captured to disk.** `gren hook-run --interactive` (e.g. a herdr plugin's bootstrap pane) wired the hook straight to the pane's TTY, so nothing was captured — when a hook failed and the pane closed, the on-disk log recorded `hook failed: exit status N` with empty stdout/stderr. Interactive hooks now run against a pseudo-terminal and their combined output is tee'd to both the terminal and a per-run file at `<logdir>/hooks/<type>-<branch>-<ts>.log`, with a capped tail in `HookResult.Output` and a pointer line in `gren.log`. Full TTY fidelity is preserved (colors, 1Password `op`, `read` prompts). New dependency: `github.com/creack/pty` (Unix; Windows keeps the previous direct passthrough).
+- **`gren logs`.** Reach and read gren's log without hunting for the file: `--path` prints its location, `-f`/`--follow` tails it, `--hooks` lists the per-run hook logs, and `--last` prints the **full captured output of the last failed hook** — so the cause of a failure is one command away.
+- **Abnormal-termination logging.** On `SIGHUP`/`SIGTERM` (e.g. a pane being torn down) or a panic, gren records the cause to disk and flushes before exiting, instead of dying silently and leaving a blank log exactly when a hook was mid-run.
+
+### Changed
+
+- **`gren.log` rotates at 5 MiB** (keeping three generations), and `GREN_LOG_DIR` overrides the log directory — the test suite uses it so tests no longer append to the real user log.
+- **The gren skill registers new worktrees in herdr's sidebar** when running under herdr (`HERDR_ENV=1`).
+
+### Fixed
+
+- **`gren create --format=json` now emits an absolute `.path`.** It was relative when `worktree_dir` was relative, so consumers that don't share gren's working directory — notably the herdr plugin passing `.path` to `herdr worktree open` — could not resolve it and failed. It is resolved to absolute right after creation, covering the JSON output, the `-x` execute directive, and the success log.
+- **`gren init` writes a relative `worktree_dir`.** It baked an absolute, machine-specific path into the committed config; it now writes `../<name>-worktrees`, which consumers resolve at runtime (and `create --format=json` reports the absolute path).
+- **`gren init` stamps the current config schema version,** so a freshly initialized repo no longer nags about a self-inflicted migration on the next run.
+- **`gren delete` resolves the target worktree by branch,** fixing deletion when a worktree's directory name and branch differ.
+
+### Added (API)
+
+- `logging.NewHookLog`, `logging.HookLogDir`, `logging.PruneHookLogs` — create and retain per-run hook output logs.
+- `logging.LogPanic`, `logging.LogTermination` — record a recovered panic or a terminating signal to disk before exit.
+
 ## [0.16.2] — 2026-07-04
 
 ### Fixed
