@@ -324,11 +324,25 @@ go install github.com/langtind/gren@latest
 ### Log File Location
 - **macOS**: `~/Library/Logs/gren/gren.log`
 - **Linux**: `~/.local/state/gren/logs/gren.log`
+- Rotated at 5 MiB (`gren.log.1` .. `.3`). Override the directory with `GREN_LOG_DIR`
+  (tests set it to a temp dir so they don't pollute the real log).
 
-View recent logs:
+### `gren logs`
 ```bash
-tail -100 ~/Library/Logs/gren/gren.log  # macOS
+gren logs              # tail the last ~50 lines
+gren logs --path       # just the path (e.g. for $EDITOR "$(gren logs --path)")
+gren logs -f           # follow (tail -f)
+gren logs --last       # jump to the last error and its hook-output pointer
+gren logs --hooks      # list per-run hook output logs
 ```
+
+### Hook output capture
+Interactive hooks (`gren hook-run --interactive`, e.g. the herdr bootstrap pane)
+run against a real pty and their **combined output is tee'd to a per-run file** at
+`<logdir>/hooks/<type>-<branch>-<ts>.log`, with a pointer line in `gren.log`. This
+means a hook that fails in a pane that then closes still leaves a readable trace —
+`gren logs --last` points at the file. On SIGHUP/SIGTERM (pane teardown) or a panic,
+gren logs the cause before exiting instead of going silent.
 
 ## Dependencies
 
