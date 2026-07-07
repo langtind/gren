@@ -5,7 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"runtime/debug"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/langtind/gren/internal/cli"
@@ -29,6 +32,29 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: failed to initialize logging: %v\n", err)
 	}
 	defer logging.Close()
+
+	// Record abnormal termination. On SIGHUP (pane/terminal closed) or SIGTERM
+	// (herdr killing the pane) Go runs no deferred funcs — without this the log
+	// goes silent exactly when a hook was mid-run.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM)
+	go func() {
+		s := <-sigCh
+		logging.LogTermination(s)
+		if sysSig, ok := s.(syscall.Signal); ok {
+			os.Exit(128 + int(sysSig))
+		}
+		os.Exit(1)
+	}()
+
+	// Record panics to disk before they hit stderr and the process dies.
+	defer func() {
+		if r := recover(); r != nil {
+			logging.LogPanic(r, debug.Stack())
+			logging.Close()
+			panic(r) // preserve original crash behaviour and exit code
+		}
+	}()
 
 	// Set up embedded skill files for install-skill command
 	cli.SetSkillFS(skillFS, "skills/gren", "gren")
