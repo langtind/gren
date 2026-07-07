@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -344,5 +345,28 @@ func TestLogPanicWritesStackToDisk(t *testing.T) {
 	content := string(data)
 	if !strings.Contains(content, "panic: boom") || !strings.Contains(content, "stackframe-xyz") {
 		t.Errorf("log missing panic/stack, got: %s", content)
+	}
+}
+
+func TestLogTerminationWritesSignalLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFilePath := filepath.Join(tmpDir, "test.log")
+	file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origLogger, origLogFile, origEnabled := logger, logFile, enabled
+	defer func() { logger, logFile, enabled = origLogger, origLogFile, origEnabled }()
+	logFile, logger, enabled = file, log.New(file, "", 0), true
+
+	LogTermination(syscall.SIGHUP) // also closes the log file
+
+	data, err := os.ReadFile(logFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "terminating on signal: hangup") {
+		t.Errorf("log missing termination line, got: %s", data)
 	}
 }
