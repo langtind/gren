@@ -629,6 +629,34 @@ func (c *CLI) handleList(args []string) error {
 }
 
 // handleDelete handles the delete command
+// worktreeBlockingContent returns the modified / untracked / ignored entries in
+// a worktree that make a plain `git worktree remove` fail (git output lines like
+// "!! node_modules/", "?? file", " M file"). Empty means a clean removal will
+// succeed.
+func worktreeBlockingContent(path string) []string {
+	out, err := exec.Command("git", "-C", path, "status", "--porcelain", "--ignored").Output()
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// capList returns at most n items, appending a "… and N more" line when the
+// input is longer, so a long leftover list doesn't flood the terminal.
+func capList(items []string, n int) []string {
+	if len(items) <= n {
+		return items
+	}
+	out := append([]string{}, items[:n]...)
+	return append(out, fmt.Sprintf("… and %d more", len(items)-n))
+}
+
 func (c *CLI) handleDelete(args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	force := fs.Bool("f", false, "Force deletion without confirmation")
@@ -714,7 +742,34 @@ func (c *CLI) handleDelete(args []string) error {
 
 	worktreePath := targetWorktree.Path
 	worktreeBranch := targetWorktree.Branch
-	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, *force)
+
+	// If a plain delete would fail because the checkout still holds files git
+	// won't remove on its own (leftover build output like node_modules/ or
+	// .venv/, or uncommitted files), list them and offer to force — rather than
+	// failing with a raw "Directory not empty".
+	effectiveForce := *force
+	if !effectiveForce {
+		if leftovers := worktreeBlockingContent(worktreePath); len(leftovers) > 0 {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("worktree '%s' has content that blocks a clean delete; re-run with -f to force", worktreeName)
+			}
+			fmt.Printf("Worktree '%s' still contains files git won't remove on its own:\n", worktreeName)
+			for _, l := range capList(leftovers, 15) {
+				fmt.Printf("  %s\n", l)
+			}
+			fmt.Print("Force remove (this discards the above)? [y/N]: ")
+			var resp string
+			fmt.Scanln(&resp)
+			if r := strings.ToLower(strings.TrimSpace(resp)); r != "y" && r != "yes" {
+				logging.Info("CLI delete: user declined force removal of %s", worktreeName)
+				fmt.Println("Cancelled")
+				return nil
+			}
+			effectiveForce = true
+		}
+	}
+
+	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, effectiveForce)
 	if err != nil {
 		logging.Error("CLI delete failed: %v", err)
 		return err
