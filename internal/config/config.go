@@ -19,8 +19,11 @@ const (
 	ConfigFileJSON = "config.json"
 	// ConfigFile is kept for backward compatibility, points to JSON.
 	ConfigFile = ConfigFileJSON
-	// DefaultVersion is the current configuration version.
-	DefaultVersion = "1.0.0"
+	// DefaultVersion is the version stamped into configs created by `gren init`.
+	// It is tied to CurrentConfigVersion (see migration.go) so a freshly written
+	// config is always at the current schema version and never triggers a
+	// migration nag. Bump CurrentConfigVersion, not this.
+	DefaultVersion = CurrentConfigVersion
 	// DefaultHookFile is the default post-create hook script.
 	DefaultHookFile = "post-create.sh"
 )
