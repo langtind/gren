@@ -53,6 +53,26 @@ func TestWorktreeBlockingContent(t *testing.T) {
 	}
 }
 
+func TestSplitBlockingContent(t *testing.T) {
+	real, ignored := splitBlockingContent([]string{
+		"!! node_modules/",
+		"?? untracked.txt",
+		" M modified.txt",
+		"!! .venv/",
+	})
+	if len(real) != 2 || real[0] != "?? untracked.txt" || real[1] != " M modified.txt" {
+		t.Errorf("real = %v, want untracked + modified entries", real)
+	}
+	if len(ignored) != 2 || ignored[0] != "!! node_modules/" || ignored[1] != "!! .venv/" {
+		t.Errorf("ignored = %v, want the two !! entries", ignored)
+	}
+
+	real, ignored = splitBlockingContent([]string{"!! .env", "!! dist/"})
+	if len(real) != 0 || len(ignored) != 2 {
+		t.Errorf("ignored-only input: real = %v, ignored = %v", real, ignored)
+	}
+}
+
 func TestCapList(t *testing.T) {
 	if got := capList([]string{"a", "b"}, 5); len(got) != 2 {
 		t.Errorf("capList within limit = %v, want unchanged", got)

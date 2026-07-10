@@ -647,6 +647,22 @@ func worktreeBlockingContent(path string) []string {
 	return lines
 }
 
+// splitBlockingContent separates `git status --porcelain --ignored` lines into
+// entries holding real work (untracked/modified) and gitignored ones ("!! …").
+// Ignored entries are disposable by definition — build artifacts, caches,
+// symlinked env files — so the delete flow discards them without prompting and
+// only asks the user about the rest.
+func splitBlockingContent(lines []string) (real, ignored []string) {
+	for _, l := range lines {
+		if strings.HasPrefix(l, "!!") {
+			ignored = append(ignored, l)
+		} else {
+			real = append(real, l)
+		}
+	}
+	return real, ignored
+}
+
 // capList returns at most n items, appending a "… and N more" line when the
 // input is longer, so a long leftover list doesn't flood the terminal.
 func capList(items []string, n int) []string {
@@ -750,22 +766,34 @@ func (c *CLI) handleDelete(args []string) error {
 	effectiveForce := *force
 	if !effectiveForce {
 		if leftovers := worktreeBlockingContent(worktreePath); len(leftovers) > 0 {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("worktree '%s' has content that blocks a clean delete; re-run with -f to force", worktreeName)
+			real, ignored := splitBlockingContent(leftovers)
+			if len(real) == 0 {
+				// Only gitignored content blocks the removal — nothing worth a
+				// prompt after the user already confirmed the delete.
+				fmt.Printf("Worktree '%s' only contains gitignored files (%d entries) — removing them with the worktree.\n", worktreeName, len(ignored))
+				logging.Info("CLI delete: auto-forcing removal of %s (%d gitignored entries)", worktreeName, len(ignored))
+				effectiveForce = true
+			} else {
+				if !term.IsTerminal(int(os.Stdin.Fd())) {
+					return fmt.Errorf("worktree '%s' has uncommitted or untracked files that block a clean delete; re-run with -f to force", worktreeName)
+				}
+				fmt.Printf("Worktree '%s' still contains files git won't remove on its own:\n", worktreeName)
+				for _, l := range capList(real, 15) {
+					fmt.Printf("  %s\n", l)
+				}
+				if len(ignored) > 0 {
+					fmt.Printf("  (plus %d gitignored entries that will also be removed)\n", len(ignored))
+				}
+				fmt.Print("Force remove (this discards the above)? [y/N]: ")
+				var resp string
+				fmt.Scanln(&resp)
+				if r := strings.ToLower(strings.TrimSpace(resp)); r != "y" && r != "yes" {
+					logging.Info("CLI delete: user declined force removal of %s", worktreeName)
+					fmt.Println("Cancelled")
+					return nil
+				}
+				effectiveForce = true
 			}
-			fmt.Printf("Worktree '%s' still contains files git won't remove on its own:\n", worktreeName)
-			for _, l := range capList(leftovers, 15) {
-				fmt.Printf("  %s\n", l)
-			}
-			fmt.Print("Force remove (this discards the above)? [y/N]: ")
-			var resp string
-			fmt.Scanln(&resp)
-			if r := strings.ToLower(strings.TrimSpace(resp)); r != "y" && r != "yes" {
-				logging.Info("CLI delete: user declined force removal of %s", worktreeName)
-				fmt.Println("Cancelled")
-				return nil
-			}
-			effectiveForce = true
 		}
 	}
 
