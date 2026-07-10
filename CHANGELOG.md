@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-07-10
+
+### Changed
+
+- **`gren delete` no longer prompts over gitignored leftovers.** The force-remove prompt from 0.17.1 listed every blocking entry, but on any set-up worktree that is dozens of gitignored lines (`node_modules/`, `.venv/`, `__pycache__/`, symlinked env files) — noise that hides real content at risk. Blocking content is now split by status: a worktree holding only gitignored entries is removed directly with a one-line notice (the delete itself was already confirmed), and when untracked or modified files are present the prompt lists only those, with the ignored entries summarized as a count.
+
 ## [0.17.1] — 2026-07-07
 
 ### Fixed
