@@ -612,6 +612,144 @@ func TestHandleCreateJSONPathIsAbsolute(t *testing.T) {
 	}
 }
 
+// setupTempGitRepoAheadOfOrigin builds the repo state that makes CreateWorktree
+// emit an "unpushed commit(s)" warning for main: a configured origin (local bare
+// repo) that has main, plus one local commit origin doesn't have. This is the
+// state that corrupted `gren create --format=json` stdout — the warning was
+// printed before the JSON, so the herdr picker's `jq -r '.path'` failed and the
+// worktree was left registered-but-never-set-up.
+func setupTempGitRepoAheadOfOrigin(t *testing.T) (string, func()) {
+	t.Helper()
+	dir, repoCleanup := setupTempGitRepoWithCleanWorktrees(t)
+
+	origin, err := os.MkdirTemp("", "gren-cli-origin-*")
+	if err != nil {
+		repoCleanup()
+		t.Fatalf("failed to create origin dir: %v", err)
+	}
+	cleanup := func() {
+		os.RemoveAll(origin)
+		repoCleanup()
+	}
+
+	if out, err := exec.Command("git", "init", "--bare", origin).CombinedOutput(); err != nil {
+		cleanup()
+		t.Fatalf("init bare origin: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "remote", "add", "origin", origin).CombinedOutput(); err != nil {
+		cleanup()
+		t.Fatalf("add origin: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", dir, "push", "-u", "origin", "main").CombinedOutput(); err != nil {
+		cleanup()
+		t.Fatalf("push main to origin: %v\n%s", err, out)
+	}
+
+	// One commit origin doesn't have → main is ahead 1 → warning path.
+	if err := os.WriteFile(filepath.Join(dir, "ahead.txt"), []byte("ahead\n"), 0644); err != nil {
+		cleanup()
+		t.Fatalf("write ahead file: %v", err)
+	}
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	if out, err := exec.Command("git", "-C", dir, "commit", "-m", "unpushed commit").CombinedOutput(); err != nil {
+		cleanup()
+		t.Fatalf("commit ahead file: %v\n%s", err, out)
+	}
+
+	return dir, cleanup
+}
+
+// createJSONInAheadRepo runs `gren create --format=json` with main (ahead of
+// origin) as base and returns captured stdout and stderr.
+func createJSONInAheadRepo(t *testing.T, name string) (stdout, stderr string) {
+	t.Helper()
+	dir, cleanup := setupTempGitRepoAheadOfOrigin(t)
+	t.Cleanup(cleanup)
+
+	originalDir, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(originalDir) })
+	os.Chdir(dir)
+
+	config.Initialize(filepath.Base(dir), true)
+	cli := NewCLI(git.NewLocalRepository(), config.NewManager())
+
+	stdout = captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			if err := cli.ParseAndExecute([]string{"gren", "create", "-n", name, "-b", "main", "--no-hooks", "-y", "--format=json"}); err != nil {
+				t.Fatalf("create failed: %v", err)
+			}
+		})
+	})
+	return stdout, stderr
+}
+
+// TestHandleCreateJSONStdoutPureWhenBaseHasUnpushedCommits guards that
+// `gren create --format=json` keeps stdout machine-parseable when the base
+// branch has unpushed commits. The "⚠️ main has N unpushed commit(s)" warning
+// used to be printed to stdout ahead of the JSON, which broke every consumer
+// piping stdout to jq (the herdr picker aborted before running post-create).
+func TestHandleCreateJSONStdoutPureWhenBaseHasUnpushedCommits(t *testing.T) {
+	stdout, _ := createJSONInAheadRepo(t, "warn-pure-json-test")
+
+	var result CreateJSON
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("create --format=json stdout must be pure JSON, got parse error %v\nstdout: %q", err, stdout)
+	}
+	if result.Path == "" {
+		t.Errorf("create JSON .path is empty\nstdout: %q", stdout)
+	}
+}
+
+// TestHandleCreateJSONCarriesWarningField: machine consumers must still see the
+// unpushed-commits warning — as a field in the JSON payload, not as stdout text.
+func TestHandleCreateJSONCarriesWarningField(t *testing.T) {
+	stdout, _ := createJSONInAheadRepo(t, "warn-field-test")
+
+	var result CreateJSON
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse create JSON %q: %v", stdout, err)
+	}
+	if !strings.Contains(result.Warning, "unpushed commit") {
+		t.Errorf("create JSON .warning should carry the unpushed-commits warning, got %q", result.Warning)
+	}
+}
+
+// TestHandleCreateJSONWarningOnStderr: in JSON mode the human-readable warning
+// belongs on stderr (same convention as list's "-v is ignored" warning), so log
+// readers still see it without stdout losing parseability.
+func TestHandleCreateJSONWarningOnStderr(t *testing.T) {
+	_, stderr := createJSONInAheadRepo(t, "warn-stderr-test")
+
+	if !strings.Contains(stderr, "unpushed commit") {
+		t.Errorf("expected unpushed-commits warning on stderr in JSON mode, got %q", stderr)
+	}
+}
+
+// TestHandleCreateInteractiveWarningKept guards the flip side: without
+// --format=json the warning must keep printing where humans look for it
+// (stdout), so the JSON fix can't silently drop it from the interactive flow.
+func TestHandleCreateInteractiveWarningKept(t *testing.T) {
+	dir, cleanup := setupTempGitRepoAheadOfOrigin(t)
+	defer cleanup()
+
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	os.Chdir(dir)
+
+	config.Initialize(filepath.Base(dir), true)
+	cli := NewCLI(git.NewLocalRepository(), config.NewManager())
+
+	stdout := captureStdout(t, func() {
+		if err := cli.ParseAndExecute([]string{"gren", "create", "-n", "warn-interactive-test", "-b", "main", "--no-hooks", "-y"}); err != nil {
+			t.Fatalf("create failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(stdout, "unpushed commit") {
+		t.Errorf("interactive create should still print the unpushed-commits warning on stdout, got %q", stdout)
+	}
+}
+
 func TestHandleCreateWithExistingBranch(t *testing.T) {
 	dir, cleanup := setupTempGitRepoWithCleanWorktrees(t)
 	defer cleanup()
@@ -1622,6 +1760,19 @@ func captureStdout(t *testing.T, fn func()) string {
 	fn()
 	w.Close()
 	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	return buf.String()
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = oldStderr
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
 	return buf.String()

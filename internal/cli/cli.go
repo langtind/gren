@@ -308,8 +308,17 @@ func (c *CLI) handleCreate(args []string) error {
 		worktreePath = abs
 	}
 
+	// In JSON mode stdout must stay pure JSON — consumers pipe it straight to
+	// jq (the herdr picker reads .path), and a leading warning line made that
+	// parse fail, aborting the picker before post-create ever ran. The warning
+	// goes to stderr instead (same convention as list's "-v is ignored") and
+	// into the JSON payload below.
 	if warning != "" {
-		output.Warning(warning)
+		if jsonMode {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+		} else {
+			output.Warning(warning)
+		}
 	}
 	logging.Info("CLI create succeeded: %s at %s", *name, worktreePath)
 
@@ -341,10 +350,11 @@ func (c *CLI) handleCreate(args []string) error {
 		allHooks := append([]core.HookResult{}, preCreateResults...)
 		allHooks = append(allHooks, postCreateResults...)
 		out := CreateJSON{
-			Name:   *name,
-			Branch: branchName,
-			Path:   worktreePath,
-			Hooks:  hookResultsToJSON(allHooks),
+			Name:    *name,
+			Branch:  branchName,
+			Path:    worktreePath,
+			Warning: warning,
+			Hooks:   hookResultsToJSON(allHooks),
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -396,10 +406,11 @@ func (c *CLI) handleCreate(args []string) error {
 // Hooks slice captures whether configured hooks ran, succeeded, and any error
 // detail — so callers don't have to parse stderr to know if setup worked.
 type CreateJSON struct {
-	Name   string     `json:"name"`
-	Branch string     `json:"branch"`
-	Path   string     `json:"path,omitempty"`
-	Hooks  []HookJSON `json:"hooks,omitempty"`
+	Name    string     `json:"name"`
+	Branch  string     `json:"branch"`
+	Path    string     `json:"path,omitempty"`
+	Warning string     `json:"warning,omitempty"`
+	Hooks   []HookJSON `json:"hooks,omitempty"`
 }
 
 // HookJSON is the per-hook entry inside CreateJSON.Hooks. Command and Name are

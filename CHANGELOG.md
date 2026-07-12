@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gren create --format=json` keeps stdout pure JSON when the base branch has unpushed commits.** The "⚠️ `main` has N unpushed commit(s) - using local version" warning was printed to stdout ahead of the JSON object, so any consumer piping stdout to `jq` got a parse error — notably the herdr picker, which read an empty `.path`, aborted before registration, and left a created-but-never-set-up worktree behind (no ports file, no env symlinks, no deps, no databases). In JSON mode the warning now goes to stderr and is carried in the payload as a `warning` field; interactive mode is unchanged.
+
 ## [0.18.0] — 2026-07-10
 
 ### Changed
