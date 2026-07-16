@@ -25,6 +25,7 @@ Just as git uses branches to organize code, gren helps you manage the physical d
 - 💤 Stale worktree detection (merged branches, closed PRs)
 - 🔗 GitHub CLI integration for PR status and badges
 - 🧹 Bulk cleanup of stale and missing worktrees
+- 🐑 [herdr integration](#herdr-integration) — worktree setup inside the herdr multiplexer
 
 ## Installation
 
@@ -444,6 +445,34 @@ The provider is auto-detected from your remote URL. Status indicators work the s
 | ❌ Failed | Checks failed | Pipeline failed |
 | 🔄 Pending | In progress | Running |
 | #N | PR number | MR number |
+
+## herdr Integration
+
+[herdr](https://herdr.dev) is a terminal multiplexer that runs AI agents across
+workspaces. It manages worktrees itself, but has no setup step — a fresh checkout
+has no `.env`, no dependencies, nothing bootstrapped. The
+[**gren-herdr plugin**](https://github.com/langtind/gren-herdr) wires gren into
+it, so herdr's worktrees get gren's post-create setup:
+
+```bash
+herdr plugin install langtind/gren-herdr
+```
+
+It adds an fzf picker for switching and creating worktrees (at gren's configured
+`worktree_dir`, with base-branch selection and `pr:42` checkout) and a remove
+picker that runs gren's pre-remove hooks. The main point: every worktree herdr
+creates runs `gren hook-run --interactive` in its own pane. That's a real TTY, so
+1Password `op` prompts and `make seed` work, approval is prompted once per
+project, and per-worktree templates like `{{ branch | hash_port }}` resolve.
+
+Requires gren ≥ 0.16.0 for interactive hooks (≥ 0.18.1 recommended). Remember to
+**commit `.gren/`** — a worktree is a fresh checkout, so it inherits only the
+hooks git tracks.
+
+Several gren features exist to serve this integration, and are the ones to reach
+for when building any external consumer: `hook-run --interactive` (hooks against
+a PTY, output tee'd to both terminal and disk), `create --format=json` with a
+guaranteed-absolute `.path` and pure-JSON stdout, and `list --format=json`.
 
 ## CLI Commands
 
