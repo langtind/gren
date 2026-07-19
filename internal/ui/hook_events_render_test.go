@@ -32,15 +32,15 @@ func TestRenderHookEvents_Empty(t *testing.T) {
 func TestRenderHookEvents_SamePhaseDifferentApps(t *testing.T) {
 	now := time.Now()
 	evs := []events.Event{
-		{TS: now, Phase: "migrate", App: "referat", Status: events.StatusOK},
-		{TS: now, Phase: "migrate", App: "vidd", Status: events.StatusError, Detail: "alembic failed"},
+		{TS: now, Phase: "migrate", App: "web", Status: events.StatusOK},
+		{TS: now, Phase: "migrate", App: "api", Status: events.StatusError, Detail: "alembic failed"},
 	}
 	out := RenderHookEvents(evs)
-	if !strings.Contains(out, "referat / migrate") {
-		t.Errorf("expected 'referat / migrate', got: %s", out)
+	if !strings.Contains(out, "web / migrate") {
+		t.Errorf("expected 'web / migrate', got: %s", out)
 	}
-	if !strings.Contains(out, "vidd / migrate") {
-		t.Errorf("expected 'vidd / migrate', got: %s", out)
+	if !strings.Contains(out, "api / migrate") {
+		t.Errorf("expected 'api / migrate', got: %s", out)
 	}
 	if !strings.Contains(out, "alembic failed") {
 		t.Errorf("expected detail preserved, got: %s", out)

@@ -85,7 +85,7 @@ func TestHookResult_FailureOutput_LabelsAndOrdering(t *testing.T) {
 	}
 }
 
-// TestExecuteHook_BashErrorLandsInStderr mirrors the flyt repro: a bash
+// TestExecuteHook_BashErrorLandsInStderr mirrors a real-world consumer-repo repro: a bash
 // parse-time failure (bad substitution) must land in Stderr so the UI can
 // show it as the failure cause instead of silently swallowing it.
 func TestExecuteHook_BashErrorLandsInStderr(t *testing.T) {

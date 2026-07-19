@@ -39,12 +39,12 @@ import (
 )
 
 func TestParseLine_Valid(t *testing.T) {
-	line := `{"ts":"2026-04-20T22:51:52Z","phase":"migrate","status":"start","app":"referat","detail":"alembic upgrade head"}`
+	line := `{"ts":"2026-04-20T22:51:52Z","phase":"migrate","status":"start","app":"web","detail":"alembic upgrade head"}`
 	ev, err := ParseLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ev.Phase != "migrate" || ev.Status != StatusStart || ev.App != "referat" {
+	if ev.Phase != "migrate" || ev.Status != StatusStart || ev.App != "web" {
 		t.Errorf("unexpected event: %+v", ev)
 	}
 	if ev.Detail != "alembic upgrade head" {
@@ -1264,7 +1264,7 @@ func RenderHookEvents(evs []events.Event) string {
 		phase, app, detail string
 		status             events.Status
 	}
-	// Key by phase+app so "migrate/referat" and "migrate/vidd" stay distinct.
+	// Key by phase+app so "migrate/web" and "migrate/api" stay distinct.
 	order := []string{}
 	rows := map[string]*row{}
 	for _, e := range evs {

@@ -25,7 +25,7 @@ func TestExecuteHook_EventsFileMatchesCollected(t *testing.T) {
 emit() { printf '{"ts":"%s","phase":"%s","status":"%s"%s}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" >> "$GREN_EVENTS_FILE"; }
 emit install start ""
 emit install ok ',"detail":"bun install done"'
-emit migrate start ',"app":"referat"'
+emit migrate start ',"app":"web"'
 exit 2
 `
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
@@ -79,7 +79,7 @@ exit 2
 	if parsed[1].Detail != "bun install done" {
 		t.Errorf("detail not preserved: %q", parsed[1].Detail)
 	}
-	if parsed[2].App != "referat" {
+	if parsed[2].App != "web" {
 		t.Errorf("app not preserved: %q", parsed[2].App)
 	}
 }

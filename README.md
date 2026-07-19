@@ -379,7 +379,7 @@ The generated `.gren/post-create.sh` from `gren init` includes this helper plus 
 | `ts`     | yes      | RFC 3339 timestamp (with or without sub-second precision)                   |
 | `phase`  | yes      | Free-form phase name. Convention: `lowercase-kebab`                         |
 | `status` | yes      | `start`, `ok`, or `error`                                                   |
-| `app`    | no       | Sub-target within a phase (e.g. `referat` vs `vidd` for a multi-app repo)   |
+| `app`    | no       | Sub-target within a phase (e.g. `web` vs `api` for a multi-app repo)   |
 | `detail` | no       | Human-readable description                                                  |
 
 **`interrupted`** is a fourth status synthesized by gren itself: if the hook exits non-zero while a phase is still `start` with no matching `ok`/`error`, gren appends a synthetic `interrupted` event. This catches `SIGINT`/`SIGKILL` deaths the hook couldn't observe — the exact failure mode the incident that motivated this feature exhibited.
