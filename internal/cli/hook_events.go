@@ -50,9 +50,12 @@ func streamEventsTo(w io.Writer) func(events.Event) {
 	}
 }
 
-// printHookEvents writes a phase summary to stdout whenever any hook in
-// results produced events. Always runs — on success so the user sees what
-// the hook actually did, and on failure so interrupted phases are visible.
+// printHookEvents writes a phase summary whenever any hook in results produced
+// events. Always runs — on success so the user sees what the hook actually did,
+// and on failure so interrupted phases are visible.
+//
+// Writes to humanOut, not stdout: in JSON mode the same phases are carried
+// inside the payload, and printing them again on stdout would corrupt it.
 func printHookEvents(results []core.HookResult) {
 	var all []events.Event
 	var files []string
@@ -67,17 +70,17 @@ func printHookEvents(results []core.HookResult) {
 		return
 	}
 	if len(all) > 0 {
-		fmt.Println()
-		fmt.Println("Hook phases:")
+		fmt.Fprintln(humanOut())
+		fmt.Fprintln(humanOut(), "Hook phases:")
 		for _, e := range all {
-			fmt.Println(RenderEventLine(e))
+			fmt.Fprintln(humanOut(), RenderEventLine(e))
 		}
 	}
 	if failed && len(files) > 0 {
-		fmt.Println()
-		fmt.Println("Hook failed. Event log for post-mortem:")
+		fmt.Fprintln(humanOut())
+		fmt.Fprintln(humanOut(), "Hook failed. Event log for post-mortem:")
 		for _, f := range files {
-			fmt.Println("  " + f)
+			fmt.Fprintln(humanOut(), "  "+f)
 		}
 	}
 }
