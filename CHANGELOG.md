@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-07-23
+
 ### Added
 
 - **`gren delete --format=json`.** Deleting a worktree was the one destructive operation with no machine-readable path: a consumer got prose and an exit code, so each of them — the herdr plugin, the `issue-worktrees` agent skill — reimplemented gren's own safety check with `git status --porcelain` before daring to pass `-f`. JSON mode never prompts (plugins, agents, and CI cannot answer a y/N) and reports the decision as data instead: `deleted`, a `reason` from a closed set (`dry_run`, `confirmation_required`, `not_found`, `hook_failed`, `error`), and a `blocking` object when content is in the way. `blocking.tracked` lists untracked/modified entries as `{status, path}` — the porcelain code split from the path, so consumers don't each re-parse git's output format — while gitignored build output is counted rather than listed, since listing it is what buried the entries that mattered. `--dry-run --format=json` answers "is this safe to remove?" without touching anything, and `branch_kept` states gren's branch-preservation guarantee rather than leaving it implied.
