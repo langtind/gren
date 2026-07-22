@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -688,6 +689,7 @@ func (c *CLI) handleDelete(args []string) error {
 	fs := flag.NewFlagSet("delete", flag.ExitOnError)
 	force := fs.Bool("f", false, "Force deletion without confirmation")
 	dryRun := fs.Bool("dry-run", false, "Show what would be deleted without actually deleting")
+	format := addFormatFlag(fs)
 
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gren delete [options] <worktree-name>\n")
@@ -698,10 +700,20 @@ func (c *CLI) handleDelete(args []string) error {
 		fmt.Fprintf(fs.Output(), "  gren delete feature-branch\n")
 		fmt.Fprintf(fs.Output(), "  gren delete -f old-feature\n")
 		fmt.Fprintf(fs.Output(), "  gren delete --dry-run feature-branch\n")
+		fmt.Fprintf(fs.Output(), "  gren delete --dry-run --format=json feature-branch   # What blocks it?\n")
+		fmt.Fprintf(fs.Output(), "  gren delete -f --format=json old-feature             # Machine-readable\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	jsonMode, err := parseFormat(*format)
+	if err != nil {
+		return err
+	}
+	if jsonMode {
+		defer enterJSONMode()()
 	}
 
 	if fs.NArg() == 0 {
@@ -711,28 +723,33 @@ func (c *CLI) handleDelete(args []string) error {
 	}
 
 	worktreeName := fs.Arg(0)
-	logging.Info("CLI delete: worktree=%s, force=%v, dry-run=%v", worktreeName, *force, *dryRun)
+	logging.Info("CLI delete: worktree=%s, force=%v, dry-run=%v, json=%v", worktreeName, *force, *dryRun, jsonMode)
 
-	// Dry run mode - just show what would happen
-	if *dryRun {
-		fmt.Printf("[dry-run] Would delete worktree: %s\n", worktreeName)
+	// Dry run mode - just show what would happen. In JSON mode this is the
+	// inspection call: it answers "is this worktree safe to remove, and if not,
+	// what exactly is in the way" without touching anything.
+	if *dryRun && !jsonMode {
+		fmt.Fprintf(humanOut(), "[dry-run] Would delete worktree: %s\n", worktreeName)
 		return nil
 	}
 
-	// Confirmation unless force is specified
-	if !*force {
+	// Confirmation unless force is specified. JSON mode never prompts: its
+	// callers are plugins, agents, and CI, none of which can answer. Without -f
+	// it reports what it would have asked about and exits non-zero, which is
+	// strictly more useful than the bare refusal a non-TTY got before.
+	if !*force && !*dryRun && !jsonMode {
 		// Check if we're running in an interactive terminal
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return fmt.Errorf("cannot delete worktree without confirmation in non-interactive mode; use -f to force")
 		}
 
-		fmt.Printf("Delete worktree '%s'? (y/N): ", worktreeName)
+		fmt.Fprintf(humanOut(), "Delete worktree '%s'? (y/N): ", worktreeName)
 		var response string
 		fmt.Scanln(&response)
 		response = strings.ToLower(strings.TrimSpace(response))
 		if response != "y" && response != "yes" {
 			logging.Info("CLI delete: user cancelled deletion of %s", worktreeName)
-			fmt.Println("Cancelled")
+			fmt.Fprintln(humanOut(), "Cancelled")
 			return nil
 		}
 		logging.Info("CLI delete: user confirmed deletion of %s", worktreeName)
@@ -743,6 +760,9 @@ func (c *CLI) handleDelete(args []string) error {
 	// Get worktree info for hook context
 	worktrees, err := c.worktreeManager.ListWorktrees(ctx)
 	if err != nil {
+		if jsonMode {
+			_ = emitJSON(DeleteJSON{Name: worktreeName, Reason: DeleteReasonError, Error: err.Error()})
+		}
 		return fmt.Errorf("failed to list worktrees: %w", err)
 	}
 	var targetWorktree *core.WorktreeInfo
@@ -753,7 +773,34 @@ func (c *CLI) handleDelete(args []string) error {
 		}
 	}
 	if targetWorktree == nil {
+		if jsonMode {
+			_ = emitJSON(DeleteJSON{Name: worktreeName, Reason: DeleteReasonNotFound})
+		}
 		return fmt.Errorf("worktree '%s' not found", worktreeName)
+	}
+
+	// JSON mode resolves the whole decision up front — blocking content, then
+	// dry-run or missing -f — so the caller gets one object describing why
+	// nothing happened, instead of an error string it has to pattern-match.
+	if jsonMode {
+		blocking := blockingJSON(targetWorktree.Path)
+		base := DeleteJSON{
+			Name:       targetWorktree.Name,
+			Branch:     targetWorktree.Branch,
+			Path:       targetWorktree.Path,
+			BranchKept: true,
+			Blocking:   blocking,
+		}
+		switch {
+		case *dryRun:
+			base.Reason = DeleteReasonDryRun
+			base.WouldForce = blocking != nil
+			return emitJSON(base)
+		case !*force:
+			base.Reason = DeleteReasonConfirmationRequired
+			_ = emitJSON(base)
+			return fmt.Errorf("refusing to delete %q without -f: --format=json never prompts", worktreeName)
+		}
 	}
 
 	// Run pre-remove hooks with approval (interactive prompt). Stream phase
@@ -764,6 +811,17 @@ func (c *CLI) handleDelete(args []string) error {
 	c.worktreeManager.SetEventObserver(nil)
 	printHookEvents(results)
 	if failed := core.FirstFailedHook(results); failed != nil {
+		if jsonMode {
+			_ = emitJSON(DeleteJSON{
+				Name:       targetWorktree.Name,
+				Branch:     targetWorktree.Branch,
+				Path:       targetWorktree.Path,
+				BranchKept: true,
+				Reason:     DeleteReasonHookFailed,
+				Error:      failed.Err.Error(),
+				Hooks:      hookResultsToJSON(results),
+			})
+		}
 		return fmt.Errorf("pre-remove hook failed: %s\n%s", failed.Err, failed.FailureOutput())
 	}
 
@@ -781,26 +839,26 @@ func (c *CLI) handleDelete(args []string) error {
 			if len(real) == 0 {
 				// Only gitignored content blocks the removal — nothing worth a
 				// prompt after the user already confirmed the delete.
-				fmt.Printf("Worktree '%s' only contains gitignored files (%d entries) — removing them with the worktree.\n", worktreeName, len(ignored))
+				fmt.Fprintf(humanOut(), "Worktree '%s' only contains gitignored files (%d entries) — removing them with the worktree.\n", worktreeName, len(ignored))
 				logging.Info("CLI delete: auto-forcing removal of %s (%d gitignored entries)", worktreeName, len(ignored))
 				effectiveForce = true
 			} else {
 				if !term.IsTerminal(int(os.Stdin.Fd())) {
 					return fmt.Errorf("worktree '%s' has uncommitted or untracked files that block a clean delete; re-run with -f to force", worktreeName)
 				}
-				fmt.Printf("Worktree '%s' still contains files git won't remove on its own:\n", worktreeName)
+				fmt.Fprintf(humanOut(), "Worktree '%s' still contains files git won't remove on its own:\n", worktreeName)
 				for _, l := range capList(real, 15) {
-					fmt.Printf("  %s\n", l)
+					fmt.Fprintf(humanOut(), "  %s\n", l)
 				}
 				if len(ignored) > 0 {
-					fmt.Printf("  (plus %d gitignored entries that will also be removed)\n", len(ignored))
+					fmt.Fprintf(humanOut(), "  (plus %d gitignored entries that will also be removed)\n", len(ignored))
 				}
-				fmt.Print("Force remove (this discards the above)? [y/N]: ")
+				fmt.Fprint(humanOut(), "Force remove (this discards the above)? [y/N]: ")
 				var resp string
 				fmt.Scanln(&resp)
 				if r := strings.ToLower(strings.TrimSpace(resp)); r != "y" && r != "yes" {
 					logging.Info("CLI delete: user declined force removal of %s", worktreeName)
-					fmt.Println("Cancelled")
+					fmt.Fprintln(humanOut(), "Cancelled")
 					return nil
 				}
 				effectiveForce = true
@@ -811,6 +869,17 @@ func (c *CLI) handleDelete(args []string) error {
 	err = c.worktreeManager.DeleteWorktree(ctx, worktreeName, effectiveForce)
 	if err != nil {
 		logging.Error("CLI delete failed: %v", err)
+		if jsonMode {
+			_ = emitJSON(DeleteJSON{
+				Name:       targetWorktree.Name,
+				Branch:     worktreeBranch,
+				Path:       worktreePath,
+				BranchKept: true,
+				Reason:     DeleteReasonError,
+				Error:      err.Error(),
+				Hooks:      hookResultsToJSON(results),
+			})
+		}
 		return err
 	}
 
@@ -820,7 +889,110 @@ func (c *CLI) handleDelete(args []string) error {
 	postResults := c.worktreeManager.RunPostRemoveHookWithApproval(worktreePath, worktreeBranch, false)
 	c.worktreeManager.SetEventObserver(nil)
 	printHookEvents(postResults)
+
+	if jsonMode {
+		allHooks := append([]core.HookResult{}, results...)
+		allHooks = append(allHooks, postResults...)
+		return emitJSON(DeleteJSON{
+			Name:       targetWorktree.Name,
+			Branch:     worktreeBranch,
+			Path:       worktreePath,
+			Deleted:    true,
+			Forced:     effectiveForce,
+			BranchKept: true,
+			Hooks:      hookResultsToJSON(allHooks),
+		})
+	}
 	return nil
+}
+
+// Reasons reported by `gren delete --format=json` when Deleted is false. They
+// are a closed set so a caller can switch on them instead of matching error
+// prose, which is free to change.
+const (
+	DeleteReasonDryRun               = "dry_run"
+	DeleteReasonConfirmationRequired = "confirmation_required"
+	DeleteReasonBlocked              = "blocked"
+	DeleteReasonNotFound             = "not_found"
+	DeleteReasonHookFailed           = "hook_failed"
+	DeleteReasonError                = "error"
+)
+
+// DeleteJSON is the machine-readable shape returned by `gren delete --format=json`.
+//
+// Deleted is the single field a caller has to check. When it is false, Reason
+// says why in a stable vocabulary and Blocking carries the detail — so an agent
+// deciding whether a worktree is safe to remove can ask gren instead of
+// reimplementing the check with `git status --porcelain`, which is what every
+// consumer had to do before this existed.
+type DeleteJSON struct {
+	Name    string `json:"name"`
+	Branch  string `json:"branch,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Deleted bool   `json:"deleted"`
+	Forced  bool   `json:"forced,omitempty"`
+	// WouldForce reports, for a dry run, whether the real delete would need -f.
+	WouldForce bool `json:"would_force,omitempty"`
+	// BranchKept is always true: gren preserves the branch by design. It is
+	// stated rather than implied so callers don't guess.
+	BranchKept bool          `json:"branch_kept"`
+	Reason     string        `json:"reason,omitempty"`
+	Blocking   *BlockingJSON `json:"blocking,omitempty"`
+	Hooks      []HookJSON    `json:"hooks,omitempty"`
+	Error      string        `json:"error,omitempty"`
+}
+
+// BlockingJSON describes content that stops a plain `git worktree remove`.
+//
+// The split matters: Tracked entries are work that could be lost and warrant a
+// human decision, while Ignored is build output (node_modules/, .venv/) that
+// any set-up worktree accumulates and nobody needs to see listed. Only the
+// count is reported for the latter — listing them was noise that hid the
+// entries that actually matter.
+type BlockingJSON struct {
+	Tracked      []BlockingEntry `json:"tracked,omitempty"`
+	IgnoredCount int             `json:"ignored_count"`
+}
+
+// BlockingEntry is one piece of content in the way of a removal.
+//
+// Status is the two-character `git status --porcelain` code (`??` untracked,
+// ` M` modified, `A ` added, …) and Path is what it refers to. They are split
+// rather than handed over as one porcelain line so a caller can show the path
+// without re-parsing a git output format — leaking that format into the payload
+// would make every consumer implement the same two-character slice.
+type BlockingEntry struct {
+	Status string `json:"status"`
+	Path   string `json:"path"`
+}
+
+// blockingJSON inspects a worktree path and reports what would block removal,
+// or nil when a plain remove would succeed.
+func blockingJSON(worktreePath string) *BlockingJSON {
+	leftovers := worktreeBlockingContent(worktreePath)
+	if len(leftovers) == 0 {
+		return nil
+	}
+	real, ignored := splitBlockingContent(leftovers)
+	entries := make([]BlockingEntry, 0, len(real))
+	for _, l := range real {
+		entries = append(entries, parseBlockingEntry(l))
+	}
+	return &BlockingJSON{Tracked: entries, IgnoredCount: len(ignored)}
+}
+
+// parseBlockingEntry splits a porcelain line into its status code and path.
+// A line too short for the fixed "XY path" shape is passed through as the path
+// with an empty status rather than dropped: an entry the caller cannot classify
+// is still an entry it must not silently delete.
+func parseBlockingEntry(line string) BlockingEntry {
+	if len(line) < 4 {
+		return BlockingEntry{Path: strings.TrimSpace(line)}
+	}
+	return BlockingEntry{
+		Status: line[:2],
+		Path:   strings.TrimSpace(line[3:]),
+	}
 }
 
 // handleCleanup handles the cleanup command (delete all stale worktrees)
@@ -2726,9 +2898,18 @@ func (c *CLI) handleHookRun(args []string) error {
 	baseBranch := fs.String("base", "", "Base branch")
 	interactive := fs.Bool("interactive", false, "Force all hooks to run with terminal access (inherited stdio) and prompt for approval")
 	tty := fs.Bool("tty", false, "Alias for --interactive")
+	format := addFormatFlag(fs)
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	jsonMode, err := parseFormat(*format)
+	if err != nil {
+		return err
+	}
+	if jsonMode {
+		defer enterJSONMode()()
 	}
 
 	if *hookType == "" {
@@ -2755,62 +2936,89 @@ func (c *CLI) handleHookRun(args []string) error {
 	c.worktreeManager.SetEventObserver(streamEventsTo(os.Stderr))
 	defer c.worktreeManager.SetEventObserver(nil)
 
+	// Each case only differs in which runner it calls and whether a failure is
+	// fatal, so dispatch produces results and the shared tail handles reporting.
+	// Before, every case repeated the same printHookEvents/HooksFailed block,
+	// and adding JSON output would have meant repeating it seven more times.
+	var results []core.HookResult
+	bestEffort := false
+
 	switch ht {
 	case config.HookPostCreate:
-		results := c.worktreeManager.RunPostCreateHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
-		printHookEvents(results)
-		if core.HooksFailed(results) {
-			if failed := core.FirstFailedHook(results); failed != nil {
-				return fmt.Errorf("hook failed: %v", failed.Err)
-			}
-		}
+		results = c.worktreeManager.RunPostCreateHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
 	case config.HookPreRemove:
-		results := c.worktreeManager.RunPreRemoveHookWithApproval(*worktreePath, *branchName, autoApprove)
-		printHookEvents(results)
-		if core.HooksFailed(results) {
-			if failed := core.FirstFailedHook(results); failed != nil {
-				return fmt.Errorf("hook failed: %v", failed.Err)
-			}
-		}
+		results = c.worktreeManager.RunPreRemoveHookWithApproval(*worktreePath, *branchName, autoApprove)
 	case config.HookPostRemove:
 		// post-remove is best-effort; errors are logged but not returned
-		results := c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, autoApprove)
-		printHookEvents(results)
+		results = c.worktreeManager.RunPostRemoveHookWithApproval(*worktreePath, *branchName, autoApprove)
+		bestEffort = true
 	case config.HookPreMerge:
-		results := c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
-		printHookEvents(results)
-		if core.HooksFailed(results) {
-			if failed := core.FirstFailedHook(results); failed != nil {
-				return fmt.Errorf("hook failed: %v", failed.Err)
-			}
-		}
+		results = c.worktreeManager.RunPreMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
 	case config.HookPostMerge:
-		results := c.worktreeManager.RunPostMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
-		printHookEvents(results)
-		if core.HooksFailed(results) {
-			if failed := core.FirstFailedHook(results); failed != nil {
-				return fmt.Errorf("hook failed: %v", failed.Err)
-			}
-		}
+		results = c.worktreeManager.RunPostMergeHookWithApproval(*worktreePath, *branchName, *baseBranch, autoApprove)
 	case config.HookPostSwitch:
-		results := c.worktreeManager.RunPostSwitchHookWithApproval(*worktreePath, *branchName, autoApprove)
-		printHookEvents(results)
-		if core.HooksFailed(results) {
-			if failed := core.FirstFailedHook(results); failed != nil {
-				return fmt.Errorf("hook failed: %v", failed.Err)
-			}
-		}
+		results = c.worktreeManager.RunPostSwitchHookWithApproval(*worktreePath, *branchName, autoApprove)
 	case config.HookPostStart:
-		results := c.worktreeManager.RunPostStartHookWithApproval(*worktreePath, *branchName, "", autoApprove)
-		printHookEvents(results)
-		if core.HooksFailed(results) {
-			if failed := core.FirstFailedHook(results); failed != nil {
-				return fmt.Errorf("hook failed: %v", failed.Err)
-			}
-		}
+		results = c.worktreeManager.RunPostStartHookWithApproval(*worktreePath, *branchName, "", autoApprove)
 	default:
+		if jsonMode {
+			_ = emitJSON(HookRunJSON{Type: *hookType, Branch: *branchName, Path: *worktreePath,
+				Error: fmt.Sprintf("unknown hook type: %s", *hookType)})
+		}
 		return fmt.Errorf("unknown hook type: %s", *hookType)
 	}
 
+	printHookEvents(results)
+
+	failed := core.FirstFailedHook(results)
+	fatal := failed != nil && !bestEffort
+
+	if jsonMode {
+		out := HookRunJSON{
+			Type:   *hookType,
+			Branch: *branchName,
+			Path:   *worktreePath,
+			Ok:     failed == nil,
+			Ran:    len(results) > 0,
+			Hooks:  hookResultsToJSON(results),
+		}
+		if failed != nil {
+			out.Error = failed.Err.Error()
+		}
+		if err := emitJSON(out); err != nil {
+			return err
+		}
+		// The payload already carries the failure; still exit non-zero so a
+		// shell caller that only checks $? behaves the same as without --format.
+		if fatal {
+			return errHookFailedSilently
+		}
+		return nil
+	}
+
+	if fatal {
+		return fmt.Errorf("hook failed: %v", failed.Err)
+	}
 	return nil
+}
+
+// errHookFailedSilently marks a failure whose detail has already been written
+// to stdout as JSON. main prints errors to stderr; this one carries no message
+// because repeating it would just be noise beside the payload.
+var errHookFailedSilently = errors.New("")
+
+// HookRunJSON is the machine-readable shape returned by `gren hook-run --format=json`.
+//
+// Ok is the field to check. Hooks carries per-hook detail — including captured
+// output — so a caller that ran setup in a pane it cannot read (herdr's
+// bootstrap pane, CI) can still report exactly which hook failed and why,
+// instead of surfacing a bare exit code.
+type HookRunJSON struct {
+	Type   string     `json:"type"`
+	Branch string     `json:"branch,omitempty"`
+	Path   string     `json:"path,omitempty"`
+	Ok     bool       `json:"ok"`
+	Ran    bool       `json:"ran"`
+	Hooks  []HookJSON `json:"hooks,omitempty"`
+	Error  string     `json:"error,omitempty"`
 }

@@ -474,6 +474,66 @@ for when building any external consumer: `hook-run --interactive` (hooks against
 a PTY, output tee'd to both terminal and disk), `create --format=json` with a
 guaranteed-absolute `.path` and pure-JSON stdout, and `list --format=json`.
 
+## Machine-Readable Output
+
+`--format=json` is supported by `create`, `list`, `delete`, and `hook-run`. Two
+guarantees hold across all of them:
+
+- **stdout carries the payload and nothing else.** Banners, warnings, progress,
+  and hook phase summaries all go to stderr in this mode, so the output is safe
+  to pipe straight into `jq` without stripping anything first.
+- **The exit code still means what it always did.** A shell caller that only
+  checks `$?` behaves identically with and without the flag.
+
+### `delete --format=json`
+
+JSON mode never prompts — its callers are plugins, agents, and CI, none of which
+can answer a y/N. That makes `--dry-run` the way to ask whether a worktree is
+safe to remove:
+
+```bash
+gren delete --dry-run --format=json my-feature
+```
+
+```json
+{
+  "name": "my-feature",
+  "branch": "my-feature",
+  "path": "/path/to/worktrees/my-feature",
+  "deleted": false,
+  "would_force": true,
+  "branch_kept": true,
+  "reason": "dry_run",
+  "blocking": {
+    "tracked": [{ "status": "??", "path": "scratch.txt" }],
+    "ignored_count": 12
+  }
+}
+```
+
+`blocking.tracked` is work that could be lost — untracked or modified files,
+with their `git status --porcelain` code. `ignored_count` is the gitignored
+build output (`node_modules/`, `.venv/`) that any set-up worktree accumulates;
+it is counted rather than listed because listing it buried the entries that
+matter. A consumer no longer has to reimplement this check with
+`git status --porcelain` of its own.
+
+`deleted` is the only field a caller must check. When it is false, `reason` says
+why, from a closed set: `dry_run`, `confirmation_required` (no `-f`),
+`not_found`, `hook_failed`, `error`. Pass `-f` to actually delete. The branch is
+always preserved — `branch_kept` states it rather than leaving it implied.
+
+### `hook-run --format=json`
+
+```bash
+gren hook-run --type post-create --path "$WORKTREE" --branch "$BRANCH" --format=json
+```
+
+Returns `ok`, `ran`, and a `hooks[]` array carrying each hook's command, exit
+status, and captured output. This is what lets a caller that ran setup in a pane
+it cannot read — herdr's bootstrap pane, or CI — report *which* hook failed and
+why, instead of surfacing a bare exit code.
+
 ## CLI Commands
 
 ### Core Commands

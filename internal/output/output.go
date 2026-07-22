@@ -3,12 +3,48 @@ package output
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
+
+// stdout is where human-facing output goes. Every function in this package
+// writes here rather than to os.Stdout directly, so a caller that owns stdout —
+// notably a `--format=json` command, whose stdout must contain nothing but the
+// payload — can redirect all of it in one call.
+//
+// This exists because the alternative is discipline: remembering, at every call
+// site however deep in the stack, not to print. That failed once already in
+// 0.18.1, where a single unpushed-commits warning landed on stdout ahead of the
+// JSON object and broke every consumer piping to jq.
+//
+// Errors are exempt: Error/Errorf always write to stderr, in both modes.
+var stdoutOverride io.Writer
+
+// stdout resolves the current sink at call time rather than capturing
+// os.Stdout once at package init. That distinction matters: a caller that
+// reassigns os.Stdout — every test in this repo that captures output does —
+// must still be honoured, or this package would keep writing to the original
+// file descriptor and the capture would come back empty.
+func stdout() io.Writer {
+	if stdoutOverride != nil {
+		return stdoutOverride
+	}
+	return os.Stdout
+}
+
+// SetStdout redirects this package's human-facing output. It returns a function
+// that restores the previous writer, so callers can scope the change:
+//
+//	defer output.SetStdout(os.Stderr)()
+func SetStdout(w io.Writer) func() {
+	prev := stdoutOverride
+	stdoutOverride = w
+	return func() { stdoutOverride = prev }
+}
 
 // Symbols for message prefixes
 const (
@@ -57,7 +93,7 @@ var (
 
 // Success prints a success message with green checkmark
 func Success(message string) {
-	fmt.Println(successStyle.Render("✅") + " " + greenStyle.Render(message))
+	fmt.Fprintln(stdout(), successStyle.Render("✅")+" "+greenStyle.Render(message))
 }
 
 // Successf prints a formatted success message
@@ -77,7 +113,7 @@ func Errorf(format string, args ...interface{}) {
 
 // Warning prints a warning message with yellow triangle
 func Warning(message string) {
-	fmt.Println(warningStyle.Render("⚠️") + " " + yellowStyle.Render(message))
+	fmt.Fprintln(stdout(), warningStyle.Render("⚠️")+" "+yellowStyle.Render(message))
 }
 
 // Warningf prints a formatted warning message
@@ -87,7 +123,7 @@ func Warningf(format string, args ...interface{}) {
 
 // Progress prints a progress message with cyan circle
 func Progress(message string) {
-	fmt.Println(progressStyle.Render("⏳") + " " + cyanStyle.Render(message))
+	fmt.Fprintln(stdout(), progressStyle.Render("⏳")+" "+cyanStyle.Render(message))
 }
 
 // Progressf prints a formatted progress message
@@ -97,7 +133,7 @@ func Progressf(format string, args ...interface{}) {
 
 // Hint prints a hint message with dim arrow
 func Hint(message string) {
-	fmt.Println(hintStyle.Render("💡") + " " + dimStyle.Render(message))
+	fmt.Fprintln(stdout(), hintStyle.Render("💡")+" "+dimStyle.Render(message))
 }
 
 // Hintf prints a formatted hint message
@@ -107,7 +143,7 @@ func Hintf(format string, args ...interface{}) {
 
 // Info prints an info message with dim circle
 func Info(message string) {
-	fmt.Println(infoStyle.Render(SymbolInfo) + " " + message)
+	fmt.Fprintln(stdout(), infoStyle.Render(SymbolInfo)+" "+message)
 }
 
 // Infof prints a formatted info message
@@ -117,7 +153,7 @@ func Infof(format string, args ...interface{}) {
 
 // Header prints a section header
 func Header(title string) {
-	fmt.Println(headerStyle.Render(title))
+	fmt.Fprintln(stdout(), headerStyle.Render(title))
 }
 
 // Bold returns bolded text
@@ -166,7 +202,7 @@ func Branch(name string) string {
 
 // KeyValue prints a key-value pair with proper formatting
 func KeyValue(key, value string) {
-	fmt.Printf("%s %s\n", dimStyle.Render(key+":"), value)
+	fmt.Fprintf(stdout(), "%s %s\n", dimStyle.Render(key+":"), value)
 }
 
 // ListItem prints a list item with bullet
@@ -175,17 +211,17 @@ func ListItem(text string, current bool) {
 	if current {
 		prefix = greenStyle.Render("▸ ")
 	}
-	fmt.Printf("%s%s\n", prefix, text)
+	fmt.Fprintf(stdout(), "%s%s\n", prefix, text)
 }
 
 // Blank prints an empty line
 func Blank() {
-	fmt.Println()
+	fmt.Fprintln(stdout())
 }
 
 // WorktreeHeader prints the header for worktree operations
 func WorktreeHeader(repoName string) {
-	fmt.Println(cyanStyle.Render(SymbolTree) + " " + Bold("Git Worktree Manager"))
+	fmt.Fprintln(stdout(), cyanStyle.Render(SymbolTree)+" "+Bold("Git Worktree Manager"))
 	KeyValue("Project", repoName)
 	Blank()
 }
@@ -194,14 +230,14 @@ func WorktreeHeader(repoName string) {
 func WorktreeCreated(name, branch, path string) {
 	Success("Worktree created")
 	Blank()
-	fmt.Println("🌿 " + Branch(branch))
-	fmt.Println("📂 " + Path(path))
+	fmt.Fprintln(stdout(), "🌿 "+Branch(branch))
+	fmt.Fprintln(stdout(), "📂 "+Path(path))
 }
 
 // WorktreeSwitched prints info when switching to a worktree
 func WorktreeSwitched(name, path string) {
 	Successf("Switched to %s", Bold(name))
-	fmt.Println("📂 " + Path(path))
+	fmt.Fprintln(stdout(), "📂 "+Path(path))
 }
 
 // WorktreeRemoved prints info when removing a worktree
@@ -280,11 +316,11 @@ func PrintWorktreeList(items []WorktreeListItem, repoName string) {
 			indicatorStr = " " + dimStyle.Render("[") + strings.Join(indicators, " ") + dimStyle.Render("]")
 		}
 
-		fmt.Printf("%s%s%s\n", prefix, name, indicatorStr)
+		fmt.Fprintf(stdout(), "%s%s%s\n", prefix, name, indicatorStr)
 
 		// Add path on second line for verbose mode or current worktree
 		if item.IsCurrent || i == 0 {
-			fmt.Printf("   %s\n", Path(item.Path))
+			fmt.Fprintf(stdout(), "   %s\n", Path(item.Path))
 		}
 	}
 }
@@ -316,7 +352,7 @@ func PrintSimpleWorktreeList(items []WorktreeListItem) {
 			ciIcon = " " + yellowStyle.Render("●")
 		}
 
-		fmt.Printf("%s%s%s%s\n", prefix, name, staleInfo, ciIcon)
+		fmt.Fprintf(stdout(), "%s%s%s%s\n", prefix, name, staleInfo, ciIcon)
 	}
 }
 

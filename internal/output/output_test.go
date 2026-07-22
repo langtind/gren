@@ -420,3 +420,47 @@ func TestRepoName(t *testing.T) {
 		})
 	}
 }
+
+// TestSetStdoutRedirectsAndRestores covers the seam that lets a --format=json
+// command own stdout: every human-facing writer in this package has to follow
+// the redirect, and the restore must put it back so a later command in the same
+// process is not left writing to the wrong stream.
+func TestSetStdoutRedirectsAndRestores(t *testing.T) {
+	var buf bytes.Buffer
+	restore := SetStdout(&buf)
+
+	Success("created")
+	Warning("careful")
+	Info("detail")
+	KeyValue("Project", "demo")
+	Blank()
+
+	if buf.Len() == 0 {
+		t.Fatal("SetStdout did not capture any output")
+	}
+	for _, want := range []string{"created", "careful", "detail", "Project"} {
+		if !bytes.Contains(buf.Bytes(), []byte(want)) {
+			t.Errorf("redirected output is missing %q, got %q", want, buf.String())
+		}
+	}
+
+	restore()
+	if stdoutOverride != nil {
+		t.Error("restore did not clear the override")
+	}
+	if stdout() != os.Stdout {
+		t.Error("restore did not put the sink back to os.Stdout")
+	}
+}
+
+// TestStdoutFollowsReassignedOsStdout is the regression the first version of
+// this package got wrong: binding os.Stdout into a package var at init makes
+// every later reassignment invisible, so a caller capturing output — every test
+// helper in this repo — silently gets nothing while the text goes to the
+// process's original file descriptor.
+func TestStdoutFollowsReassignedOsStdout(t *testing.T) {
+	captured := captureStdout(func() { Success("visible") })
+	if !strings.Contains(captured, "visible") {
+		t.Errorf("output did not follow the reassigned os.Stdout, got %q", captured)
+	}
+}
