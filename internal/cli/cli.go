@@ -83,11 +83,31 @@ type CLI struct {
 // NewCLI creates a new CLI instance
 func NewCLI(gitRepo git.Repository, configManager *config.Manager) *CLI {
 	worktreeManager := core.NewWorktreeManager(gitRepo, configManager)
+	// Without a terminal on stdin there is no one to answer a hook's prompt, so
+	// no hook gets a TTY however it is declared. gren already refuses its own
+	// prompts here; this extends the same detection to the hook runner, which
+	// used to hand an `interactive = true` hook a pty nobody was attached to and
+	// block on it forever. `hook-run --interactive` overrides this per command.
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		worktreeManager.SetHookInteractivity(core.HookInteractivityNever)
+	}
 	return &CLI{
 		gitRepo:         gitRepo,
 		configManager:   configManager,
 		worktreeManager: worktreeManager,
 	}
+}
+
+// suppressHookPrompts declares, for the duration of one command, that nobody
+// will answer a hook's prompt. `-f` on delete and cleanup and `-y` on merge all
+// mean "stop asking me things", and `--format=json` says the same in machine
+// terms: its callers are plugins, agents, and CI. A hook that opened its own
+// prompt under any of those would contradict the flag, and unattended it would
+// hang. Returns a restore function.
+func (c *CLI) suppressHookPrompts() func() {
+	prev := c.worktreeManager.HookInteractivity()
+	c.worktreeManager.SetHookInteractivity(core.HookInteractivityNever)
+	return func() { c.worktreeManager.SetHookInteractivity(prev) }
 }
 
 // ParseAndExecute parses command line arguments and executes the appropriate command
@@ -725,6 +745,10 @@ func (c *CLI) handleDelete(args []string) error {
 	worktreeName := fs.Arg(0)
 	logging.Info("CLI delete: worktree=%s, force=%v, dry-run=%v, json=%v", worktreeName, *force, *dryRun, jsonMode)
 
+	if *force || jsonMode {
+		defer c.suppressHookPrompts()()
+	}
+
 	// Dry run mode - just show what would happen. In JSON mode this is the
 	// inspection call: it answers "is this worktree safe to remove, and if not,
 	// what exactly is in the way" without touching anything.
@@ -1020,6 +1044,10 @@ func (c *CLI) handleCleanup(args []string) error {
 	}
 
 	logging.Info("CLI cleanup: skip-confirmation=%v, force-delete=%v, dry-run=%v", *skipConfirmation, *forceDelete, *dryRun)
+
+	if *skipConfirmation {
+		defer c.suppressHookPrompts()()
+	}
 
 	// Show spinner while fetching data
 	sp := newSpinner("Fetching worktree status...")
@@ -1946,6 +1974,10 @@ func (c *CLI) handleMerge(args []string) error {
 	target := ""
 	if fs.NArg() > 0 {
 		target = fs.Arg(0)
+	}
+
+	if *yes {
+		defer c.suppressHookPrompts()()
 	}
 
 	ctx := context.Background()
@@ -2925,8 +2957,9 @@ func (c *CLI) handleHookRun(args []string) error {
 	// callers (e.g. the TUI) keep auto-approve.
 	forceInteractive := *interactive || *tty
 	if forceInteractive {
-		c.worktreeManager.SetForceInteractive(true)
-		defer c.worktreeManager.SetForceInteractive(false)
+		prev := c.worktreeManager.HookInteractivity()
+		c.worktreeManager.SetHookInteractivity(core.HookInteractivityForce)
+		defer c.worktreeManager.SetHookInteractivity(prev)
 	}
 	autoApprove := !forceInteractive
 

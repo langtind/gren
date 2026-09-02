@@ -13,6 +13,9 @@ import (
 	"golang.org/x/term"
 )
 
+// eot is Ctrl-D, the canonical-mode end-of-transmission character.
+const eot = 0x04
+
 // runInteractiveCaptured runs cmd attached to a pseudo-terminal, copying stdin
 // into the pty and the pty output to out (typically a MultiWriter of the real
 // terminal and a disk sink). The child sees a real TTY, so interactive tools,
@@ -45,7 +48,15 @@ func runInteractiveCaptured(cmd *exec.Cmd, stdin io.Reader, out io.Writer) error
 		}
 	}
 
-	go func() { _, _ = io.Copy(ptmx, stdin) }()
+	// When the copy ends, no more input will ever arrive. A pty has no
+	// half-close, so send EOT: the line discipline turns it into a read() of 0,
+	// which is EOF to the child. Without it a hook that prompts blocks forever
+	// on a pty nobody is attached to. With a real terminal the copy only ends
+	// when stdin closes, where EOF is equally correct.
+	go func() {
+		_, _ = io.Copy(ptmx, stdin)
+		_, _ = ptmx.Write([]byte{eot})
+	}()
 	_, _ = io.Copy(out, ptmx) // drains until the child closes the pty (EIO on Linux is expected)
 	return cmd.Wait()
 }

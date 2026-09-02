@@ -474,6 +474,32 @@ for when building any external consumer: `hook-run --interactive` (hooks against
 a PTY, output tee'd to both terminal and disk), `create --format=json` with a
 guaranteed-absolute `.path` and pure-JSON stdout, and `list --format=json`.
 
+## Hooks and Interactivity
+
+A hook marked `interactive = true` asks for a TTY. Whether it gets one depends
+on whether anyone is there to use it:
+
+- **No terminal on stdin** (an agent, a script, CI) — no hook gets a TTY.
+- **`gren delete -f`, `gren cleanup -f`, `gren merge -y`, or `--format=json`** —
+  no hook gets a TTY. These flags mean "stop asking me things", and that now
+  reaches the hooks, not just gren's own confirmations.
+- **`gren hook-run --interactive`** — every hook gets a TTY, which is how
+  herdr's setup pane makes `op` and `make seed` work.
+- Otherwise each hook's own `interactive` setting decides.
+
+When no hook will get a TTY, gren sets `GREN_NONINTERACTIVE=1` in the hook
+environment. The older `[ -t 0 ]` convention keeps working: without a TTY the
+hook's stdin is a pipe that reads EOF, so the guard takes its non-interactive
+branch instead of blocking on a prompt no one can answer.
+
+```bash
+if [ -n "$GREN_NONINTERACTIVE" ] || [ ! -t 0 ]; then
+  echo "unattended: skipping the database drop"
+  exit 0
+fi
+printf 'Drop databases? (y/N): '; read -r ans
+```
+
 ## Machine-Readable Output
 
 `--format=json` is supported by `create`, `list`, `delete`, and `hook-run`. Two

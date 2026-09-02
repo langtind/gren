@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`gren delete -f` no longer hangs on an interactive hook.** A pre-remove hook declared `interactive = true` got a pty regardless of who was driving gren, so a hook guarding its prompt with the usual `[ -t 0 ]` saw a terminal, printed `Drop databases? (y/N):`, and blocked forever on a pty nobody was attached to — silently, with the prompt buffered behind the caller's pipe, indistinguishable from a wedged process. `-f` suppressed gren's own confirmation but never reached the hook. Whether a hook gets a terminal is now a property of the run, not of the hook alone: `HookInteractivityNever` when stdin has no terminal, when `--format=json` is in play, or when the caller passed `delete -f`, `cleanup -f`, or `merge -y`. A hook's `interactive` flag answers "does this want a TTY"; the mode answers "is anyone here to use one", and conflating the two is what broke.
+- **`gren hook-run --interactive` no longer hangs when stdin has no terminal.** It still allocates a pty, since that is what makes `op` TouchID and colored output work, but once the input copy ends no further keystroke can ever arrive, so gren sends EOT and the child's `read` sees EOF instead of waiting forever.
+
+### Added
+
+- **`GREN_NONINTERACTIVE=1` in the hook environment** whenever no hook will get a terminal. The existing `[ -t 0 ]` convention keeps working unchanged; this is the explicit signal for hooks that want to say so directly.
+
 ## [0.19.0] — 2026-07-23
 
 ### Added

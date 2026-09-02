@@ -94,9 +94,12 @@ fi
 
 **Interactive-setup caveat:** `gren create` runs the post-create hooks in this
 (non-interactive) invocation, so hooks that need a human at a terminal — 1Password
-`op` (TouchID), `make seed` prompts — will hang or fail. For such repos, either
-create with `--no-hooks` and let the human run setup, or tell them to create via
-herdr's picker (`prefix+shift+g`), which runs setup in a real TTY pane. For
+`op` (TouchID), `make seed` prompts — cannot get one. They will not hang: gren
+gives no hook a TTY when stdin has no terminal, and sets `GREN_NONINTERACTIVE=1`
+so the hook can take its own unattended branch. But whatever that branch skips
+stays unset. For such repos, either create with `--no-hooks` and let the human
+run setup, or tell them to create via herdr's picker (`prefix+shift+g`), which
+runs setup in a real TTY pane. For
 non-interactive setups (dependency install, env symlinks, port derivation) the
 flow above is complete on its own.
 
