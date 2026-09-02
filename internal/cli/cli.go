@@ -2955,11 +2955,23 @@ func (c *CLI) handleHookRun(args []string) error {
 	// It also drops auto-approval: since a human is at the TTY, prompt for hook
 	// approval (persisted per project, so it's a one-time prompt). Non-interactive
 	// callers (e.g. the TUI) keep auto-approve.
+	// --format=json wins over --interactive. A hook with a TTY writes its live
+	// output straight to the real stdout, which enterJSONMode cannot redirect,
+	// so the payload would land behind hook chatter and stop parsing. A caller
+	// asking for machine-readable output has no terminal to offer anyway.
 	forceInteractive := *interactive || *tty
-	if forceInteractive {
+	if jsonMode && forceInteractive {
+		fmt.Fprintln(humanOut(), "note: --interactive ignored with --format=json; hooks run without a TTY")
+		forceInteractive = false
+	}
+	switch {
+	case forceInteractive:
 		prev := c.worktreeManager.HookInteractivity()
 		c.worktreeManager.SetHookInteractivity(core.HookInteractivityForce)
 		defer c.worktreeManager.SetHookInteractivity(prev)
+	case jsonMode:
+		// Same reason, for a hook that declared itself interactive on its own.
+		defer c.suppressHookPrompts()()
 	}
 	autoApprove := !forceInteractive
 

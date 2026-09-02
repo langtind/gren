@@ -245,8 +245,19 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		jsonData = []byte("{}")
 	}
 
-	// Set environment variables
-	cmd.Env = append(os.Environ(),
+	// Set environment variables. An inherited GREN_NONINTERACTIVE describes the
+	// run that exported it, not this one — a hook that shells back into gren
+	// would otherwise pass its own answer down to a hook that does have a TTY.
+	// Drop it, then set it below only when it is true here.
+	parentEnv := os.Environ()
+	env := make([]string, 0, len(parentEnv)+9)
+	for _, kv := range parentEnv {
+		if strings.HasPrefix(kv, "GREN_NONINTERACTIVE=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = append(env,
 		"GREN_WORKTREE_PATH="+ctx.WorktreePath,
 		"GREN_BRANCH="+ctx.BranchName,
 		"GREN_BASE_BRANCH="+ctx.BaseBranch,

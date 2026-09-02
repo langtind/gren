@@ -83,3 +83,29 @@ func TestExecuteHook_ForcedPtyWithoutTerminalDoesNotHang(t *testing.T) {
 		t.Errorf("expected the prompt to read EOF and continue, got %q", got.Output)
 	}
 }
+
+// An inherited GREN_NONINTERACTIVE belongs to whoever exported it. A hook that
+// shells back into gren must not pass its own answer down to a hook that does
+// get a terminal, so the variable is rebuilt per run rather than inherited.
+func TestExecuteHook_InheritedNonInteractiveEnvIsNotPassedThrough(t *testing.T) {
+	repo := mkRepo(t)
+	t.Setenv("GREN_LOG_DIR", t.TempDir())
+	t.Setenv("GREN_NONINTERACTIVE", "1")
+	ctx := HookContext{WorktreePath: repo, BranchName: "main", RepoRoot: repo}
+
+	for _, tc := range []struct {
+		mode HookInteractivity
+		want string
+	}{
+		{HookInteractivityAuto, "flag=unset"},
+		{HookInteractivityForce, "flag=unset"},
+		{HookInteractivityNever, "flag=1"},
+	} {
+		wm := &WorktreeManager{}
+		wm.SetHookInteractivity(tc.mode)
+		got := runHookWithDeadline(t, wm, ctx, `echo "flag=${GREN_NONINTERACTIVE:-unset}"`, false)
+		if !strings.Contains(got.Output, tc.want) {
+			t.Errorf("mode %s: want %q, got %q", tc.mode, tc.want, got.Output)
+		}
+	}
+}
