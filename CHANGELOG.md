@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-02
+
 ### Fixed
 
 - **`gren delete -f` no longer hangs on an interactive hook.** A pre-remove hook declared `interactive = true` got a pty regardless of who was driving gren, so a hook guarding its prompt with the usual `[ -t 0 ]` saw a terminal, printed `Drop databases? (y/N):`, and blocked forever on a pty nobody was attached to — silently, with the prompt buffered behind the caller's pipe, indistinguishable from a wedged process. `-f` suppressed gren's own confirmation but never reached the hook. Whether a hook gets a terminal is now a property of the run, not of the hook alone: `HookInteractivityNever` when stdin has no terminal, when `--format=json` is in play, or when the caller passed `delete -f`, `cleanup -f`, or `merge -y`. A hook's `interactive` flag answers "does this want a TTY"; the mode answers "is anyone here to use one", and conflating the two is what broke.
