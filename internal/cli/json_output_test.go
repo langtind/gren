@@ -314,3 +314,21 @@ func TestHookRunJSONUnknownTypeIsStructured(t *testing.T) {
 		t.Errorf("error is empty for an unknown hook type")
 	}
 }
+
+// TestHookRunJSONIgnoresInteractive guards the stdout-only contract against the
+// one flag that can break it. --interactive gives the hook a pty whose output
+// goes to the real stdout, which enterJSONMode cannot redirect, so the payload
+// used to land behind "Drop databases? (y/N):" and stop parsing.
+func TestHookRunJSONIgnoresInteractive(t *testing.T) {
+	_, worktreePath := hookRunJSONRepo(t, "hook-tty", "echo setup-done")
+
+	result, errored := runHookRunJSON(t, "--type", "post-create", "--path", worktreePath,
+		"--branch", "hook-tty", "--interactive", "--format=json")
+
+	if errored {
+		t.Fatalf("a succeeding hook must exit zero: %+v", result)
+	}
+	if !result.Ok || !result.Ran {
+		t.Errorf("hook did not run under --interactive --format=json: %+v", result)
+	}
+}

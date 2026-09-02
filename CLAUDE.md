@@ -169,6 +169,22 @@ type HookJSONContext struct {
 }
 ```
 
+### Hook Interactivity
+
+Whether a hook gets a pty is decided by `core.HookInteractivity` on the
+`WorktreeManager`, not by the hook's own `interactive` flag alone:
+
+- `HookInteractivityAuto` — honor each hook's `interactive` setting (default).
+- `HookInteractivityForce` — every hook gets a pty (`gren hook-run --interactive`).
+- `HookInteractivityNever` — no hook gets a pty; `GREN_NONINTERACTIVE=1` is set
+  in the hook env. `NewCLI` selects this when stdin is not a terminal, and
+  `suppressHookPrompts` selects it for `delete -f`, `cleanup -f`, `merge -y`,
+  and `--format=json`.
+
+A hook's `interactive` flag answers "does this hook want a TTY". The mode
+answers "is anyone here to use one". Conflating them is what made `gren delete
+-f` hang forever on a hook prompt in an agent session.
+
 ### Hook Approval System
 Security feature in `internal/config/approval.go`:
 - `ApprovalManager` - Manages approved hook commands per project

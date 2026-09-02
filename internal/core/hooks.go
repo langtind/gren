@@ -199,10 +199,18 @@ func (wm *WorktreeManager) RunHooksWithApproval(hookType config.HookType, ctx Ho
 	return results
 }
 
-// executeHook runs a single hook command.
-// If interactive is true, the hook runs with terminal access for user input.
+// executeHook runs a single hook command. interactive is the hook's own
+// request for a terminal; whether it gets one is decided together with the
+// manager's HookInteractivity mode.
 func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string, ctx HookContext, hookName string, interactive bool) HookResult {
-	logging.Info("Running %s hook: %s (interactive: %v)", hookType, hookCmd, interactive)
+	// The hook's own `interactive` setting says whether it wants a TTY; the
+	// manager's mode says whether anyone is here to use one. A hook that asks
+	// for a TTY when nobody can answer gets piped stdin instead, so its
+	// `[[ -t 0 ]]` guard takes the non-interactive branch rather than blocking
+	// on a `read` no one will ever satisfy.
+	mode := wm.HookInteractivity()
+	runInteractive := mode == HookInteractivityForce || (mode == HookInteractivityAuto && interactive)
+	logging.Info("Running %s hook: %s (wants-tty: %v, mode: %s, tty: %v)", hookType, hookCmd, interactive, mode, runInteractive)
 
 	var cmd *exec.Cmd
 	var cmdDesc string
@@ -237,8 +245,19 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		jsonData = []byte("{}")
 	}
 
-	// Set environment variables
-	cmd.Env = append(os.Environ(),
+	// Set environment variables. An inherited GREN_NONINTERACTIVE describes the
+	// run that exported it, not this one — a hook that shells back into gren
+	// would otherwise pass its own answer down to a hook that does have a TTY.
+	// Drop it, then set it below only when it is true here.
+	parentEnv := os.Environ()
+	env := make([]string, 0, len(parentEnv)+9)
+	for _, kv := range parentEnv {
+		if strings.HasPrefix(kv, "GREN_NONINTERACTIVE=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = append(env,
 		"GREN_WORKTREE_PATH="+ctx.WorktreePath,
 		"GREN_BRANCH="+ctx.BranchName,
 		"GREN_BASE_BRANCH="+ctx.BaseBranch,
@@ -248,6 +267,9 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 		"GREN_EXECUTE_CMD="+ctx.ExecuteCmd,
 		"GREN_JSON_CONTEXT="+string(jsonData),
 	)
+	if mode == HookInteractivityNever {
+		cmd.Env = append(cmd.Env, "GREN_NONINTERACTIVE=1")
+	}
 
 	// Create a per-run NDJSON events file so hooks can emit structured
 	// progress. Additive: hooks that don't emit events are unaffected.
@@ -336,7 +358,7 @@ func (wm *WorktreeManager) executeHook(hookType config.HookType, hookCmd string,
 	// *where* it failed, not just that it failed.
 	var stdoutBuf, stderrBuf strings.Builder
 	var hookLogPath string
-	if interactive || wm.forceInteractive.Load() {
+	if runInteractive {
 		// Interactive: run against a real TTY (op / make seed / read all work),
 		// but tee the combined output to a per-run disk log and a capped tail so a
 		// failure leaves a trace even if the pane closes or gren is killed mid-run.

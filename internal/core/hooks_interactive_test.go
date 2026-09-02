@@ -9,7 +9,7 @@ import (
 	"github.com/langtind/gren/internal/config"
 )
 
-// SetForceInteractive makes ALL hooks run with inherited stdio (a real TTY),
+// HookInteractivityForce makes ALL hooks run against a real TTY,
 // regardless of each hook's own `interactive` setting. This is what powers
 // `gren hook-run --interactive`, so a caller (e.g. the herdr bootstrap pane)
 // can run the repo's normal, non-interactive hooks in a terminal — needed for
@@ -40,7 +40,7 @@ func TestExecuteHook_ForceInteractive(t *testing.T) {
 
 	// Force-interactive runs against a real pty, but the combined output is now
 	// tee'd to a capped tail in Output — captured even though the child saw a TTY.
-	wm.SetForceInteractive(true)
+	wm.SetHookInteractivity(HookInteractivityForce)
 	forced := wm.executeHook(config.HookPostCreate, "echo interactive-captured", ctx, "", false)
 	if forced.Err != nil {
 		t.Fatalf("forced hook failed: %v", forced.Err)
@@ -50,10 +50,10 @@ func TestExecuteHook_ForceInteractive(t *testing.T) {
 	}
 
 	// Clearing it keeps normal capture.
-	wm.SetForceInteractive(false)
+	wm.SetHookInteractivity(HookInteractivityAuto)
 	restored := wm.executeHook(config.HookPostCreate, "echo again", ctx, "", false)
 	if !strings.Contains(restored.Output, "again") {
-		t.Errorf("expected capture after clearing force-interactive, got %q", restored.Output)
+		t.Errorf("expected capture after returning to auto, got %q", restored.Output)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestExecuteHook_InteractiveWritesHookLogFileOnFailure(t *testing.T) {
 	t.Setenv("GREN_LOG_DIR", logDir)
 
 	wm := &WorktreeManager{}
-	wm.SetForceInteractive(true)
+	wm.SetHookInteractivity(HookInteractivityForce)
 	ctx := HookContext{WorktreePath: repo, BranchName: "feat/x", RepoRoot: repo}
 
 	result := wm.executeHook(config.HookPostCreate,

@@ -26,11 +26,30 @@ type WorktreeManager struct {
 	// as it is parsed from the NDJSON stream. Stored via atomic.Value so
 	// Set/Get don't race with the consumer goroutine. Callback must not block.
 	eventObserver atomic.Value // func(events.Event)
-	// forceInteractive, when set, makes every hook run with inherited stdio
-	// (a real TTY) regardless of its own `interactive` setting. Used by
-	// `gren hook-run --interactive` so a caller can run normal hooks in a pane.
-	forceInteractive atomic.Bool
+	// hookInteractivity decides whether hooks may talk to a terminal. See
+	// HookInteractivity.
+	hookInteractivity atomic.Int32
 }
+
+// HookInteractivity says whether hooks may use a terminal. A hook's own
+// `interactive` setting answers "does this hook want a TTY"; this answers the
+// question that actually matters, "is anyone here to answer it". The two agree
+// until an agent or CI drives gren, and then they diverge silently.
+type HookInteractivity int32
+
+const (
+	// HookInteractivityAuto honors each hook's own `interactive` setting.
+	HookInteractivityAuto HookInteractivity = iota
+	// HookInteractivityForce gives every hook a TTY regardless of its own
+	// setting. `gren hook-run --interactive` uses it so a caller like herdr's
+	// bootstrap pane can run normal hooks against a real terminal.
+	HookInteractivityForce
+	// HookInteractivityNever gives no hook a TTY, whatever it asked for.
+	// Set when nobody can answer a prompt: non-TTY stdin, `--format=json`, or
+	// an explicit `-f`. Hooks get piped stdin that EOFs, so a `[[ -t 0 ]]`
+	// guard takes its non-interactive branch instead of blocking on `read`.
+	HookInteractivityNever
+)
 
 // NewWorktreeManager creates a new WorktreeManager
 func NewWorktreeManager(gitRepo git.Repository, configManager *config.Manager) *WorktreeManager {
@@ -52,12 +71,25 @@ func (wm *WorktreeManager) SetEventObserver(fn func(events.Event)) {
 	wm.eventObserver.Store(v)
 }
 
-// SetForceInteractive toggles whether all hooks run with inherited stdio (a
-// real TTY) regardless of their own `interactive` setting. `gren hook-run
-// --interactive` sets it so normal, non-interactive hooks can run in a
-// terminal pane (e.g. herdr's bootstrap pane) for setup that needs a TTY.
-func (wm *WorktreeManager) SetForceInteractive(on bool) {
-	wm.forceInteractive.Store(on)
+func (m HookInteractivity) String() string {
+	switch m {
+	case HookInteractivityForce:
+		return "force"
+	case HookInteractivityNever:
+		return "never"
+	default:
+		return "auto"
+	}
+}
+
+// SetHookInteractivity sets whether hooks may use a terminal.
+func (wm *WorktreeManager) SetHookInteractivity(mode HookInteractivity) {
+	wm.hookInteractivity.Store(int32(mode))
+}
+
+// HookInteractivity reports the current mode.
+func (wm *WorktreeManager) HookInteractivity() HookInteractivity {
+	return HookInteractivity(wm.hookInteractivity.Load())
 }
 
 // emitEvent forwards an event to the registered observer, if any.
